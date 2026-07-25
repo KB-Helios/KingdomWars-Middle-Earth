@@ -104,6 +104,7 @@ public final class GameplayContentContractTest {
                 Map.of(),
                 Map.of(),
                 Map.of(),
+                Map.of(),
                 launch);
     }
 

@@ -4,7 +4,10 @@ import galacticwars.clonewars.conquest.ConquestSavedData;
 import galacticwars.clonewars.data.LaunchContentDefinitions;
 import galacticwars.clonewars.entity.GalacticRecruitEntity;
 import galacticwars.clonewars.faction.FactionBalanceService;
-import galacticwars.clonewars.faction.FactionRelation;
+import galacticwars.clonewars.faction.ai.FactionReputationEvent;
+import galacticwars.clonewars.faction.ai.FactionReputationService;
+import galacticwars.clonewars.faction.ai.NpcDisposition;
+import galacticwars.clonewars.faction.ai.NpcReactionDecision;
 import galacticwars.clonewars.kingdom.KingdomSavedData;
 import galacticwars.clonewars.progression.GalacticProgressionCoordinator;
 import galacticwars.clonewars.progression.LaunchContentCatalog;
@@ -56,12 +59,19 @@ public final class PhysicalTradeService {
 
         ProgressionState state = ProgressionSavedData.get(level).state(player.getUUID());
         String tradeFaction = "galacticwars:" + trade.factionId();
-        if (merchant != null && (!merchant.factionIdForGameplay().equals(tradeFaction)
-                || merchant.factionRelationTo(player) == FactionRelation.ENEMY)) {
-            return TradePreview.rejected(trade, "hostile_merchant");
+        NpcReactionDecision reaction = merchant == null ? null : merchant.npcReactionTo(player);
+        if (merchant != null && !merchant.factionIdForGameplay().equals(tradeFaction)) {
+            return TradePreview.rejected(trade, "hostile_merchant", reaction);
+        }
+        if (reaction != null && !reaction.tradeAllowed()) {
+            return TradePreview.rejected(
+                    trade,
+                    reaction.disposition() == NpcDisposition.HOSTILE
+                            ? "hostile_merchant" : "wary_merchant",
+                    reaction);
         }
         if (merchant == null && !state.factionId().equals(tradeFaction)) {
-            return TradePreview.rejected(trade, "hostile_merchant");
+            return TradePreview.rejected(trade, "hostile_merchant", null);
         }
 
         KingdomSavedData kingdoms = KingdomSavedData.get(level);
@@ -74,29 +84,30 @@ public final class PhysicalTradeService {
         if (playerKingdom != null && merchantKingdom != null
                 && !playerKingdom.id().equals(merchantKingdom.id())
                 && kingdoms.relation(playerKingdom.id(), merchantKingdom.id()).embargo()) {
-            return TradePreview.rejected(trade, "trade_embargoed");
+            return TradePreview.rejected(trade, "trade_embargoed", reaction);
         }
         if (trade.stockTier() > 1 && !state.unlocks().contains("veteran_trades")) {
-            return TradePreview.rejected(trade, "veteran_trade_locked");
+            return TradePreview.rejected(trade, "veteran_trade_locked", reaction);
         }
         if (!state.unlocks().contains(trade.requiredUnlock())) {
-            return TradePreview.rejected(trade, "trade_locked");
+            return TradePreview.rejected(trade, "trade_locked", reaction);
         }
         if (!trade.regionalPrerequisite().isEmpty()) {
             var control = ConquestSavedData.get(level).state(trade.regionalPrerequisite()).orElse(null);
             if (control == null || !control.controllingFaction().equals(tradeFaction)) {
-                return TradePreview.rejected(trade, "regional_control_required");
+                return TradePreview.rejected(trade, "regional_control_required", reaction);
             }
         }
         if (registeredItem(trade.itemId()) == null) {
-            return TradePreview.rejected(trade, "unknown_trade_item");
+            return TradePreview.rejected(trade, "unknown_trade_item", reaction);
         }
-        int creditPrice = adjustedCreditPrice(trade);
+        int creditPrice = adjustedCreditPrice(
+                trade, reaction == null ? 100 : reaction.tradePricePercent());
         if (!player.hasInfiniteMaterials()
                 && CreditTransactionService.playerBalance(player) < creditPrice) {
-            return TradePreview.rejected(trade, "insufficient_credits");
+            return TradePreview.rejected(trade, "insufficient_credits", reaction);
         }
-        return TradePreview.available(trade);
+        return TradePreview.available(trade, reaction);
     }
 
     public static TradeResult purchase(ServerPlayer player, UUID eventId, String tradeId) {
@@ -175,6 +186,16 @@ public final class PhysicalTradeService {
         if (!result.isEmpty()) {
             player.spawnAtLocation(level, result);
         }
+        LaunchContentDefinitions.TradeDefinition completedTrade =
+                LaunchContentCatalog.trades().get(preview.tradeId());
+        if (completedTrade != null) {
+            FactionReputationService.record(
+                    level,
+                    player.getUUID(),
+                    eventId,
+                    "galacticwars:" + completedTrade.factionId(),
+                    FactionReputationEvent.TRADE_COMPLETED);
+        }
         return new TradeResult(
                 true, true, "accepted", preview.itemId(), preview.itemCount(), preview.creditPrice());
     }
@@ -183,6 +204,7 @@ public final class PhysicalTradeService {
         return switch (reason == null ? "" : reason) {
             case "available", "accepted", "unknown_trade", "server_only", "merchant_unavailable",
                     "hostile_merchant", "trade_embargoed", "trade_locked",
+                    "wary_merchant",
                     "veteran_trade_locked", "regional_control_required",
                     "unknown_trade_item", "insufficient_credits",
                     "offer_changed", "duplicate_event", "transaction_failed" ->
@@ -203,9 +225,16 @@ public final class PhysicalTradeService {
                 ? resultItem : null;
     }
 
-    private static int adjustedCreditPrice(LaunchContentDefinitions.TradeDefinition trade) {
-        return FactionBalanceService.tradeCreditPrice(
+    private static int adjustedCreditPrice(
+            LaunchContentDefinitions.TradeDefinition trade,
+            int dispositionPercent
+    ) {
+        int factionPrice = FactionBalanceService.tradeCreditPrice(
                 "galacticwars:" + trade.factionId(), trade.price());
+        return Math.max(1, Math.min(
+                LaunchContentDefinitions.MAX_TRADE_CREDIT_PRICE,
+                FactionBalanceService.applyPercentCeil(
+                        factionPrice, dispositionPercent)));
     }
 
     public record TradePreview(
@@ -214,12 +243,14 @@ public final class PhysicalTradeService {
             int itemCount,
             int creditPrice,
             boolean eligible,
-            String reason
+            String reason,
+            String disposition
     ) {
         public TradePreview {
             Objects.requireNonNull(tradeId, "tradeId");
             Objects.requireNonNull(itemId, "itemId");
             Objects.requireNonNull(reason, "reason");
+            Objects.requireNonNull(disposition, "disposition");
             if (itemCount < 0 || creditPrice < 0) {
                 throw new IllegalArgumentException("Trade preview amounts cannot be negative");
             }
@@ -229,36 +260,77 @@ public final class PhysicalTradeService {
             }
         }
 
-        private static TradePreview available(LaunchContentDefinitions.TradeDefinition trade) {
-            return of(trade, true, "available");
+        public TradePreview(
+                String tradeId,
+                String itemId,
+                int itemCount,
+                int creditPrice,
+                boolean eligible,
+                String reason
+        ) {
+            this(tradeId, itemId, itemCount, creditPrice, eligible, reason, "neutral");
+        }
+
+        private static TradePreview available(
+                LaunchContentDefinitions.TradeDefinition trade,
+                NpcReactionDecision reaction
+        ) {
+            return of(trade, true, "available", reaction);
         }
 
         private static TradePreview rejected(
                 LaunchContentDefinitions.TradeDefinition trade, String reason
         ) {
-            return of(trade, false, reason);
+            return of(trade, false, reason, null);
+        }
+
+        private static TradePreview rejected(
+                LaunchContentDefinitions.TradeDefinition trade,
+                String reason,
+                NpcReactionDecision reaction
+        ) {
+            return of(trade, false, reason, reaction);
         }
 
         private static TradePreview unknown(String reason) {
-            return new TradePreview("", "", 0, 0, false, reason);
+            return new TradePreview("", "", 0, 0, false, reason, "neutral");
         }
 
         private static TradePreview of(
-                LaunchContentDefinitions.TradeDefinition trade, boolean eligible, String reason
+                LaunchContentDefinitions.TradeDefinition trade,
+                boolean eligible,
+                String reason,
+                NpcReactionDecision reaction
         ) {
+            int dispositionPercent = reaction == null ? 100 : reaction.tradePricePercent();
             return new TradePreview(
-                    trade.id(), trade.itemId(), trade.itemCount(), adjustedCreditPrice(trade),
-                    eligible, reason);
+                    trade.id(), trade.itemId(), trade.itemCount(),
+                    adjustedCreditPrice(trade, dispositionPercent),
+                    eligible, reason,
+                    reaction == null
+                            ? "neutral"
+                            : reaction.disposition().name().toLowerCase(java.util.Locale.ROOT));
         }
     }
 
-    public record TradeQuote(String tradeId, String itemId, int itemCount, int creditPrice) {
+    public record TradeQuote(
+            String tradeId,
+            String itemId,
+            int itemCount,
+            int creditPrice,
+            String disposition
+    ) {
         public TradeQuote {
             Objects.requireNonNull(tradeId, "tradeId");
             Objects.requireNonNull(itemId, "itemId");
+            Objects.requireNonNull(disposition, "disposition");
             if (tradeId.isBlank() || itemId.isBlank() || itemCount <= 0 || creditPrice <= 0) {
                 throw new IllegalArgumentException("Trade quote is incomplete");
             }
+        }
+
+        public TradeQuote(String tradeId, String itemId, int itemCount, int creditPrice) {
+            this(tradeId, itemId, itemCount, creditPrice, "neutral");
         }
 
         public boolean matches(TradePreview preview) {
@@ -266,7 +338,8 @@ public final class PhysicalTradeService {
                     && tradeId.equals(preview.tradeId())
                     && itemId.equals(preview.itemId())
                     && itemCount == preview.itemCount()
-                    && creditPrice == preview.creditPrice();
+                    && creditPrice == preview.creditPrice()
+                    && disposition.equals(preview.disposition());
         }
     }
 

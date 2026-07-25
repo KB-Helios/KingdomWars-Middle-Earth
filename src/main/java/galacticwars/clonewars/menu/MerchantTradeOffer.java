@@ -16,7 +16,8 @@ public record MerchantTradeOffer(
         int itemCount,
         int creditPrice,
         boolean eligible,
-        String reasonTranslationKey
+        String reasonTranslationKey,
+        String disposition
 ) {
     public static final int MAX_OFFERS = 32;
     public static final int MAX_TEXT_BYTES = LaunchContentDefinitions.MAX_SERIALIZED_TRADE_TEXT_BYTES;
@@ -25,12 +26,24 @@ public record MerchantTradeOffer(
         tradeId = boundedText(tradeId, "tradeId");
         itemId = boundedText(itemId, "itemId");
         reasonTranslationKey = boundedText(reasonTranslationKey, "reasonTranslationKey");
+        disposition = boundedText(disposition, "disposition");
         if (itemCount <= 0 || itemCount > LaunchContentDefinitions.MAX_TRADE_ITEM_COUNT) {
             throw new IllegalArgumentException("itemCount is outside the merchant offer limit");
         }
         if (creditPrice <= 0 || creditPrice > LaunchContentDefinitions.MAX_TRADE_CREDIT_PRICE) {
             throw new IllegalArgumentException("creditPrice is outside the merchant offer limit");
         }
+    }
+
+    public MerchantTradeOffer(
+            String tradeId,
+            String itemId,
+            int itemCount,
+            int creditPrice,
+            boolean eligible,
+            String reasonTranslationKey
+    ) {
+        this(tradeId, itemId, itemCount, creditPrice, eligible, reasonTranslationKey, "neutral");
     }
 
     public static MerchantTradeOffer fromPreview(PhysicalTradeService.TradePreview preview) {
@@ -41,11 +54,13 @@ public record MerchantTradeOffer(
         }
         return new MerchantTradeOffer(
                 preview.tradeId(), preview.itemId(), preview.itemCount(), preview.creditPrice(),
-                preview.eligible(), PhysicalTradeService.reasonTranslationKey(preview.reason()));
+                preview.eligible(), PhysicalTradeService.reasonTranslationKey(preview.reason()),
+                preview.disposition());
     }
 
     public PhysicalTradeService.TradeQuote quote() {
-        return new PhysicalTradeService.TradeQuote(tradeId, itemId, itemCount, creditPrice);
+        return new PhysicalTradeService.TradeQuote(
+                tradeId, itemId, itemCount, creditPrice, disposition);
     }
 
     public static void writeOffers(FriendlyByteBuf buffer, List<MerchantTradeOffer> offers) {
@@ -80,6 +95,7 @@ public record MerchantTradeOffer(
         buffer.writeVarInt(creditPrice);
         buffer.writeBoolean(eligible);
         buffer.writeUtf(reasonTranslationKey, MAX_TEXT_BYTES);
+        buffer.writeUtf(disposition, MAX_TEXT_BYTES);
     }
 
     private static MerchantTradeOffer read(FriendlyByteBuf buffer) {
@@ -90,6 +106,7 @@ public record MerchantTradeOffer(
                     buffer.readVarInt(),
                     buffer.readVarInt(),
                     buffer.readBoolean(),
+                    buffer.readUtf(MAX_TEXT_BYTES),
                     buffer.readUtf(MAX_TEXT_BYTES));
         } catch (IllegalArgumentException exception) {
             throw new DecoderException("Invalid merchant offer", exception);

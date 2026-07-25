@@ -32,6 +32,7 @@ final class GameplayContentFingerprint {
             updateMap(digest, "ability", snapshot.abilities(), GameplayContentFingerprint::canonical);
             updateMap(digest, "class", snapshot.unitClasses(), GameplayContentFingerprint::canonical);
             updateMap(digest, "faction_policy", snapshot.factionPolicies(), GameplayContentFingerprint::canonical);
+            updateMap(digest, "npc_ai_profile", snapshot.npcAiProfiles(), GameplayContentFingerprint::canonical);
             LaunchContentDefinitions launch = snapshot.launchContent();
             updateMap(digest, "planet", launch.planets(), GameplayContentFingerprint::canonical);
             updateMap(digest, "vehicle", launch.vehicles(), GameplayContentFingerprint::canonical);

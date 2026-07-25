@@ -10,6 +10,7 @@ import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.ArrayList;
+import java.util.EnumMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -41,6 +42,10 @@ import galacticwars.clonewars.faction.FactionDefinition;
 import galacticwars.clonewars.faction.FactionId;
 import galacticwars.clonewars.faction.FactionRuntimePolicy;
 import galacticwars.clonewars.faction.FactionStrategyDefinition;
+import galacticwars.clonewars.faction.FactionAlignmentRule;
+import galacticwars.clonewars.faction.ai.FactionReputationEvent;
+import galacticwars.clonewars.faction.ai.NpcAiProfile;
+import galacticwars.clonewars.faction.ai.NpcRole;
 import galacticwars.clonewars.recruitment.NpcServiceBranch;
 import galacticwars.clonewars.settlement.BaseBlockPlacement;
 import galacticwars.clonewars.settlement.BlueprintAnchor;
@@ -115,6 +120,7 @@ public final class GameplayDataManager extends SimplePreparableReloadListener<Ga
             Map<AbilityId, AbilityDefinition> abilities = prepared.getAbilities();
             Map<UnitClassId, UnitClassDefinition> unitClasses = prepared.getUnitClasses();
             Map<FactionId, FactionRuntimePolicy> factionPolicies = prepared.getFactionPolicies();
+            Map<FactionId, NpcAiProfile> npcAiProfiles = prepared.getNpcAiProfiles();
             Map<String, KingdomBaseBlueprint> blueprints = prepared.getBlueprints();
             Map<String, CivilianArchetypeDefinition> civilianArchetypes = prepared.getCivilianArchetypes();
             Map<String, OverworldFactionSpawnProfile> overworldSpawnProfiles =
@@ -230,6 +236,7 @@ public final class GameplayDataManager extends SimplePreparableReloadListener<Ga
                     abilities,
                     unitClasses,
                     factionPolicies,
+                    npcAiProfiles,
                     launchContent);
             CoreContentBindings.validate(loaded);
             for (CoreContentBindings.VehicleBinding binding : CoreContentBindings.vehicles().values()) {
@@ -267,7 +274,7 @@ public final class GameplayDataManager extends SimplePreparableReloadListener<Ga
                     loaded.selectableFactions().stream().map(faction -> faction.id().toString()).toList(),
                     launchUnits);
             GalacticWars.LOGGER.info(
-                    "Loaded gameplay content generation {} ({}) with {} factions, {} units, {} classes, {} abilities, {} faction policies, {} civilian archetypes, {} base blueprints, {} Overworld spawn profiles, {} quests, {} trades, {} vehicles, and {} planets",
+                    "Loaded gameplay content generation {} ({}) with {} factions, {} units, {} classes, {} abilities, {} faction policies, {} NPC AI profiles, {} civilian archetypes, {} base blueprints, {} Overworld spawn profiles, {} quests, {} trades, {} vehicles, and {} planets",
                     nextGeneration,
                     contentHash,
                     loaded.factions().definitions().size(),
@@ -275,6 +282,7 @@ public final class GameplayDataManager extends SimplePreparableReloadListener<Ga
                     loaded.unitClasses().size(),
                     loaded.abilities().size(),
                     loaded.factionPolicies().size(),
+                    loaded.npcAiProfiles().size(),
                     loaded.civilianArchetypesByEntityType().size(),
                     loaded.blueprints().size(),
                     loaded.overworldSpawnProfiles().size(),
@@ -527,6 +535,70 @@ public final class GameplayDataManager extends SimplePreparableReloadListener<Ga
         return Map.copyOf(policies);
     }
 
+    static Map<FactionId, NpcAiProfile> loadNpcAiProfiles(
+            ResourceManager manager,
+            Map<FactionId, FactionDefinition> factions
+    ) throws IOException {
+        LinkedHashMap<FactionId, NpcAiProfile> profiles = new LinkedHashMap<>();
+        for (ResourceJson resource : resources(manager, "galacticwars/npc_ai_profiles")) {
+            requireSchema(resource, NpcAiProfile.SCHEMA_VERSION);
+            JsonObject json = resource.json();
+            FactionId factionId = FactionId.of(requiredString(json, "faction", resource.id()));
+            if (!factions.containsKey(factionId)) {
+                throw new IllegalArgumentException(
+                        "NPC AI profile references unknown faction " + factionId);
+            }
+
+            JsonObject rolesJson = requiredObject(json, "roles", resource.id());
+            EnumMap<NpcRole, NpcAiProfile.RoleScanSettings> roles =
+                    new EnumMap<>(NpcRole.class);
+            for (NpcRole role : NpcRole.values()) {
+                JsonObject settings = requiredObject(rolesJson, role.id(), resource.id());
+                roles.put(role, new NpcAiProfile.RoleScanSettings(
+                        requiredInteger(settings, "scan_interval", resource.id()),
+                        requiredInteger(settings, "scan_radius", resource.id())));
+            }
+
+            JsonObject thresholds = requiredObject(
+                    json, "alignment_thresholds", resource.id());
+            JsonObject eventsJson = requiredObject(
+                    json, "reputation_events", resource.id());
+            EnumMap<FactionReputationEvent, FactionAlignmentRule> reputationRules =
+                    new EnumMap<>(FactionReputationEvent.class);
+            for (FactionReputationEvent event : FactionReputationEvent.values()) {
+                JsonObject rule = requiredObject(eventsJson, event.id(), resource.id());
+                reputationRules.put(event, new FactionAlignmentRule(
+                        requiredInteger(rule, "direct", resource.id()),
+                        requiredInteger(rule, "allies", resource.id()),
+                        requiredInteger(rule, "enemies", resource.id()),
+                        event.id()));
+            }
+
+            NpcAiProfile profile = new NpcAiProfile(
+                    factionId,
+                    roles,
+                    requiredInteger(json, "coordination_radius", resource.id()),
+                    requiredInteger(json, "max_responders", resource.id()),
+                    requiredInteger(json, "warning_cooldown", resource.id()),
+                    requiredInteger(json, "alert_duration", resource.id()),
+                    requiredInteger(thresholds, "friendly", resource.id()),
+                    requiredInteger(thresholds, "neutral", resource.id()),
+                    requiredInteger(thresholds, "wary", resource.id()),
+                    requiredInteger(json, "friendly_trade_price_percent", resource.id()),
+                    reputationRules);
+            if (profiles.putIfAbsent(factionId, profile) != null) {
+                throw new IllegalArgumentException(
+                        "Duplicate NPC AI profile for " + factionId);
+            }
+        }
+        if (!profiles.keySet().equals(factions.keySet())) {
+            LinkedHashSet<FactionId> missing = new LinkedHashSet<>(factions.keySet());
+            missing.removeAll(profiles.keySet());
+            throw new IllegalArgumentException("Missing NPC AI profiles for " + missing);
+        }
+        return Map.copyOf(profiles);
+    }
+
     static Map<String, KingdomBaseBlueprint> loadBlueprints(ResourceManager manager) throws IOException {
         LinkedHashMap<String, KingdomBaseBlueprint> blueprints = new LinkedHashMap<>();
         for (ResourceJson resource : resources(manager, "galacticwars/blueprints")) {
@@ -751,7 +823,8 @@ public final class GameplayDataManager extends SimplePreparableReloadListener<Ga
             JsonObject entry = element.getAsJsonObject();
             roster.add(new BlueprintRosterEntry(requiredString(entry, "entity_type", resourceId),
                     integer(entry, "minimum", 1), integer(entry, "maximum", 1), integer(entry, "weight", 1),
-                    string(entry, "service_branch", "military")));
+                    string(entry, "service_branch", "military"),
+                    string(entry, "role", "")));
         }
         return new BlueprintWorldgenProfile(strings(json, "biomes"), requiredString(json, "faction", resourceId),
                 integer(json, "site_radius", 32), roster, strings(json, "loot_markers"),
@@ -1011,6 +1084,7 @@ public final class GameplayDataManager extends SimplePreparableReloadListener<Ga
                 new ArmyUnitCatalog(List.of()),
                 Map.of(),
                 Map.of("galacticwars:mandalorian_rider", ArmyUnitId.of("galacticwars:mandalorian_warrior")),
+                Map.of(),
                 Map.of(),
                 Map.of(),
                 Map.of(),

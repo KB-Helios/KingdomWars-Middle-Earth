@@ -65,7 +65,9 @@ public final class CivilianShelterBehaviour
         return civilian.isNaturalFactionCivilian()
                 && civilian.hasHome()
                 && !civilian.blockPosition().closerThan(civilian.getHomePosition(), 3.0D)
-                && (civilian.level().isDarkOutside() || dangerNearby(civilian));
+                && (civilian.level().isDarkOutside()
+                || civilian.hasActiveOutpostAlert()
+                || dangerNearby(civilian));
     }
 
     private static void setShelterTargets(GalacticRecruitEntity civilian) {
