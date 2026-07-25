@@ -30,12 +30,10 @@ public final class FactionReputationService {
         Objects.requireNonNull(playerId, "playerId");
         Objects.requireNonNull(eventId, "eventId");
         Objects.requireNonNull(event, "event");
-        FactionId sourceFaction;
-        try {
-            sourceFaction = FactionId.of(factionId);
-        } catch (IllegalArgumentException invalidFaction) {
+        if (factionId == null) {
             return Optional.empty();
         }
+        FactionId sourceFaction;
         var snapshot = GameplayDataManager.snapshot();
         if (!snapshot.factions().contains(sourceFaction)) {
             return Optional.empty();
