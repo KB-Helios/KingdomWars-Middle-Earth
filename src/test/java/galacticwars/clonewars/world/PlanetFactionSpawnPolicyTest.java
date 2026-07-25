@@ -133,6 +133,7 @@ public final class PlanetFactionSpawnPolicyTest {
                 Map.of(),
                 Map.of(),
                 Map.of(),
+                Map.of(),
                 launchContent);
     }
 

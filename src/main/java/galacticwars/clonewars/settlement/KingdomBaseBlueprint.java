@@ -290,6 +290,7 @@ public record KingdomBaseBlueprint(
                     update(digest, entry.maximum());
                     update(digest, entry.weight());
                     update(digest, entry.serviceBranch());
+                    update(digest, entry.role());
                 }
                 profile.lootMarkers().stream().sorted().forEach(value -> update(digest, value));
                 update(digest, profile.placementWeight());

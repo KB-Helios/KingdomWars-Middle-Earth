@@ -6,6 +6,8 @@ import galacticwars.clonewars.conquest.ConquestRuntimeEvents;
 import galacticwars.clonewars.conquest.ConquestSavedData;
 import galacticwars.clonewars.data.LaunchContentDefinitions;
 import galacticwars.clonewars.entity.GalacticRecruitEntity;
+import galacticwars.clonewars.faction.ai.FactionReputationEvent;
+import galacticwars.clonewars.faction.ai.FactionReputationService;
 import galacticwars.clonewars.kingdom.KingdomRecord;
 import galacticwars.clonewars.kingdom.KingdomSavedData;
 import galacticwars.clonewars.recruitment.NpcServiceBranch;
@@ -162,6 +164,15 @@ public final class MissionRuntimeEvents {
         if (objective.accepted() && objective.state().hasSubject(
                 ProgressionEventType.MISSION_COMPLETED, mission.id())) {
             attempts.put(holding.complete());
+            UUID reputationEventId = UUID.nameUUIDFromBytes(
+                    ("faction-mission:" + player.getUUID() + ":" + mission.id() + ":"
+                            + holding.attempt()).getBytes(StandardCharsets.UTF_8));
+            FactionReputationService.record(
+                    overworld,
+                    player.getUUID(),
+                    reputationEventId,
+                    objective.state().factionId(),
+                    FactionReputationEvent.MISSION_COMPLETED);
             player.sendSystemMessage(Component.translatable(
                     "message.galacticwars.mission.completed", missionTitle(mission.id())));
         }

@@ -8,6 +8,7 @@ import galacticwars.clonewars.classes.UnitClassId
 import galacticwars.clonewars.faction.FactionDefinition
 import galacticwars.clonewars.faction.FactionId
 import galacticwars.clonewars.faction.FactionRuntimePolicy
+import galacticwars.clonewars.faction.ai.NpcAiProfile
 import galacticwars.clonewars.settlement.KingdomBaseBlueprint
 import galacticwars.clonewars.world.CivilianArchetypeDefinition
 import galacticwars.clonewars.world.OverworldFactionSpawnProfile
@@ -26,6 +27,7 @@ data class PreparedGameplayData(
     val abilities: Map<AbilityId, AbilityDefinition>,
     val unitClasses: Map<UnitClassId, UnitClassDefinition>,
     val factionPolicies: Map<FactionId, FactionRuntimePolicy>,
+    val npcAiProfiles: Map<FactionId, NpcAiProfile>,
     val blueprints: Map<String, KingdomBaseBlueprint>,
     val civilianArchetypes: Map<String, CivilianArchetypeDefinition>,
     val overworldSpawnProfiles: Map<String, OverworldFactionSpawnProfile>,
@@ -48,6 +50,9 @@ object GameplayDataReloadPipeline {
                 val abilities = async { GameplayDataManager.loadAbilities(manager) }
                 val factionPolicies = async {
                     GameplayDataManager.loadFactionPolicies(manager, factions)
+                }
+                val npcAiProfiles = async {
+                    GameplayDataManager.loadNpcAiProfiles(manager, factions)
                 }
                 val blueprints = async { GameplayDataManager.loadBlueprints(manager) }
                 val civilianArchetypes = async {
@@ -86,6 +91,7 @@ object GameplayDataReloadPipeline {
                     abilities = loadedAbilities,
                     unitClasses = unitClasses.await(),
                     factionPolicies = factionPolicies.await(),
+                    npcAiProfiles = npcAiProfiles.await(),
                     blueprints = blueprints.await(),
                     civilianArchetypes = loadedCivilianArchetypes,
                     overworldSpawnProfiles = spawnProfiles.await(),

@@ -2,6 +2,7 @@ package galacticwars.clonewars.world;
 
 import galacticwars.clonewars.data.GameplayDataManager;
 import galacticwars.clonewars.entity.GalacticRecruitEntity;
+import galacticwars.clonewars.faction.ai.NpcRole;
 import galacticwars.clonewars.recruitment.NpcServiceBranch;
 import galacticwars.clonewars.registry.ModBlockEntityTypes;
 import galacticwars.clonewars.settlement.BlueprintRosterEntry;
@@ -112,7 +113,10 @@ public final class BlueprintSiteAnchorBlockEntity extends BlockEntity {
                     ? NpcServiceBranch.CIVILIAN : NpcServiceBranch.MILITARY;
             for (int index = 0; index < count; index++) {
                 UUID npcId = UUID.nameUUIDFromBytes((siteId + ":resident:" + ordinal++).getBytes(StandardCharsets.UTF_8));
-                residents.add(new PendingResident(npcId, entry.entityTypeId(), branch));
+                NpcRole role = entry.explicitRole().orElse(
+                        branch == NpcServiceBranch.MILITARY
+                                ? NpcRole.TROOPER : NpcRole.CIVILIAN);
+                residents.add(new PendingResident(npcId, entry.entityTypeId(), branch, role));
                 (branch == NpcServiceBranch.MILITARY ? military : civilians).add(npcId);
             }
         }
@@ -166,7 +170,8 @@ public final class BlueprintSiteAnchorBlockEntity extends BlockEntity {
             index++;
             recruit.setUUID(pending.id());
             recruit.snapTo(center.getX() + dx + 0.5D, center.getY() + 1.0D, center.getZ() + dz + 0.5D, 0.0F, 0.0F);
-            recruit.initializeBlueprintSiteResident(siteId, pending.branch(), center, radius);
+            recruit.initializeBlueprintSiteResident(
+                    siteId, pending.branch(), pending.role(), center, radius);
             recruit.setPersistenceRequired();
             level.addFreshEntity(recruit);
         }
@@ -192,7 +197,12 @@ public final class BlueprintSiteAnchorBlockEntity extends BlockEntity {
         output.putBoolean("invalid", invalid);
     }
 
-    private record PendingResident(UUID id, String entityTypeId, NpcServiceBranch branch) {
+    private record PendingResident(
+            UUID id,
+            String entityTypeId,
+            NpcServiceBranch branch,
+            NpcRole role
+    ) {
     }
 
     private record ResidentPlan(

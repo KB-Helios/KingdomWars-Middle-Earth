@@ -2,6 +2,8 @@ package galacticwars.clonewars.conquest;
 
 import galacticwars.clonewars.data.LaunchContentDefinitions;
 import galacticwars.clonewars.entity.GalacticRecruitEntity;
+import galacticwars.clonewars.faction.ai.FactionReputationEvent;
+import galacticwars.clonewars.faction.ai.FactionReputationService;
 import galacticwars.clonewars.progression.ProgressionEvent;
 import galacticwars.clonewars.progression.ProgressionEventType;
 import galacticwars.clonewars.progression.ProgressionSavedData;
@@ -136,8 +138,16 @@ final class ConquestCounterattackService {
             }
             UUID eventId = UUID.nameUUIDFromBytes(("conquest:defended:" + regionId + ":"
                     + state.revision() + ":" + player.getUUID()).getBytes(StandardCharsets.UTF_8));
-            ProgressionSavedData.get(level).apply(new ProgressionEvent(
+            var progressionResult = ProgressionSavedData.get(level).apply(new ProgressionEvent(
                     eventId, player.getUUID(), ProgressionEventType.REGION_DEFENDED, regionId, 1));
+            if (progressionResult.accepted() && progressionResult.changed()) {
+                FactionReputationService.record(
+                        level,
+                        player.getUUID(),
+                        eventId,
+                        state.controllingFaction(),
+                        FactionReputationEvent.OUTPOST_DEFENDED);
+            }
         }
     }
 

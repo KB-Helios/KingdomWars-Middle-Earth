@@ -2,6 +2,7 @@ package galacticwars.clonewars.gametest;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -57,6 +58,9 @@ import galacticwars.clonewars.faction.FactionAlignmentSavedData;
 import galacticwars.clonewars.faction.FactionBalanceService;
 import galacticwars.clonewars.faction.FactionId;
 import galacticwars.clonewars.faction.FactionRelation;
+import galacticwars.clonewars.faction.ai.NpcDisposition;
+import galacticwars.clonewars.faction.ai.NpcFactionAiService;
+import galacticwars.clonewars.faction.ai.NpcRole;
 import galacticwars.clonewars.force.ForceWorldEffectService;
 import galacticwars.clonewars.force.ForceShrineService;
 import galacticwars.clonewars.kingdom.BuildProject;
@@ -271,6 +275,9 @@ public final class ModGameTests {
         isolatedEnvironments.put(id("recruit_spawn_eggs"), event.registerEnvironment(
                         id("recruit_spawn_eggs_environment"),
                         new TestEnvironmentDefinition.AllOf(List.of())));
+        isolatedEnvironments.put(id("faction_ai_reaction_runtime"), event.registerEnvironment(
+                        id("faction_ai_reaction_runtime_environment"),
+                        new TestEnvironmentDefinition.AllOf(List.of())));
         List<Identifier> smartBrainRuntimeTests = List.of(
                 id("ungrouped_recruit_ranged_brain"),
                 id("ungrouped_recruit_melee_brain"),
@@ -278,6 +285,7 @@ public final class ModGameTests {
                 id("smart_brain_move_command"),
                 id("smart_brain_move_stall_recovery"),
                 id("natural_civilian_brain_runtime"),
+                id("faction_ai_reaction_runtime"),
                 id("planet_faction_outpost_runtime"),
                 id("grouped_brain_authority"),
                 id("grouped_patrol_pause_runtime"),
@@ -309,6 +317,8 @@ public final class ModGameTests {
                                             ? 360
                                     : testId.equals(id("natural_civilian_brain_runtime"))
                                             ? 600
+                                    : testId.equals(id("faction_ai_reaction_runtime"))
+                                            ? 360
                                     : Set.of(
                                             id("local_recruit_protect_owner"),
                                             id("ungrouped_recruit_ranged_brain"),
@@ -362,6 +372,8 @@ public final class ModGameTests {
                 ModGameTests::naturalRejectionSerialization);
         tests.put(id("planet_faction_outpost_runtime"), ModGameTests::planetFactionOutpostRuntime);
         tests.put(id("physical_trade_transaction"), ModGameTests::physicalTradeTransaction);
+        tests.put(id("faction_trader_disposition_runtime"),
+                ModGameTests::factionTraderDispositionRuntime);
         tests.put(id("faction_selection_transaction"), ModGameTests::factionSelectionTransaction);
         tests.put(id("progression_runtime_adapter"), ModGameTests::progressionRuntimeAdapter);
         tests.put(id("class_ability_runtime_data"), ModGameTests::classAbilityRuntimeData);
@@ -397,6 +409,7 @@ public final class ModGameTests {
         tests.put(id("smart_brain_move_command"), ModGameTests::smartBrainMoveCommand);
         tests.put(id("smart_brain_move_stall_recovery"), ModGameTests::smartBrainMoveStallRecovery);
         tests.put(id("natural_civilian_brain_runtime"), ModGameTests::naturalCivilianBrainRuntime);
+        tests.put(id("faction_ai_reaction_runtime"), ModGameTests::factionAiReactionRuntime);
         tests.put(id("grouped_brain_authority"), ModGameTests::groupedBrainAuthority);
         tests.put(id("grouped_patrol_pause_runtime"), ModGameTests::groupedPatrolPauseRuntime);
         tests.put(id("grouped_protect_entity_runtime"), ModGameTests::groupedProtectEntityRuntime);
@@ -1537,6 +1550,14 @@ public final class ModGameTests {
         SmartBrainTestArea area = prepareSmartBrainTestArea(
                 helper, GameType.CREATIVE, -4, 8, -4, 8);
         NaturalCivilianTestScenario scenario = new NaturalCivilianTestScenario(helper, area);
+        helper.onEachTick(scenario::tick);
+    }
+
+    private static void factionAiReactionRuntime(GameTestHelper helper) {
+        SmartBrainTestArea area = prepareSmartBrainTestArea(
+                helper, GameType.SURVIVAL, -2, 50, -2, 12);
+        FactionAiReactionTestScenario scenario =
+                new FactionAiReactionTestScenario(helper, area);
         helper.onEachTick(scenario::tick);
     }
 
@@ -5029,6 +5050,155 @@ public final class ModGameTests {
         helper.succeed();
     }
 
+    private static void factionTraderDispositionRuntime(GameTestHelper helper) {
+        ServerLevel level = helper.getLevel();
+        ServerPlayer player = makeConnectedMockPlayer(helper, GameType.SURVIVAL);
+        ProgressionSavedData progression = ProgressionSavedData.get(level);
+        if (!progression.apply(new ProgressionEvent(
+                UUID.randomUUID(),
+                player.getUUID(),
+                ProgressionEventType.FACTION_PLEDGED,
+                "galacticwars:hutt_cartel",
+                1)).accepted()) {
+            helper.fail("Trader disposition setup could not pledge the neutral customer faction");
+            return;
+        }
+        player.getInventory().add(new ItemStack(ModItems.CREDIT_CHIP.get(), 100));
+
+        UUID outpostId = UUID.randomUUID();
+        BlockPos merchantPosition = helper.absolutePos(new BlockPos(2, 1, 2));
+        GalacticRecruitEntity trader = helper.spawn(
+                ModEntityTypes.REPUBLIC_CIVILIAN.get(), new BlockPos(2, 1, 2));
+        trader.initializeBlueprintSiteResident(
+                outpostId,
+                NpcServiceBranch.CIVILIAN,
+                NpcRole.TRADER,
+                merchantPosition,
+                32);
+        FactionOutpostSavedData.get(level).registerGeneratedSite(
+                outpostId,
+                "galacticwars:republic",
+                level.dimension().identifier().toString(),
+                merchantPosition,
+                32,
+                List.of(),
+                List.of(trader.getUUID()),
+                level.getGameTime());
+        player.setPos(trader.getX(), trader.getY(), trader.getZ() + 1.0D);
+        level.getChunkSource().move(player);
+
+        FactionAlignmentSavedData alignment = FactionAlignmentSavedData.get(level);
+        FactionId merchantFaction = FactionId.of("republic");
+        alignment.setScore(player.getUUID(), merchantFaction, 10);
+        PhysicalTradeService.TradePreview friendly =
+                PhysicalTradeService.preview(player, "republic_quartermaster", trader);
+        int basePrice = FactionBalanceService.tradeCreditPrice(
+                "galacticwars:republic",
+                LaunchContentCatalog.trades().get("republic_quartermaster").price());
+        int friendlyPrice = FactionBalanceService.applyPercentCeil(basePrice, 90);
+
+        alignment.setScore(player.getUUID(), merchantFaction, 0);
+        PhysicalTradeService.TradePreview neutral =
+                PhysicalTradeService.preview(player, "republic_quartermaster", trader);
+        PhysicalTradeService.TradeQuote neutralQuote = new PhysicalTradeService.TradeQuote(
+                neutral.tradeId(),
+                neutral.itemId(),
+                neutral.itemCount(),
+                neutral.creditPrice(),
+                neutral.disposition());
+
+        alignment.setScore(player.getUUID(), merchantFaction, -1);
+        PhysicalTradeService.TradePreview wary =
+                PhysicalTradeService.preview(player, "republic_quartermaster", trader);
+        alignment.setScore(player.getUUID(), merchantFaction, -21);
+        PhysicalTradeService.TradePreview hostile =
+                PhysicalTradeService.preview(player, "republic_quartermaster", trader);
+        if (!friendly.eligible()
+                || !friendly.disposition().equals("friendly")
+                || friendly.creditPrice() != friendlyPrice
+                || !neutral.eligible()
+                || !neutral.disposition().equals("neutral")
+                || neutral.creditPrice() != basePrice
+                || wary.eligible()
+                || !wary.reason().equals("wary_merchant")
+                || !wary.disposition().equals("wary")
+                || hostile.eligible()
+                || !hostile.reason().equals("hostile_merchant")
+                || !hostile.disposition().equals("hostile")) {
+            helper.fail("Live trader disposition or pricing contract failed: friendly="
+                    + friendly + ", neutral=" + neutral + ", wary=" + wary
+                    + ", hostile=" + hostile);
+            return;
+        }
+
+        alignment.setScore(player.getUUID(), merchantFaction, 10);
+        int creditsBeforeStale = CreditTransactionService.playerBalance(player);
+        PhysicalTradeService.TradeResult stale = PhysicalTradeService.purchase(
+                player,
+                UUID.randomUUID(),
+                "republic_quartermaster",
+                trader,
+                neutralQuote);
+        if (stale.accepted()
+                || !stale.reason().equals("offer_changed")
+                || CreditTransactionService.playerBalance(player) != creditsBeforeStale) {
+            helper.fail("Disposition change did not invalidate the stale trader quote: " + stale);
+            return;
+        }
+
+        PhysicalTradeService.TradePreview live =
+                PhysicalTradeService.preview(player, "republic_quartermaster", trader);
+        PhysicalTradeService.TradeQuote liveQuote = new PhysicalTradeService.TradeQuote(
+                live.tradeId(),
+                live.itemId(),
+                live.itemCount(),
+                live.creditPrice(),
+                live.disposition());
+        UUID replayId = UUID.randomUUID();
+        PhysicalTradeService.TradeResult purchase = PhysicalTradeService.purchase(
+                player,
+                replayId,
+                "republic_quartermaster",
+                trader,
+                liveQuote);
+        int purchasedItems = countPlayerItem(
+                player,
+                BuiltInRegistries.ITEM.getValue(Identifier.parse(live.itemId())));
+        PhysicalTradeService.TradeResult replay = PhysicalTradeService.purchase(
+                player,
+                replayId,
+                "republic_quartermaster",
+                trader,
+                liveQuote);
+        int replayedItems = countPlayerItem(
+                player,
+                BuiltInRegistries.ITEM.getValue(Identifier.parse(live.itemId())));
+        boolean alarmRaised = NpcFactionAiService.raiseAlert(
+                trader, player, "gametest_hostile_trade");
+        PhysicalTradeService.TradePreview alarmRefusal =
+                PhysicalTradeService.preview(player, "republic_quartermaster", trader);
+        if (!purchase.accepted()
+                || !purchase.changed()
+                || purchase.creditsCharged() != friendlyPrice
+                || !replay.accepted()
+                || replay.changed()
+                || replayedItems != purchasedItems
+                || alignment.processedEventCount(player.getUUID()) != 1
+                || !alarmRaised
+                || alarmRefusal.eligible()
+                || !alarmRefusal.reason().equals("hostile_merchant")
+                || !alarmRefusal.disposition().equals("hostile")) {
+            helper.fail("Trader purchase replay or active-alarm revalidation failed: purchase="
+                    + purchase + ", replay=" + replay + ", items=" + purchasedItems
+                    + "/" + replayedItems + ", reputationEvents="
+                    + alignment.processedEventCount(player.getUUID())
+                    + ", alarm=" + alarmRaised + "/" + alarmRefusal);
+            return;
+        }
+        trader.discard();
+        helper.succeed();
+    }
+
     private static void recruitEntityContract(GameTestHelper helper) {
         GalacticRecruitEntity recruit = helper.spawn(ModEntityTypes.CLONE_TROOPER.get(), new BlockPos(1, 1, 1));
         recruit.setWorkerProfession(WorkerProfession.MINER);
@@ -6704,7 +6874,14 @@ public final class ModGameTests {
             }
             this.owner.setPos(
                     this.merchant.getX(), this.merchant.getY(), this.merchant.getZ() + 1.0D);
-            this.owner.getInventory().add(new ItemStack(ModItems.CREDIT_CHIP.get(), 12));
+            int expectedFriendlyPrice = FactionBalanceService.applyPercentCeil(
+                    FactionBalanceService.tradeCreditPrice(
+                            "galacticwars:republic",
+                            LaunchContentCatalog.trades()
+                                    .get("republic_quartermaster").price()),
+                    90);
+            this.owner.getInventory().add(
+                    new ItemStack(ModItems.CREDIT_CHIP.get(), expectedFriendlyPrice));
             MerchantTradeMenu tradeMenu = (MerchantTradeMenu) new MerchantTradeMenuProvider(this.merchant)
                     .createMenu(21, this.owner.getInventory(), this.owner);
             int offer = tradeMenu.tradeIds().indexOf("republic_quartermaster");
@@ -6713,7 +6890,7 @@ public final class ModGameTests {
             boolean truthfulOffer = serverOffer != null
                     && serverOffer.itemId().equals("galacticwars:energy_cell")
                     && serverOffer.itemCount() == 8
-                    && serverOffer.creditPrice() == 12
+                    && serverOffer.creditPrice() == expectedFriendlyPrice
                     && serverOffer.eligible();
             boolean traded = truthfulOffer && tradeMenu.handleReplayAction(this.owner, tradeId, offer);
             boolean replayRejected = offer >= 0
@@ -6804,7 +6981,14 @@ public final class ModGameTests {
 
             this.owner.setPos(
                     this.merchant.getX(), this.merchant.getY(), this.merchant.getZ() + 1.0D);
-            this.owner.getInventory().add(new ItemStack(ModItems.CREDIT_CHIP.get(), 12));
+            int expectedFriendlyPrice = FactionBalanceService.applyPercentCeil(
+                    FactionBalanceService.tradeCreditPrice(
+                            "galacticwars:republic",
+                            LaunchContentCatalog.trades()
+                                    .get("republic_quartermaster").price()),
+                    90);
+            this.owner.getInventory().add(
+                    new ItemStack(ModItems.CREDIT_CHIP.get(), expectedFriendlyPrice));
             MerchantTradeMenu veteranTrade = (MerchantTradeMenu)
                     new MerchantTradeMenuProvider(this.merchant)
                             .createMenu(22, this.owner.getInventory(), this.owner);
@@ -6869,6 +7053,355 @@ public final class ModGameTests {
                 .filter(stack -> stack.is(item))
                 .mapToInt(ItemStack::getCount)
                 .sum();
+    }
+
+    private static final class FactionAiReactionTestScenario {
+        private final GameTestHelper helper;
+        private final SmartBrainTestArea area;
+        private final List<GalacticRecruitEntity> responders = new ArrayList<>();
+        private boolean started;
+        private boolean complete;
+        private boolean alertPrecedenceVerified;
+        private boolean warningCooldownVerified;
+        private long startTick;
+        private UUID mainOutpostId;
+        private UUID shortAlertPlayerId;
+        private GalacticRecruitEntity commander;
+        private GalacticRecruitEntity trader;
+        private GalacticRecruitEntity civilian;
+        private GalacticRecruitEntity fallbackTrooper;
+        private GalacticRecruitEntity foreignOutpostTrooper;
+        private double traderInitialHomeDistance;
+        private double civilianInitialHomeDistance;
+
+        private FactionAiReactionTestScenario(
+                GameTestHelper helper,
+                SmartBrainTestArea area
+        ) {
+            this.helper = helper;
+            this.area = area;
+        }
+
+        private void tick() {
+            if (this.complete) {
+                return;
+            }
+            if (!this.started) {
+                this.start();
+            }
+
+            ServerLevel level = this.helper.getLevel();
+            ServerPlayer player = this.area.player();
+            long elapsed = this.helper.getTick() - this.startTick;
+            FactionOutpostSavedData outposts = FactionOutpostSavedData.get(level);
+            boolean alertActive = outposts.activeAlert(
+                    this.mainOutpostId, player.getUUID(), level.getGameTime()).isPresent();
+            if (alertActive && !this.alertPrecedenceVerified) {
+                FactionAlignmentSavedData.get(level).setScore(
+                        player.getUUID(), FactionId.of("republic"), 10);
+                if (this.commander.npcReactionTo(player).disposition()
+                        != NpcDisposition.HOSTILE) {
+                    this.fail("Active local alarm did not override friendly reputation");
+                    return;
+                }
+                FactionAlignmentSavedData.get(level).setScore(
+                        player.getUUID(), FactionId.of("republic"), -21);
+                this.alertPrecedenceVerified = true;
+            }
+
+            if (elapsed >= 8L && outposts.activeAlert(
+                    this.mainOutpostId, this.shortAlertPlayerId,
+                    level.getGameTime()).isPresent()) {
+                this.fail("Short-lived outpost alarm did not expire on server time");
+                return;
+            }
+            if (elapsed < 105L) {
+                return;
+            }
+
+            int selectedResponders = (int) this.responders.stream()
+                    .filter(recruit -> BrainUtil.getMemory(
+                            recruit,
+                            net.minecraft.world.entity.ai.memory.MemoryModuleType.ATTACK_TARGET)
+                            == player)
+                    .count();
+            int responderLimit = NpcFactionAiService.responderLimit(this.commander);
+            boolean pvpEnabled = Config.ALLOW_BLASTER_PVP.getAsBoolean();
+            boolean militaryReaction = pvpEnabled
+                    ? BrainUtil.getMemory(
+                            this.commander,
+                            net.minecraft.world.entity.ai.memory.MemoryModuleType.ATTACK_TARGET)
+                            == player
+                            && BrainUtil.getMemory(
+                            this.fallbackTrooper,
+                            net.minecraft.world.entity.ai.memory.MemoryModuleType.ATTACK_TARGET)
+                            == player
+                            && selectedResponders == responderLimit
+                    : BrainUtil.getMemory(
+                            this.commander,
+                            net.minecraft.world.entity.ai.memory.MemoryModuleType.ATTACK_TARGET)
+                            == null
+                            && BrainUtil.getMemory(
+                            this.fallbackTrooper,
+                            net.minecraft.world.entity.ai.memory.MemoryModuleType.ATTACK_TARGET)
+                            == null
+                            && selectedResponders == 0;
+            boolean civiliansSafe = BrainUtil.getMemory(
+                    this.trader,
+                    net.minecraft.world.entity.ai.memory.MemoryModuleType.ATTACK_TARGET) == null
+                    && BrainUtil.getMemory(
+                    this.civilian,
+                    net.minecraft.world.entity.ai.memory.MemoryModuleType.ATTACK_TARGET) == null;
+            boolean sameOutpostBounded = BrainUtil.getMemory(
+                    this.foreignOutpostTrooper,
+                    net.minecraft.world.entity.ai.memory.MemoryModuleType.ATTACK_TARGET) == null;
+            boolean sheltering = this.trader.distanceToSqr(
+                    Vec3.atCenterOf(this.trader.getHomePosition()))
+                    < this.traderInitialHomeDistance - 2.0D
+                    && this.civilian.distanceToSqr(
+                    Vec3.atCenterOf(this.civilian.getHomePosition()))
+                    < this.civilianInitialHomeDistance - 2.0D;
+            if (!this.warningCooldownVerified) {
+                this.warningCooldownVerified = this.commander.tryWarnPlayer(player);
+            }
+            if (alertActive && this.alertPrecedenceVerified
+                    && militaryReaction && civiliansSafe && sameOutpostBounded
+                    && sheltering && this.warningCooldownVerified) {
+                this.complete = true;
+                this.cleanup();
+                this.helper.succeed();
+                return;
+            }
+            if (elapsed >= 220L) {
+                this.fail("Faction AI reaction did not converge: alert=" + alertActive
+                        + ", precedence=" + this.alertPrecedenceVerified
+                        + ", pvp=" + pvpEnabled
+                        + ", commanderTarget=" + this.commander.getTarget()
+                        + ", commanderRole=" + this.commander.getNpcRole()
+                        + ", commanderAuthorized="
+                        + this.commander.canAttackFactionPlayer(player)
+                        + ", commanderVisible=" + BrainUtil.getMemory(
+                        this.commander,
+                        net.minecraft.world.entity.ai.memory.MemoryModuleType.NEAREST_VISIBLE_PLAYER)
+                        + ", commanderAttackMemory=" + BrainUtil.getMemory(
+                        this.commander,
+                        net.minecraft.world.entity.ai.memory.MemoryModuleType.ATTACK_TARGET)
+                        + ", commanderRunning="
+                        + this.commander.getBrain().getRunningBehaviors()
+                        + ", fallbackTarget=" + this.fallbackTrooper.getTarget()
+                        + ", fallbackRole=" + this.fallbackTrooper.getNpcRole()
+                        + ", fallbackAuthorized="
+                        + this.fallbackTrooper.canAttackFactionPlayer(player)
+                        + ", fallbackVisible=" + BrainUtil.getMemory(
+                        this.fallbackTrooper,
+                        net.minecraft.world.entity.ai.memory.MemoryModuleType.NEAREST_VISIBLE_PLAYER)
+                        + ", fallbackAttackMemory=" + BrainUtil.getMemory(
+                        this.fallbackTrooper,
+                        net.minecraft.world.entity.ai.memory.MemoryModuleType.ATTACK_TARGET)
+                        + ", fallbackRunning="
+                        + this.fallbackTrooper.getBrain().getRunningBehaviors()
+                        + ", responders=" + selectedResponders + "/" + responderLimit
+                        + ", foreignTarget=" + this.foreignOutpostTrooper.getTarget()
+                        + ", traderTarget=" + this.trader.getTarget()
+                        + ", civilianTarget=" + this.civilian.getTarget()
+                        + ", traderShelter=" + this.trader.distanceToSqr(
+                        Vec3.atCenterOf(this.trader.getHomePosition()))
+                        + "/" + this.traderInitialHomeDistance
+                        + ", civilianShelter=" + this.civilian.distanceToSqr(
+                        Vec3.atCenterOf(this.civilian.getHomePosition()))
+                        + "/" + this.civilianInitialHomeDistance);
+            }
+        }
+
+        private void start() {
+            this.started = true;
+            this.startTick = this.helper.getTick();
+            ServerLevel level = this.helper.getLevel();
+            ServerPlayer player = this.area.player();
+            player.setGameMode(GameType.SURVIVAL);
+            player.getAttribute(Attributes.MAX_HEALTH).setBaseValue(10_000.0D);
+            player.setHealth(10_000.0F);
+            FactionAlignmentSavedData alignment = FactionAlignmentSavedData.get(level);
+
+            this.mainOutpostId = UUID.randomUUID();
+            BlockPos commanderPosition = this.area.at(20, 1, 1);
+            this.commander = spawnRecruitAt(
+                    this.helper, ModEntityTypes.CLONE_TROOPER.get(), commanderPosition);
+            this.commander.setInvulnerable(true);
+            this.commander.initializeBlueprintSiteResident(
+                    this.mainOutpostId,
+                    NpcServiceBranch.MILITARY,
+                    NpcRole.COMMANDER,
+                    commanderPosition,
+                    64);
+
+            List<UUID> militaryNpcIds = new ArrayList<>();
+            militaryNpcIds.add(this.commander.getUUID());
+            for (int index = 0; index < 13; index++) {
+                BlockPos position = this.area.at(
+                        42 + index % 7,
+                        1,
+                        1 + (index / 7) * 2);
+                GalacticRecruitEntity responder = spawnRecruitAt(
+                        this.helper, ModEntityTypes.CLONE_TROOPER.get(), position);
+                responder.setInvulnerable(true);
+                responder.initializeBlueprintSiteResident(
+                        this.mainOutpostId,
+                        NpcServiceBranch.MILITARY,
+                        NpcRole.TROOPER,
+                        position,
+                        64);
+                this.responders.add(responder);
+                militaryNpcIds.add(responder.getUUID());
+            }
+
+            BlockPos traderHome = this.area.at(30, 1, 6);
+            this.trader = spawnRecruitAt(
+                    this.helper, ModEntityTypes.REPUBLIC_CIVILIAN.get(),
+                    this.area.at(18, 1, 6));
+            this.trader.setInvulnerable(true);
+            this.trader.initializeBlueprintSiteResident(
+                    this.mainOutpostId,
+                    NpcServiceBranch.CIVILIAN,
+                    NpcRole.TRADER,
+                    traderHome,
+                    64);
+            this.traderInitialHomeDistance = this.trader.distanceToSqr(
+                    Vec3.atCenterOf(traderHome));
+
+            BlockPos civilianHome = this.area.at(30, 1, 8);
+            this.civilian = spawnRecruitAt(
+                    this.helper, ModEntityTypes.REPUBLIC_CIVILIAN.get(),
+                    this.area.at(18, 1, 8));
+            this.civilian.setInvulnerable(true);
+            this.civilian.initializeBlueprintSiteResident(
+                    this.mainOutpostId,
+                    NpcServiceBranch.CIVILIAN,
+                    NpcRole.CIVILIAN,
+                    civilianHome,
+                    64);
+            this.civilianInitialHomeDistance = this.civilian.distanceToSqr(
+                    Vec3.atCenterOf(civilianHome));
+
+            FactionOutpostSavedData outposts = FactionOutpostSavedData.get(level);
+            outposts.registerGeneratedSite(
+                    this.mainOutpostId,
+                    "galacticwars:republic",
+                    level.dimension().identifier().toString(),
+                    commanderPosition,
+                    64,
+                    militaryNpcIds,
+                    List.of(this.trader.getUUID(), this.civilian.getUUID()),
+                    level.getGameTime());
+
+            UUID fallbackOutpostId = UUID.randomUUID();
+            BlockPos fallbackPosition = this.area.at(5, 1, 10);
+            this.fallbackTrooper = spawnRecruitAt(
+                    this.helper, ModEntityTypes.CLONE_TROOPER.get(), fallbackPosition);
+            this.fallbackTrooper.setInvulnerable(true);
+            this.fallbackTrooper.initializeBlueprintSiteResident(
+                    fallbackOutpostId,
+                    NpcServiceBranch.MILITARY,
+                    NpcRole.TROOPER,
+                    fallbackPosition,
+                    32);
+            outposts.registerGeneratedSite(
+                    fallbackOutpostId,
+                    "galacticwars:republic",
+                    level.dimension().identifier().toString(),
+                    fallbackPosition,
+                    32,
+                    List.of(this.fallbackTrooper.getUUID()),
+                    List.of(),
+                    level.getGameTime());
+
+            UUID foreignOutpostId = UUID.randomUUID();
+            BlockPos foreignPosition = this.area.at(44, 1, 10);
+            this.foreignOutpostTrooper = spawnRecruitAt(
+                    this.helper, ModEntityTypes.CLONE_TROOPER.get(), foreignPosition);
+            this.foreignOutpostTrooper.setInvulnerable(true);
+            this.foreignOutpostTrooper.initializeBlueprintSiteResident(
+                    foreignOutpostId,
+                    NpcServiceBranch.MILITARY,
+                    NpcRole.TROOPER,
+                    foreignPosition,
+                    32);
+            outposts.registerGeneratedSite(
+                    foreignOutpostId,
+                    "galacticwars:republic",
+                    level.dimension().identifier().toString(),
+                    foreignPosition,
+                    32,
+                    List.of(this.foreignOutpostTrooper.getUUID()),
+                    List.of(),
+                    level.getGameTime());
+
+            alignment.setScore(player.getUUID(), FactionId.of("republic"), 10);
+            NpcDisposition friendly = this.commander.npcReactionTo(player).disposition();
+            alignment.setScore(player.getUUID(), FactionId.of("republic"), 0);
+            NpcDisposition neutral = this.commander.npcReactionTo(player).disposition();
+            alignment.setScore(player.getUUID(), FactionId.of("republic"), -1);
+            NpcDisposition wary = this.commander.npcReactionTo(player).disposition();
+            boolean warned = this.commander.tryWarnPlayer(player);
+            boolean warningSuppressed = !this.commander.tryWarnPlayer(player);
+            alignment.setScore(player.getUUID(), FactionId.of("republic"), -21);
+            NpcDisposition hostile = this.commander.npcReactionTo(player).disposition();
+            if (friendly != NpcDisposition.FRIENDLY
+                    || neutral != NpcDisposition.NEUTRAL
+                    || wary != NpcDisposition.WARY
+                    || hostile != NpcDisposition.HOSTILE
+                    || !warned
+                    || !warningSuppressed) {
+                this.fail("Live disposition thresholds or warning cooldown failed: "
+                        + friendly + "/" + neutral + "/" + wary + "/" + hostile
+                        + ", warning=" + warned + "/" + warningSuppressed);
+                return;
+            }
+            if (Config.ALLOW_BLASTER_PVP.getAsBoolean()
+                    && !this.commander.canAttackFactionPlayer(player)) {
+                this.fail("Hostile survival player failed the final attack authorization gate: "
+                        + "spectator=" + player.isSpectator()
+                        + ", infinite=" + player.hasInfiniteMaterials()
+                        + ", gameMode=" + player.gameMode.getGameModeForPlayer()
+                        + ", disposition=" + this.commander.npcReactionTo(player).disposition()
+                        + ", role=" + this.commander.getNpcRole()
+                        + ", group=" + this.commander.getArmyGroupId());
+                return;
+            }
+
+            this.shortAlertPlayerId = UUID.randomUUID();
+            outposts.raiseAlert(
+                    this.mainOutpostId,
+                    this.shortAlertPlayerId,
+                    level.getGameTime(),
+                    5,
+                    "expiry_probe");
+        }
+
+        private void fail(String message) {
+            this.complete = true;
+            this.cleanup();
+            this.helper.fail(message);
+        }
+
+        private void cleanup() {
+            if (this.commander != null) {
+                this.commander.discard();
+            }
+            this.responders.forEach(Entity::discard);
+            if (this.trader != null) {
+                this.trader.discard();
+            }
+            if (this.civilian != null) {
+                this.civilian.discard();
+            }
+            if (this.fallbackTrooper != null) {
+                this.fallbackTrooper.discard();
+            }
+            if (this.foreignOutpostTrooper != null) {
+                this.foreignOutpostTrooper.discard();
+            }
+        }
     }
 
     private static final class NaturalCivilianTestScenario {

@@ -14,12 +14,12 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Properties;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /** Authoritative gameplay policy loaded only by the logical server. */
 public final class Config {
-    private static final Path CONFIG_PATH = Platform.getConfigFolder().resolve("galacticwars-server.properties");
-    private static final Path LEGACY_CONFIG_PATH = Platform.getConfigFolder().resolve("galacticwars.properties");
-    private static final Map<String, BooleanValue> VALUES = new LinkedHashMap<>();
+    private static final Map<String, BooleanValue> BOOLEAN_VALUES = new LinkedHashMap<>();
+    private static final Map<String, IntValue> INT_VALUES = new LinkedHashMap<>();
     private static boolean loaded;
 
     public static final BooleanValue LOG_STARTUP = define("logStartup", true);
@@ -32,6 +32,12 @@ public final class Config {
     public static final BooleanValue ALLOW_FORCE_VEHICLE_PHYSICS =
             define("allowForceVehiclePhysics", true);
     public static final BooleanValue ALLOW_CLASS_PVP = define("allowClassPvp", false);
+    public static final BooleanValue ENABLE_DYNAMIC_FACTION_AI =
+            define("enableDynamicFactionAi", true);
+    public static final IntValue NPC_AI_MAX_SCAN_RADIUS =
+            define("npcAiMaxScanRadius", 48, 8, 64);
+    public static final IntValue NPC_AI_MAX_RESPONDERS =
+            define("npcAiMaxResponders", 12, 1, 32);
 
     private Config() {
     }
@@ -41,30 +47,37 @@ public final class Config {
             return;
         }
         loaded = true;
-        Path source = Files.isRegularFile(CONFIG_PATH) ? CONFIG_PATH
-                : Files.isRegularFile(LEGACY_CONFIG_PATH) ? LEGACY_CONFIG_PATH : null;
+        Path configPath = configPath();
+        Path legacyConfigPath = legacyConfigPath();
+        Path source = Files.isRegularFile(configPath) ? configPath
+                : Files.isRegularFile(legacyConfigPath) ? legacyConfigPath : null;
         if (source == null) {
             save();
             return;
         }
 
-        if (read(source) && source.equals(LEGACY_CONFIG_PATH)) {
+        if (read(source) && source.equals(legacyConfigPath)) {
             save();
-            GalacticWars.LOGGER.info("Migrated server policy from {} to {}", source, CONFIG_PATH);
+            GalacticWars.LOGGER.info("Migrated server policy from {} to {}", source, configPath);
         }
     }
 
     /** Reloads the authoritative policy from disk for the operator command. */
     public static synchronized boolean reload() {
-        if (!Files.isRegularFile(CONFIG_PATH)) {
-            VALUES.values().forEach(BooleanValue::reset);
+        Path configPath = configPath();
+        if (!Files.isRegularFile(configPath)) {
+            BOOLEAN_VALUES.values().forEach(BooleanValue::reset);
+            INT_VALUES.values().forEach(IntValue::reset);
             save();
             return true;
         }
-        Map<String, Boolean> snapshot = new LinkedHashMap<>();
-        VALUES.forEach((key, value) -> snapshot.put(key, value.get()));
-        if (!read(CONFIG_PATH)) {
-            snapshot.forEach((key, value) -> VALUES.get(key).set(value));
+        Map<String, Boolean> booleanSnapshot = new LinkedHashMap<>();
+        Map<String, Integer> intSnapshot = new LinkedHashMap<>();
+        BOOLEAN_VALUES.forEach((key, value) -> booleanSnapshot.put(key, value.get()));
+        INT_VALUES.forEach((key, value) -> intSnapshot.put(key, value.get()));
+        if (!read(configPath)) {
+            booleanSnapshot.forEach((key, value) -> BOOLEAN_VALUES.get(key).set(value));
+            intSnapshot.forEach((key, value) -> INT_VALUES.get(key).set(value));
             return false;
         }
         return true;
@@ -79,51 +92,96 @@ public final class Config {
             return false;
         }
 
-        Map<String, Boolean> parsed = new LinkedHashMap<>();
-        for (Map.Entry<String, BooleanValue> entry : VALUES.entrySet()) {
+        Map<String, Boolean> parsedBooleans = new LinkedHashMap<>();
+        for (Map.Entry<String, BooleanValue> entry : BOOLEAN_VALUES.entrySet()) {
             String key = entry.getKey();
             String encoded = properties.getProperty(key);
             if (encoded == null) {
-                parsed.put(key, entry.getValue().getDefault());
+                parsedBooleans.put(key, entry.getValue().getDefault());
             } else if (encoded.equalsIgnoreCase("true") || encoded.equalsIgnoreCase("false")) {
-                parsed.put(key, Boolean.parseBoolean(encoded));
+                parsedBooleans.put(key, Boolean.parseBoolean(encoded));
             } else {
-                GalacticWars.LOGGER.warn("Ignoring invalid boolean {}={} in {}", key, encoded, source);
-                parsed.put(key, entry.getValue().getDefault());
+                GalacticWars.LOGGER.warn("Rejected invalid boolean {}={} in {}", key, encoded, source);
+                return false;
             }
         }
 
-        parsed.forEach((key, value) -> VALUES.get(key).set(value));
+        Map<String, Integer> parsedInts = new LinkedHashMap<>();
+        for (Map.Entry<String, IntValue> entry : INT_VALUES.entrySet()) {
+            String key = entry.getKey();
+            String encoded = properties.getProperty(key);
+            if (encoded == null) {
+                parsedInts.put(key, entry.getValue().getDefault());
+                continue;
+            }
+            try {
+                int value = Integer.parseInt(encoded.trim());
+                if (!entry.getValue().accepts(value)) {
+                    GalacticWars.LOGGER.warn(
+                            "Rejected out-of-range integer {}={} in {}", key, encoded, source);
+                    return false;
+                }
+                parsedInts.put(key, value);
+            } catch (NumberFormatException exception) {
+                GalacticWars.LOGGER.warn("Rejected invalid integer {}={} in {}", key, encoded, source);
+                return false;
+            }
+        }
+
+        parsedBooleans.forEach((key, value) -> BOOLEAN_VALUES.get(key).set(value));
+        parsedInts.forEach((key, value) -> INT_VALUES.get(key).set(value));
         return true;
     }
 
     public static synchronized void save() {
         Properties properties = new Properties();
-        VALUES.forEach((key, value) -> properties.setProperty(key, Boolean.toString(value.get())));
+        BOOLEAN_VALUES.forEach(
+                (key, value) -> properties.setProperty(key, Boolean.toString(value.get())));
+        INT_VALUES.forEach(
+                (key, value) -> properties.setProperty(key, Integer.toString(value.get())));
 
-        Path parent = CONFIG_PATH.getParent();
-        Path temporary = CONFIG_PATH.resolveSibling(CONFIG_PATH.getFileName() + ".tmp");
+        Path configPath = configPath();
+        Path parent = configPath.getParent();
+        Path temporary = configPath.resolveSibling(configPath.getFileName() + ".tmp");
         try {
             Files.createDirectories(parent);
             try (OutputStream output = Files.newOutputStream(temporary)) {
                 properties.store(output, "Galactic Wars common configuration");
             }
             try {
-                Files.move(temporary, CONFIG_PATH,
+                Files.move(temporary, configPath,
                         StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
             } catch (AtomicMoveNotSupportedException ignored) {
-                Files.move(temporary, CONFIG_PATH, StandardCopyOption.REPLACE_EXISTING);
+                Files.move(temporary, configPath, StandardCopyOption.REPLACE_EXISTING);
             }
         } catch (IOException exception) {
-            GalacticWars.LOGGER.error("Unable to save {}", CONFIG_PATH, exception);
+            GalacticWars.LOGGER.error("Unable to save {}", configPath, exception);
         }
+    }
+
+    private static Path configPath() {
+        return Platform.getConfigFolder().resolve("galacticwars-server.properties");
+    }
+
+    private static Path legacyConfigPath() {
+        return Platform.getConfigFolder().resolve("galacticwars.properties");
     }
 
     private static BooleanValue define(String key, boolean defaultValue) {
         BooleanValue value = new BooleanValue(key, defaultValue);
-        if (VALUES.putIfAbsent(key, value) != null) {
+        if (BOOLEAN_VALUES.containsKey(key) || INT_VALUES.containsKey(key)) {
             throw new IllegalStateException("Duplicate configuration key " + key);
         }
+        BOOLEAN_VALUES.put(key, value);
+        return value;
+    }
+
+    private static IntValue define(String key, int defaultValue, int minimum, int maximum) {
+        IntValue value = new IntValue(key, defaultValue, minimum, maximum);
+        if (BOOLEAN_VALUES.containsKey(key) || INT_VALUES.containsKey(key)) {
+            throw new IllegalStateException("Duplicate configuration key " + key);
+        }
+        INT_VALUES.put(key, value);
         return value;
     }
 
@@ -156,6 +214,61 @@ public final class Config {
 
         public void set(boolean nextValue) {
             value.set(nextValue);
+        }
+
+        private void reset() {
+            value.set(defaultValue);
+        }
+    }
+
+    public static final class IntValue {
+        private final String key;
+        private final int defaultValue;
+        private final int minimum;
+        private final int maximum;
+        private final AtomicInteger value;
+
+        private IntValue(String key, int defaultValue, int minimum, int maximum) {
+            this.key = Objects.requireNonNull(key, "key");
+            if (minimum > maximum || defaultValue < minimum || defaultValue > maximum) {
+                throw new IllegalArgumentException("Invalid integer configuration bounds for " + key);
+            }
+            this.defaultValue = defaultValue;
+            this.minimum = minimum;
+            this.maximum = maximum;
+            this.value = new AtomicInteger(defaultValue);
+        }
+
+        public String key() {
+            return key;
+        }
+
+        public int getDefault() {
+            return defaultValue;
+        }
+
+        public int minimum() {
+            return minimum;
+        }
+
+        public int maximum() {
+            return maximum;
+        }
+
+        public int get() {
+            return value.get();
+        }
+
+        public void set(int nextValue) {
+            if (!accepts(nextValue)) {
+                throw new IllegalArgumentException(
+                        key + " must be between " + minimum + " and " + maximum);
+            }
+            value.set(nextValue);
+        }
+
+        private boolean accepts(int nextValue) {
+            return nextValue >= minimum && nextValue <= maximum;
         }
 
         private void reset() {

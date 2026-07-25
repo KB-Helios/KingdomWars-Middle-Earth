@@ -1,6 +1,8 @@
 package galacticwars.clonewars.entity.ai;
 
 import galacticwars.clonewars.entity.GalacticRecruitEntity;
+import galacticwars.clonewars.faction.ai.NpcFactionAiService;
+import galacticwars.clonewars.faction.ai.NpcRole;
 import java.util.List;
 import net.minecraft.world.entity.ai.behavior.BehaviorControl;
 import net.tslat.smartbrainlib.api.SmartBrainBuilder;
@@ -15,6 +17,7 @@ import net.tslat.smartbrainlib.api.core.sensor.ExtendedSensor;
 import net.tslat.smartbrainlib.api.core.sensor.custom.GenericAttackTargetSensor;
 import net.tslat.smartbrainlib.api.core.sensor.vanilla.NearbyLivingEntitySensor;
 import net.tslat.smartbrainlib.api.core.sensor.vanilla.NearbyPlayersSensor;
+import net.tslat.smartbrainlib.library.object.SquareRadius;
 
 /** Stateless SmartBrainLib declaration for every Galactic recruit instance. */
 public final class RecruitBrain implements SmartBrainBuilder<GalacticRecruitEntity> {
@@ -30,14 +33,18 @@ public final class RecruitBrain implements SmartBrainBuilder<GalacticRecruitEnti
                 new ArmyThreatSensor(),
                 new NearbyPlayersSensor<GalacticRecruitEntity>()
                         .setPredicate((recruit, player) -> !player.isSpectator())
-                        .scanRate(10),
+                        .setRadius(recruit -> new SquareRadius(
+                                NpcFactionAiService.scanRadius(recruit)))
+                        .scanRate(NpcFactionAiService::scanInterval),
                 new NearbyLivingEntitySensor<GalacticRecruitEntity>()
                         .setPredicate(GalacticRecruitEntity::canUseLocalAttackTarget)
-                        .scanRate(10),
+                        .scanRate(NpcFactionAiService::scanInterval),
                 new GenericAttackTargetSensor<GalacticRecruitEntity>()
                         .onlyTargetIf(GalacticRecruitEntity::canUseLocalAttackTarget)
-                        .onlyScanIf(recruit -> !recruit.hasAuthoritativeArmyGroup())
-                        .scanRate(10));
+                        .onlyScanIf(recruit -> !recruit.hasAuthoritativeArmyGroup()
+                                && (recruit.getNpcRole() == NpcRole.COMMANDER
+                                || recruit.getNpcRole() == NpcRole.TROOPER))
+                        .scanRate(NpcFactionAiService::scanInterval));
     }
 
     @Override
@@ -48,6 +55,8 @@ public final class RecruitBrain implements SmartBrainBuilder<GalacticRecruitEnti
                 new ArmyPatrolBehaviour(),
                 new FloatToSurfaceOfFluid<GalacticRecruitEntity>(),
                 new LookAtTarget<GalacticRecruitEntity>(),
+                new FactionPlayerReactionBehaviour(),
+                new NaturalCommanderCoordinationBehaviour(),
                 new RecruitWalkTargetBehaviour());
     }
 

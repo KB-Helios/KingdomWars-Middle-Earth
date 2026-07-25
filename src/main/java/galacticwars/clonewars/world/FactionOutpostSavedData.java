@@ -18,7 +18,8 @@ import net.minecraft.world.level.saveddata.SavedData;
 import net.minecraft.world.level.saveddata.SavedDataType;
 
 public final class FactionOutpostSavedData extends SavedData {
-    private static final int SCHEMA_VERSION = 2;
+    public static final int SCHEMA_VERSION = 3;
+    public static final int MAX_PERSISTED_ALERTS = 256;
     private static final Codec<FactionOutpostRecord> OUTPOST_CODEC = RecordCodecBuilder.create(instance -> instance.group(
             UUIDUtil.CODEC.fieldOf("id").forGetter(FactionOutpostRecord::id),
             Codec.STRING.fieldOf("faction_id").forGetter(FactionOutpostRecord::factionId),
@@ -44,13 +45,23 @@ public final class FactionOutpostSavedData extends SavedData {
                             .forGetter(FactionOutpostSiteProgress::nextAttemptGameTime)
             ).apply(instance, FactionOutpostSiteProgress::new));
 
+    private static final Codec<OutpostAlert> ALERT_CODEC = RecordCodecBuilder.create(instance -> instance.group(
+            UUIDUtil.CODEC.fieldOf("outpost_id").forGetter(OutpostAlert::outpostId),
+            UUIDUtil.CODEC.fieldOf("player_id").forGetter(OutpostAlert::playerId),
+            Codec.LONG.fieldOf("raised_at").forGetter(OutpostAlert::raisedAt),
+            Codec.LONG.fieldOf("expires_at").forGetter(OutpostAlert::expiresAt),
+            Codec.STRING.fieldOf("reason").forGetter(OutpostAlert::reason)
+    ).apply(instance, OutpostAlert::new));
+
     public static final Codec<FactionOutpostSavedData> CODEC = RecordCodecBuilder.create(instance -> instance.group(
             Codec.INT.optionalFieldOf("schema_version", 1).forGetter(data -> SCHEMA_VERSION),
             OUTPOST_CODEC.listOf().optionalFieldOf("outposts", List.of()).forGetter(FactionOutpostSavedData::outposts),
             UUIDUtil.CODEC.listOf().optionalFieldOf("generated_sites", List.of())
                     .forGetter(data -> List.copyOf(data.generatedSiteIds)),
             SITE_PROGRESS_CODEC.listOf().optionalFieldOf("site_progress", List.of())
-                    .forGetter(data -> List.copyOf(data.siteProgressByOutpost.values()))
+                    .forGetter(data -> List.copyOf(data.siteProgressByOutpost.values())),
+            ALERT_CODEC.listOf().optionalFieldOf("alerts", List.of())
+                    .forGetter(data -> List.copyOf(data.alertsByTarget.values()))
     ).apply(instance, FactionOutpostSavedData::new));
 
     public static final SavedDataType<FactionOutpostSavedData> TYPE = new SavedDataType<>(
@@ -63,6 +74,7 @@ public final class FactionOutpostSavedData extends SavedData {
     private final Map<UUID, UUID> outpostIdsByNpc = new LinkedHashMap<>();
     private final LinkedHashSet<UUID> generatedSiteIds = new LinkedHashSet<>();
     private final Map<UUID, FactionOutpostSiteProgress> siteProgressByOutpost = new LinkedHashMap<>();
+    private final Map<AlertTarget, OutpostAlert> alertsByTarget = new LinkedHashMap<>();
 
     public FactionOutpostSavedData() {
     }
@@ -71,7 +83,8 @@ public final class FactionOutpostSavedData extends SavedData {
             int schemaVersion,
             List<FactionOutpostRecord> outposts,
             List<UUID> generatedSiteIds,
-            List<FactionOutpostSiteProgress> siteProgress
+            List<FactionOutpostSiteProgress> siteProgress,
+            List<OutpostAlert> alerts
     ) {
         if (schemaVersion > SCHEMA_VERSION) {
             throw new IllegalArgumentException("unsupported faction outpost schema " + schemaVersion);
@@ -87,6 +100,17 @@ public final class FactionOutpostSavedData extends SavedData {
             if (siteProgressByOutpost.putIfAbsent(progress.outpostId(), progress) != null) {
                 throw new IllegalArgumentException(
                         "duplicate faction outpost site progress " + progress.outpostId());
+            }
+        }
+        for (OutpostAlert alert : alerts.stream()
+                .skip(Math.max(0, alerts.size() - MAX_PERSISTED_ALERTS)).toList()) {
+            if (!outpostsById.containsKey(alert.outpostId())) {
+                continue;
+            }
+            AlertTarget key = new AlertTarget(alert.outpostId(), alert.playerId());
+            OutpostAlert previous = alertsByTarget.putIfAbsent(key, alert);
+            if (previous != null && previous.expiresAt() < alert.expiresAt()) {
+                alertsByTarget.put(key, alert);
             }
         }
     }
@@ -105,6 +129,60 @@ public final class FactionOutpostSavedData extends SavedData {
 
     public Optional<FactionOutpostRecord> outpostForNpc(UUID npcId) {
         return Optional.ofNullable(outpostIdsByNpc.get(npcId)).flatMap(this::outpost);
+    }
+
+    public Optional<OutpostAlert> activeAlert(
+            UUID outpostId,
+            UUID playerId,
+            long gameTime
+    ) {
+        OutpostAlert alert = alertsByTarget.get(new AlertTarget(outpostId, playerId));
+        return alert != null && alert.activeAt(gameTime)
+                ? Optional.of(alert)
+                : Optional.empty();
+    }
+
+    public List<OutpostAlert> activeAlerts(UUID outpostId, long gameTime) {
+        return alertsByTarget.values().stream()
+                .filter(alert -> alert.outpostId().equals(outpostId) && alert.activeAt(gameTime))
+                .sorted(java.util.Comparator.comparingLong(OutpostAlert::raisedAt))
+                .toList();
+    }
+
+    public Optional<OutpostAlert> raiseAlert(
+            UUID outpostId,
+            UUID playerId,
+            long gameTime,
+            int durationTicks,
+            String reason
+    ) {
+        if (!outpostsById.containsKey(outpostId)
+                || gameTime < 0L
+                || durationTicks < 1) {
+            return Optional.empty();
+        }
+        pruneExpired(gameTime);
+        AlertTarget key = new AlertTarget(outpostId, playerId);
+        OutpostAlert previous = alertsByTarget.get(key);
+        OutpostAlert alert = previous == null
+                ? new OutpostAlert(
+                        outpostId, playerId, gameTime,
+                        Math.addExact(gameTime, durationTicks), reason)
+                : previous.extend(gameTime, durationTicks, reason);
+        alertsByTarget.put(key, alert);
+        trimAlerts();
+        this.setDirty();
+        return Optional.of(alert);
+    }
+
+    public int pruneExpired(long gameTime) {
+        int before = alertsByTarget.size();
+        alertsByTarget.values().removeIf(alert -> !alert.activeAt(gameTime));
+        int removed = before - alertsByTarget.size();
+        if (removed > 0) {
+            this.setDirty();
+        }
+        return removed;
     }
 
     public boolean siteGenerated(UUID outpostId) {
@@ -243,6 +321,20 @@ public final class FactionOutpostSavedData extends SavedData {
         return true;
     }
 
+    private void trimAlerts() {
+        while (alertsByTarget.size() > MAX_PERSISTED_ALERTS) {
+            AlertTarget oldest = alertsByTarget.entrySet().stream()
+                    .min(java.util.Comparator.comparingLong(
+                            entry -> entry.getValue().expiresAt()))
+                    .map(Map.Entry::getKey)
+                    .orElse(null);
+            if (oldest == null) {
+                return;
+            }
+            alertsByTarget.remove(oldest);
+        }
+    }
+
     private void index(FactionOutpostRecord outpost) {
         FactionOutpostRecord previous = outpostsById.put(outpost.id(), outpost);
         if (previous != null) {
@@ -251,5 +343,8 @@ public final class FactionOutpostSavedData extends SavedData {
         }
         outpost.militaryNpcIds().forEach(id -> outpostIdsByNpc.put(id, outpost.id()));
         outpost.civilianNpcIds().forEach(id -> outpostIdsByNpc.put(id, outpost.id()));
+    }
+
+    private record AlertTarget(UUID outpostId, UUID playerId) {
     }
 }

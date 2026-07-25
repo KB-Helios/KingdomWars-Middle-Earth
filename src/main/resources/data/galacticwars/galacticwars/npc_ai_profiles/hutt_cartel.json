@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "faction": "galacticwars:hutt_cartel",
+  "roles": {
+    "commander": {"scan_interval": 10, "scan_radius": 32},
+    "trooper": {"scan_interval": 10, "scan_radius": 32},
+    "trader": {"scan_interval": 20, "scan_radius": 32},
+    "civilian": {"scan_interval": 20, "scan_radius": 32}
+  },
+  "coordination_radius": 48,
+  "max_responders": 12,
+  "warning_cooldown": 100,
+  "alert_duration": 600,
+  "alignment_thresholds": {"friendly": 10, "neutral": 0, "wary": -20},
+  "friendly_trade_price_percent": 90,
+  "reputation_events": {
+    "npc_damaged": {"direct": -5, "allies": -2, "enemies": 1},
+    "npc_killed": {"direct": -20, "allies": -5, "enemies": 5},
+    "trade_completed": {"direct": 1, "allies": 0, "enemies": 0},
+    "delivery_completed": {"direct": 3, "allies": 1, "enemies": -1},
+    "mission_completed": {"direct": 10, "allies": 3, "enemies": -3},
+    "outpost_defended": {"direct": 8, "allies": 2, "enemies": -2}
+  }
+}
