@@ -57,6 +57,7 @@ public final class NaturalCommanderCoordinationBehaviour
                         commander.getBoundingBox().inflate(radius),
                         recruit -> recruit != commander
                                 && recruit.isAlive()
+                                && recruit.isNaturalFactionNpc()
                                 && outpostId.equals(recruit.getFactionOutpostId())
                                 && recruit.getNpcRole() == NpcRole.TROOPER)
                 .stream()
