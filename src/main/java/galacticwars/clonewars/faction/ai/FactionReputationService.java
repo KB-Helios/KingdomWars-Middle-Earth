@@ -33,7 +33,7 @@ public final class FactionReputationService {
         if (factionId == null) {
             return Optional.empty();
         }
-        FactionId sourceFaction;
+        FactionId sourceFaction = FactionId.of(factionId);
         var snapshot = GameplayDataManager.snapshot();
         if (!snapshot.factions().contains(sourceFaction)) {
             return Optional.empty();
