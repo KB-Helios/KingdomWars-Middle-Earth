@@ -20,6 +20,8 @@ import net.tslat.smartbrainlib.util.BrainUtil;
 /** Converts sensed players into embodied warnings, alarms, or authorized local targets. */
 public final class FactionPlayerReactionBehaviour
         extends ExtendedBehaviour<GalacticRecruitEntity> {
+    private int cooldownTicks;
+
     @Override
     public Set<MemoryCondition<?, ?>> getMemoryRequirements() {
         return Set.of();
@@ -30,6 +32,10 @@ public final class FactionPlayerReactionBehaviour
             ServerLevel level,
             GalacticRecruitEntity recruit
     ) {
+        if (cooldownTicks > 0) {
+            cooldownTicks--;
+            return false;
+        }
         return Config.ENABLE_DYNAMIC_FACTION_AI.getAsBoolean()
                 && recruit.isNaturalFactionNpc()
                 && nearbyPlayer(recruit) != null;
@@ -42,6 +48,7 @@ public final class FactionPlayerReactionBehaviour
 
     @Override
     protected void start(GalacticRecruitEntity recruit) {
+        cooldownTicks = NpcFactionAiService.scanInterval(recruit);
         Player player = nearbyPlayer(recruit);
         if (player == null) {
             return;

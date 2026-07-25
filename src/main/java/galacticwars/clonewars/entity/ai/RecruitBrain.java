@@ -42,7 +42,8 @@ public final class RecruitBrain implements SmartBrainBuilder<GalacticRecruitEnti
                 new GenericAttackTargetSensor<GalacticRecruitEntity>()
                         .onlyTargetIf(GalacticRecruitEntity::canUseLocalAttackTarget)
                         .onlyScanIf(recruit -> !recruit.hasAuthoritativeArmyGroup()
-                                && (recruit.getNpcRole() == NpcRole.COMMANDER
+                                && (recruit.isTame()
+                                || recruit.getNpcRole() == NpcRole.COMMANDER
                                 || recruit.getNpcRole() == NpcRole.TROOPER))
                         .scanRate(NpcFactionAiService::scanInterval));
     }

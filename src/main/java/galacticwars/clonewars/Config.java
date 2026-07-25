@@ -98,11 +98,14 @@ public final class Config {
             String encoded = properties.getProperty(key);
             if (encoded == null) {
                 parsedBooleans.put(key, entry.getValue().getDefault());
-            } else if (encoded.equalsIgnoreCase("true") || encoded.equalsIgnoreCase("false")) {
-                parsedBooleans.put(key, Boolean.parseBoolean(encoded));
             } else {
-                GalacticWars.LOGGER.warn("Rejected invalid boolean {}={} in {}", key, encoded, source);
-                return false;
+                String trimmed = encoded.trim();
+                if (trimmed.equalsIgnoreCase("true") || trimmed.equalsIgnoreCase("false")) {
+                    parsedBooleans.put(key, Boolean.parseBoolean(trimmed));
+                } else {
+                    GalacticWars.LOGGER.warn("Rejected invalid boolean {}={} in {}", key, encoded, source);
+                    return false;
+                }
             }
         }
 

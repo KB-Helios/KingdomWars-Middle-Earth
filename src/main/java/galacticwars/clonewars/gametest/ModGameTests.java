@@ -7088,6 +7088,9 @@ public final class ModGameTests {
             }
             if (!this.started) {
                 this.start();
+                if (this.complete) {
+                    return;
+                }
             }
 
             ServerLevel level = this.helper.getLevel();

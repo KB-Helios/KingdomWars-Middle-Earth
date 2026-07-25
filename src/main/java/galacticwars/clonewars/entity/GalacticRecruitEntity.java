@@ -1133,12 +1133,13 @@ public class GalacticRecruitEntity extends TamableAnimal
         if (gameTime < nextAllowed) {
             return false;
         }
+        boolean wasAbsent = !factionWarningCooldowns.containsKey(player.getUUID());
+        if (wasAbsent && factionWarningCooldowns.size() >= 16) {
+            factionWarningCooldowns.remove(factionWarningCooldowns.keySet().iterator().next());
+        }
         factionWarningCooldowns.put(
                 player.getUUID(),
                 gameTime + NpcFactionAiService.profile(this).warningCooldownTicks());
-        while (factionWarningCooldowns.size() > 16) {
-            factionWarningCooldowns.remove(factionWarningCooldowns.keySet().iterator().next());
-        }
         player.sendSystemMessage(Component.translatable(
                 "message.galacticwars.faction_ai.warning",
                 this.getDisplayName()));
