@@ -26,17 +26,7 @@
   ],
   "rewards": {
     "recipes": [
-      "galacticwars:claim_transponder",
-      "galacticwars:blue_lightsaber",
-      "galacticwars:green_lightsaber",
-      "galacticwars:red_lightsaber",
-      "galacticwars:purple_lightsaber",
-      "galacticwars:yellow_lightsaber",
-      "galacticwars:white_lightsaber",
-      "galacticwars:power_drill",
-      "galacticwars:plasma_cutter",
-      "galacticwars:sonic_excavator",
-      "galacticwars:hydrospanner"
+      "galacticwars:claim_transponder"
     ]
   },
   "sends_telemetry_event": false

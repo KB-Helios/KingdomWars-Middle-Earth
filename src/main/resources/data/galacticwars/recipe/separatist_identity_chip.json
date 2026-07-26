@@ -1,1 +1,1 @@
-{"type":"minecraft:crafting_shapeless","category":"misc","ingredients":["minecraft:paper","galacticwars:credit_chip","galacticwars:separatist_alloy_ingot"],"result":{"id":"galacticwars:separatist_identity_chip","count":1}}
+{"type":"minecraft:crafting_shapeless","category":"misc","ingredients":["minecraft:paper","galacticwars:credit_chip","minecraft:copper_ingot","minecraft:redstone"],"result":{"id":"galacticwars:separatist_identity_chip","count":1}}

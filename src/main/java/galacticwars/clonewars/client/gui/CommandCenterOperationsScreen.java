@@ -23,6 +23,11 @@ import galacticwars.clonewars.kingdom.KingdomPermissionPolicy;
 import galacticwars.clonewars.menu.CommandCenterOperationsMenu;
 import galacticwars.clonewars.network.GalacticNetwork;
 import galacticwars.clonewars.network.MenuActionPayload;
+import galacticwars.clonewars.network.ResearchActionPayload;
+import galacticwars.clonewars.client.ClientGameplayCatalog;
+import galacticwars.clonewars.network.GameplayCatalogPayload;
+import galacticwars.clonewars.progression.PlayerCampaignAttachmentRuntime;
+import galacticwars.clonewars.progression.PlayerCampaignAttachmentState;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.Button;
@@ -43,7 +48,7 @@ public final class CommandCenterOperationsScreen extends Screen
         implements MenuAccess<CommandCenterOperationsMenu> {
     private static final String[] TABS = {
             "overview", "campaign", "construction", "squads",
-            "workforce", "kingdom", "diplomacy", "storage"
+            "workforce", "kingdom", "diplomacy", "storage", "technology", "relations"
     };
     private static final int TAB_HEIGHT = 20;
     private static final int ROW_GAP = 2;
@@ -75,7 +80,9 @@ public final class CommandCenterOperationsScreen extends Screen
     private int inviteIndex;
     private int foreignKingdomIndex;
     private int proposalIndex;
+    private int technologyIndex;
     private int lastDashboardRevision = -1;
+    private int lastTechnologyRevision = -1;
     private int panelLeft;
     private int panelWidth;
     private int bodyTop;
@@ -92,6 +99,9 @@ public final class CommandCenterOperationsScreen extends Screen
         super.init();
         normalizeSelections();
         lastDashboardRevision = menu.dashboardRevision();
+        lastTechnologyRevision = gameplayProjection()
+                .map(PlayerCampaignAttachmentState.GameplayProjection::getKingdomRevision)
+                .orElse(-1);
         int tabColumns = Math.max(2, Math.min(TABS.length, Math.max(1, (width - 16) / 76)));
         int tabRows = (TABS.length + tabColumns - 1) / tabColumns;
         int tabWidth = (width - 16) / tabColumns;
@@ -123,6 +133,8 @@ public final class CommandCenterOperationsScreen extends Screen
             case 5 -> addKingdomActions();
             case 6 -> addDiplomacyActions();
             case 7 -> addStorageActions();
+            case 8 -> addTechnologyActions();
+            case 9 -> { }
             default -> { }
         }
     }
@@ -133,7 +145,77 @@ public final class CommandCenterOperationsScreen extends Screen
         if (lastDashboardRevision != menu.dashboardRevision()) {
             normalizeSelections();
             rebuildWidgets();
+            return;
         }
+        int technologyRevision = gameplayProjection()
+                .map(PlayerCampaignAttachmentState.GameplayProjection::getKingdomRevision)
+                .orElse(-1);
+        if (technologyRevision != lastTechnologyRevision) {
+            lastTechnologyRevision = technologyRevision;
+            rebuildWidgets();
+        }
+    }
+
+    private void addTechnologyActions() {
+        List<GameplayCatalogPayload.TechnologyEntry> nodes = technologyEntries();
+        List<WorkerSummary> technicians = technicians();
+        addSelector(selectorY(0), nodes.size(),
+                () -> technologyIndex = cycle(technologyIndex, -1, nodes.size()),
+                () -> technologyIndex = cycle(technologyIndex, 1, nodes.size()));
+        addSelector(selectorY(1), technicians.size(),
+                () -> workerIndex = cycle(workerIndex, -1, technicians.size()),
+                () -> workerIndex = cycle(workerIndex, 1, technicians.size()));
+        var projection = gameplayProjection().orElse(null);
+        var selectedNode = selected(nodes, technologyIndex).orElse(null);
+        boolean manager = canManageTechnology();
+        boolean noProject = projection != null && projection.getActiveResearchNode().isEmpty();
+        boolean prerequisites = selectedNode != null && projection != null
+                && projection.getCompletedTechnology().containsAll(selectedNode.prerequisites());
+        boolean start = manager && selectedNode != null && noProject && prerequisites
+                && !projection.getCompletedTechnology().contains(selectedNode.nodeId());
+        boolean project = projection != null && !projection.getActiveResearchNode().isEmpty();
+        addResearchButton(0, "screen.galacticwars.operations.technology.start", start,
+                () -> sendResearch(ResearchActionPayload.START,
+                        selectedNode == null ? "" : selectedNode.nodeId(), Optional.empty()));
+        addResearchButton(1, "screen.galacticwars.operations.technology.contribute", project,
+                () -> sendResearch(ResearchActionPayload.CONTRIBUTE, "", Optional.empty()));
+        Optional<UUID> technician = selected(technicians, workerIndex).map(WorkerSummary::entityId);
+        addResearchButton(2, "screen.galacticwars.operations.technology.assign",
+                manager && project && technician.isPresent(),
+                () -> sendResearch(
+                        ResearchActionPayload.ASSIGN_TECHNICIAN, "", technician));
+        addResearchButton(3, "screen.galacticwars.operations.technology.cancel",
+                manager && project,
+                () -> sendResearch(ResearchActionPayload.CANCEL, "", Optional.empty()));
+    }
+
+    private void addResearchButton(int index, String translationKey, boolean enabled, Runnable action) {
+        int columns = panelWidth >= 360 ? 2 : 1;
+        int gap = 6;
+        int buttonWidth = (panelWidth - 16 - gap * (columns - 1)) / columns;
+        Button button = Button.builder(Component.translatable(translationKey), pressed -> action.run())
+                .bounds(panelLeft + 8 + (index % columns) * (buttonWidth + gap),
+                        afterSelectors(2) + (index / columns) * controlStride(),
+                        buttonWidth, controlHeight())
+                .build();
+        button.active = enabled;
+        addRenderableWidget(button);
+    }
+
+    private void sendResearch(int action, String nodeId, Optional<UUID> technicianId) {
+        var projection = gameplayProjection().orElse(null);
+        var catalog = ClientGameplayCatalog.snapshot();
+        if (projection == null || catalog.serverGeneration() < 0L) {
+            return;
+        }
+        GalacticNetwork.CHANNEL.sendToServer(new ResearchActionPayload(
+                UUID.randomUUID(),
+                menu.containerId,
+                action,
+                nodeId,
+                technicianId,
+                catalog.serverGeneration(),
+                projection.getKingdomRevision()));
     }
 
     private void addOverviewActions() {
@@ -557,6 +639,8 @@ public final class CommandCenterOperationsScreen extends Screen
             case 5 -> renderKingdom(graphics, state);
             case 6 -> renderDiplomacy(graphics, state);
             case 7 -> renderStorage(graphics, state);
+            case 8 -> renderTechnology(graphics);
+            case 9 -> renderRelations(graphics);
             default -> { }
         }
     }
@@ -761,6 +845,160 @@ public final class CommandCenterOperationsScreen extends Screen
                         : Component.translatable("screen.galacticwars.operations.status.unpaid")), TEXT);
         drawLine(graphics, 2,
                 Component.translatable("screen.galacticwars.operations.storage.hint"), MUTED);
+    }
+
+    private void renderTechnology(GuiGraphicsExtractor graphics) {
+        drawHeading(graphics, Component.translatable(
+                "screen.galacticwars.operations.technology.title"));
+        List<GameplayCatalogPayload.TechnologyEntry> nodes = technologyEntries();
+        var node = selected(nodes, technologyIndex).orElse(null);
+        var projection = gameplayProjection().orElse(null);
+        drawSelectorLabel(graphics, selectorY(0), node == null
+                ? Component.translatable("screen.galacticwars.operations.none")
+                : Component.literal(node.displayName()));
+        List<WorkerSummary> technicians = technicians();
+        drawSelectorLabel(graphics, selectorY(1), selected(technicians, workerIndex)
+                .map(this::workerLabel)
+                .orElse(Component.translatable("screen.galacticwars.operations.none")));
+        if (node == null || projection == null) {
+            return;
+        }
+        String lock = technologyLockReason(node, projection);
+        drawCentered(graphics, clipped(Component.translatable(
+                        "screen.galacticwars.operations.technology.status",
+                        humanize(lock)), panelWidth - 20),
+                afterSelectors(2) - 9, lock.equals("completed") ? GOOD
+                        : lock.equals("available") ? ACCENT : WARNING);
+        String costs = node.costs().stream()
+                .map(cost -> {
+                    int delivered = projection.getActiveResearchNode().equals(node.nodeId())
+                            ? projection.getDeliveredResearchInputs()
+                                    .getOrDefault(cost.itemId(), 0) : 0;
+                    return humanize(path(cost.itemId())) + " " + delivered + "/" + cost.count();
+                })
+                .reduce((left, right) -> left + ", " + right).orElse("");
+        drawCentered(graphics, clipped(Component.translatable(
+                        "screen.galacticwars.operations.technology.costs", costs),
+                        panelWidth - 20),
+                afterSelectors(2) + 2, MUTED);
+        String recipes = node.recipeIds().stream().map(id -> humanize(path(id)))
+                .reduce((left, right) -> left + ", " + right).orElse("-");
+        drawCentered(graphics, clipped(Component.translatable(
+                        "screen.galacticwars.operations.technology.recipes", recipes),
+                        panelWidth - 20),
+                afterSelectors(2) + 13, MUTED);
+        if (projection.getActiveResearchNode().equals(node.nodeId())) {
+            drawCentered(graphics, clipped(Component.translatable(
+                            "screen.galacticwars.operations.technology.progress",
+                            projection.getResearchProgress(),
+                            projection.getResearchRequired(),
+                            projection.getTechnicianId().isEmpty()
+                                    ? Component.translatable("screen.galacticwars.operations.none")
+                                    : Component.literal(projection.getTechnicianId())),
+                            panelWidth - 20),
+                    afterSelectors(2) + 24, TEXT);
+        }
+    }
+
+    private void renderRelations(GuiGraphicsExtractor graphics) {
+        drawHeading(graphics, Component.translatable(
+                "screen.galacticwars.operations.relations.title"));
+        var projection = gameplayProjection().orElse(null);
+        if (projection == null) {
+            return;
+        }
+        int row = 1;
+        for (var policy : ClientGameplayCatalog.snapshot().relationPolicies().values()) {
+            int score = projection.getReputation().getOrDefault(policy.factionId(), 0);
+            String tier = relationTier(score, policy);
+            int next = nextRelationThreshold(score, policy);
+            boolean recruitment = score >= policy.recruitmentThreshold();
+            long licenses = projection.getEffectiveCapabilities().stream()
+                    .filter(capability -> capability.startsWith("recipe:"))
+                    .map(capability -> capability.substring("recipe:".length()))
+                    .filter(recipe -> ClientGameplayCatalog.snapshot().fabrication(recipe)
+                            .filter(entry -> entry.factionId().equals(policy.factionId())).isPresent())
+                    .count();
+            drawLine(graphics, row++, Component.translatable(
+                    "screen.galacticwars.operations.relations.row",
+                    factionName(policy.factionId()), score, humanize(tier), next,
+                    tier.equals("friendly") ? policy.friendlyTradePricePercent() : 100,
+                    recruitment ? Component.translatable("screen.galacticwars.operations.status.ready")
+                            : Component.translatable("screen.galacticwars.operations.status.locked"),
+                    licenses), tier.equals("hostile") ? WARNING
+                            : tier.equals("friendly") ? GOOD : TEXT);
+        }
+    }
+
+    private String technologyLockReason(
+            GameplayCatalogPayload.TechnologyEntry node,
+            PlayerCampaignAttachmentState.GameplayProjection projection
+    ) {
+        if (projection.getCompletedTechnology().contains(node.nodeId())) {
+            return "completed";
+        }
+        if (!projection.getActiveResearchNode().isEmpty()) {
+            return projection.getActiveResearchNode().equals(node.nodeId())
+                    ? "researching" : "another_project_active";
+        }
+        if (!projection.getCompletedTechnology().containsAll(node.prerequisites())) {
+            return "prerequisites_missing";
+        }
+        return canManageTechnology() ? "available" : "officer_required";
+    }
+
+    private static String relationTier(
+            int score,
+            GameplayCatalogPayload.RelationPolicyEntry policy
+    ) {
+        if (score >= policy.friendlyThreshold()) return "friendly";
+        if (score >= policy.neutralThreshold()) return "neutral";
+        if (score >= policy.waryThreshold()) return "wary";
+        return "hostile";
+    }
+
+    private static int nextRelationThreshold(
+            int score,
+            GameplayCatalogPayload.RelationPolicyEntry policy
+    ) {
+        if (score < policy.waryThreshold()) return policy.waryThreshold();
+        if (score < policy.neutralThreshold()) return policy.neutralThreshold();
+        if (score < policy.friendlyThreshold()) return policy.friendlyThreshold();
+        return 100;
+    }
+
+    private List<GameplayCatalogPayload.TechnologyEntry> technologyEntries() {
+        String faction = menu.dashboardState().factionId();
+        return ClientGameplayCatalog.snapshot().technology().values().stream()
+                .filter(node -> node.factionId().equals("galacticwars:universal")
+                        || node.factionId().equals(faction))
+                .toList();
+    }
+
+    private List<WorkerSummary> technicians() {
+        return menu.dashboardState().workers().stream()
+                .filter(worker -> worker.profession().equals("technician"))
+                .toList();
+    }
+
+    private Optional<PlayerCampaignAttachmentState.GameplayProjection> gameplayProjection() {
+        var player = Minecraft.getInstance().player;
+        if (player == null) {
+            return Optional.empty();
+        }
+        return Optional.ofNullable(PlayerCampaignAttachmentRuntime.get(player))
+                .map(PlayerCampaignAttachmentState::getGameplay);
+    }
+
+    private boolean canManageTechnology() {
+        try {
+            return KingdomPermissionPolicy.allows(
+                    KingdomMemberRole.valueOf(
+                            menu.dashboardState().actorRole().toUpperCase(Locale.ROOT)),
+                    KingdomPermission.MANAGE_TECHNOLOGY);
+        } catch (IllegalArgumentException exception) {
+            return false;
+        }
     }
 
     private void drawHeading(GuiGraphicsExtractor graphics, Component heading) {

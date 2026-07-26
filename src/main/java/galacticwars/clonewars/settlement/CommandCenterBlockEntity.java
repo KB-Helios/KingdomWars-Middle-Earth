@@ -3,6 +3,8 @@ package galacticwars.clonewars.settlement;
 import galacticwars.clonewars.economy.CreditTransactionService;
 
 import java.util.List;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 import galacticwars.clonewars.data.GameplayDataManager;
@@ -19,6 +21,7 @@ import galacticwars.clonewars.registry.ModBlockEntityTypes;
 import galacticwars.clonewars.progression.ProgressionEventType;
 import galacticwars.clonewars.progression.ProgressionSavedData;
 import galacticwars.clonewars.workforce.ResourceInventory;
+import galacticwars.clonewars.technology.KingdomResearchService;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.HolderLookup;
 import net.minecraft.core.NonNullList;
@@ -64,6 +67,17 @@ public final class CommandCenterBlockEntity extends BaseContainerBlockEntity {
 
     public CommandCenterBlockEntity(BlockPos pos, BlockState state) {
         super(ModBlockEntityTypes.COMMAND_CENTER.get(), pos, state);
+    }
+
+    public static void serverTick(
+            net.minecraft.world.level.Level level,
+            BlockPos pos,
+            BlockState state,
+            CommandCenterBlockEntity commandCenter
+    ) {
+        if (level instanceof ServerLevel serverLevel && serverLevel.getGameTime() % 20L == 0L) {
+            KingdomResearchService.tick(serverLevel, commandCenter);
+        }
     }
 
     public @Nullable UUID ownerId() {
@@ -155,6 +169,57 @@ public final class CommandCenterBlockEntity extends BaseContainerBlockEntity {
             simulated.set(slot, this.items.get(slot).copy());
         }
         for (var entry : reservation.resources().entrySet()) {
+            var item = BuiltInRegistries.ITEM.getValue(Identifier.parse(entry.getKey()));
+            if (item == null || item == Items.AIR
+                    || !insertAll(simulated, new ItemStack(item, entry.getValue()))) {
+                return false;
+            }
+        }
+        this.items = simulated;
+        this.setChangedAndSync();
+        return true;
+    }
+
+    public Map<String, Integer> availableResearchContribution(Map<String, Integer> remaining) {
+        LinkedHashMap<String, Integer> available = new LinkedHashMap<>();
+        remaining.forEach((itemId, needed) -> {
+            int present = this.items.stream()
+                    .filter(stack -> itemId.equals(BuiltInRegistries.ITEM.getKey(stack.getItem()).toString()))
+                    .mapToInt(ItemStack::getCount)
+                    .sum();
+            int count = Math.min(Math.max(0, needed), present);
+            if (count > 0) {
+                available.put(itemId, count);
+            }
+        });
+        return Map.copyOf(available);
+    }
+
+    public boolean consumeResearchContribution(Map<String, Integer> contribution) {
+        if (!availableResearchContribution(contribution).equals(contribution)) {
+            return false;
+        }
+        contribution.forEach((itemId, count) -> {
+            int remaining = count;
+            for (ItemStack stack : this.items) {
+                if (remaining > 0
+                        && itemId.equals(BuiltInRegistries.ITEM.getKey(stack.getItem()).toString())) {
+                    int removed = Math.min(remaining, stack.getCount());
+                    stack.shrink(removed);
+                    remaining -= removed;
+                }
+            }
+        });
+        this.setChangedAndSync();
+        return true;
+    }
+
+    public boolean refundResearchMaterials(Map<String, Integer> materials) {
+        NonNullList<ItemStack> simulated = NonNullList.withSize(this.items.size(), ItemStack.EMPTY);
+        for (int slot = 0; slot < this.items.size(); slot++) {
+            simulated.set(slot, this.items.get(slot).copy());
+        }
+        for (var entry : materials.entrySet()) {
             var item = BuiltInRegistries.ITEM.getValue(Identifier.parse(entry.getKey()));
             if (item == null || item == Items.AIR
                     || !insertAll(simulated, new ItemStack(item, entry.getValue()))) {

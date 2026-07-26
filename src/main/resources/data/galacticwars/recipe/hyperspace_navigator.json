@@ -1,17 +1,20 @@
 {
-  "type": "minecraft:crafting_shaped",
-  "category": "equipment",
-  "pattern": [
-    " I ",
-    "ICI",
-    " I "
+  "type": "galacticwars:fabrication",
+  "ingredients": [
+    {
+      "ingredient": "minecraft:iron_ingot",
+      "count": 4
+    },
+    {
+      "ingredient": "minecraft:compass",
+      "count": 1
+    }
   ],
-  "key": {
-    "I": "minecraft:iron_ingot",
-    "C": "minecraft:compass"
-  },
   "result": {
     "id": "galacticwars:hyperspace_navigator",
     "count": 1
-  }
+  },
+  "faction": "galacticwars:universal",
+  "technology": "galacticwars:hyperspace_navigation",
+  "exportable": false
 }

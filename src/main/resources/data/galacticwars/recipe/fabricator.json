@@ -1,0 +1,19 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "building",
+  "pattern": [
+    "IRI",
+    "ECE",
+    "III"
+  ],
+  "key": {
+    "I": "minecraft:iron_ingot",
+    "R": "minecraft:redstone",
+    "E": "galacticwars:energy_cell",
+    "C": "minecraft:crafting_table"
+  },
+  "result": {
+    "id": "galacticwars:fabricator",
+    "count": 1
+  }
+}

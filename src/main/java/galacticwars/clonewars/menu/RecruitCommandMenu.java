@@ -46,6 +46,7 @@ public class RecruitCommandMenu extends AbstractContainerMenu {
     public static final int BUTTON_ROTATE_BLUEPRINT = WorkerProfessionCatalog.FIRST_COMMAND_BUTTON_ID + 10;
     public static final int BUTTON_PATROL = WorkerProfessionCatalog.FIRST_COMMAND_BUTTON_ID + 11;
     public static final int BUTTON_OPEN_LOADOUT = WorkerProfessionCatalog.FIRST_COMMAND_BUTTON_ID + 12;
+    public static final int BUTTON_ASSIGN_TECHNICIAN = WorkerProfessionCatalog.FIRST_COMMAND_BUTTON_ID + 13;
 
     private final int recruitEntityId;
     private final Level level;

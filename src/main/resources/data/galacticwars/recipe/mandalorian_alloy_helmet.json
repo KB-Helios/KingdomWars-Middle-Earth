@@ -1,1 +1,16 @@
-{"type":"minecraft:crafting_shaped","category":"equipment","pattern":["XXX","X X"],"key":{"X":"galacticwars:mandalorian_alloy_ingot"},"result":{"id":"galacticwars:mandalorian_alloy_helmet","count":1}}
+{
+  "type": "galacticwars:fabrication",
+  "ingredients": [
+    {
+      "ingredient": "galacticwars:mandalorian_alloy_ingot",
+      "count": 5
+    }
+  ],
+  "result": {
+    "id": "galacticwars:mandalorian_alloy_helmet",
+    "count": 1
+  },
+  "faction": "galacticwars:mandalorian",
+  "technology": "galacticwars:clan_armor",
+  "exportable": false
+}

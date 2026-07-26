@@ -19,14 +19,39 @@ public final class GameplayCatalogPayloadValidationTest {
         var vehicle = new GameplayCatalogPayload.VehicleEntry("laat_gunship", 180, 2400);
         var blueprint = new GameplayCatalogPayload.BlueprintEntry(
                 "galacticwars:forward_base", "Forward Base", 37);
+        var technology = new GameplayCatalogPayload.TechnologyEntry(
+                "galacticwars:clone_field_arms",
+                "galacticwars:republic",
+                "Clone Field Arms",
+                List.of("galacticwars:plastoid_processing"),
+                List.of(new GameplayCatalogPayload.CostEntry("minecraft:iron_ingot", 8)),
+                1200,
+                List.of("galacticwars:dc15_blaster"));
+        var fabrication = new GameplayCatalogPayload.FabricationEntry(
+                "galacticwars:dc15_blaster",
+                "galacticwars:republic",
+                "galacticwars:clone_field_arms",
+                true);
+        var relation = new GameplayCatalogPayload.RelationPolicyEntry(
+                "galacticwars:republic", 10, 0, -10, 90, 10);
         String contentHash = "a".repeat(64);
         var payload = new GameplayCatalogPayload(
-                4L, contentHash, List.of(unitClass), List.of(vehicle), List.of(blueprint));
+                4L,
+                contentHash,
+                List.of(unitClass),
+                List.of(vehicle),
+                List.of(blueprint),
+                List.of(technology),
+                List.of(fabrication),
+                List.of(relation));
 
         if (payload.generation() != 4L
                 || !payload.classes().getFirst().classId().equals("galacticwars:clone_trooper")
                 || payload.vehicles().getFirst().fuelCapacity() != 2400
-                || payload.blueprints().getFirst().placementCount() != 37) {
+                || payload.blueprints().getFirst().placementCount() != 37
+                || !payload.technology().getFirst().nodeId().equals("galacticwars:clone_field_arms")
+                || !payload.fabrication().getFirst().exportable()
+                || payload.relationPolicies().getFirst().friendlyThreshold() != 10) {
             throw new AssertionError("valid gameplay catalog payload did not retain its projection");
         }
         expectFailure(() -> new GameplayCatalogPayload(-1L, "", List.of(), List.of(), List.of()),
@@ -59,6 +84,21 @@ public final class GameplayCatalogPayloadValidationTest {
                         "galacticwars:forward_base", "Forward Base",
                         GameplayCatalogPayload.MAX_BLUEPRINT_PLACEMENTS + 1),
                 "blueprint placement bound");
+        expectFailure(() -> new GameplayCatalogPayload.TechnologyEntry(
+                        "galacticwars:bad",
+                        "galacticwars:republic",
+                        "Bad",
+                        List.of(),
+                        List.of(new GameplayCatalogPayload.CostEntry("minecraft:iron_ingot", 1)),
+                        19,
+                        List.of()),
+                "technology work bound");
+        expectFailure(() -> new GameplayCatalogPayload.CostEntry(
+                        "minecraft:iron_ingot", 4_097),
+                "technology cost bound");
+        expectFailure(() -> new GameplayCatalogPayload.RelationPolicyEntry(
+                        "galacticwars:republic", 0, 0, -10, 90, 10),
+                "relation threshold ordering");
 
         try {
             payload.classes().add(unitClass);

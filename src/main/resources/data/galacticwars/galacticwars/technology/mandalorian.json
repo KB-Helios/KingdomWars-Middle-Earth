@@ -1,0 +1,67 @@
+{
+  "faction": "galacticwars:mandalorian",
+  "nodes": [
+    {
+      "id": "galacticwars:alloy_forging",
+      "name": "Alloy Forging",
+      "prerequisites": ["galacticwars:field_fabrication"],
+      "inputs": {"galacticwars:mandalorian_fiber": 8, "minecraft:iron_ingot": 16},
+      "work": 2400,
+      "recipes": ["galacticwars:mandalorian_alloy_ingot"]
+    },
+    {
+      "id": "galacticwars:clan_armaments",
+      "name": "Clan Armaments",
+      "prerequisites": ["galacticwars:alloy_forging"],
+      "inputs": {"galacticwars:mandalorian_alloy_ingot": 16, "galacticwars:energy_cell": 8},
+      "work": 3200,
+      "recipes": [
+        "galacticwars:westar_blaster",
+        "galacticwars:mandalorian_alloy_sword",
+        "galacticwars:mandalorian_alloy_pickaxe",
+        "galacticwars:mandalorian_alloy_axe",
+        "galacticwars:mandalorian_alloy_shovel",
+        "galacticwars:mandalorian_alloy_hoe"
+      ]
+    },
+    {
+      "id": "galacticwars:clan_armor",
+      "name": "Clan Armor",
+      "prerequisites": ["galacticwars:alloy_forging"],
+      "inputs": {"galacticwars:mandalorian_alloy_ingot": 32, "galacticwars:mandalorian_fiber": 12},
+      "work": 4000,
+      "recipes": [
+        "galacticwars:mandalorian_alloy_helmet",
+        "galacticwars:mandalorian_alloy_chestplate",
+        "galacticwars:mandalorian_alloy_leggings",
+        "galacticwars:mandalorian_alloy_boots"
+      ]
+    },
+    {
+      "id": "galacticwars:beskar_metallurgy",
+      "name": "Beskar Metallurgy",
+      "prerequisites": ["galacticwars:alloy_forging", "galacticwars:industrial_tooling"],
+      "inputs": {"galacticwars:raw_beskar": 8, "minecraft:blast_furnace": 1},
+      "work": 6000,
+      "recipes": ["galacticwars:beskar_ingot_from_smelting", "galacticwars:beskar_ingot_from_blasting"]
+    },
+    {
+      "id": "galacticwars:beskar_forge",
+      "name": "Beskar Forge",
+      "prerequisites": ["galacticwars:clan_armaments", "galacticwars:clan_armor", "galacticwars:beskar_metallurgy"],
+      "inputs": {"galacticwars:beskar_ingot": 24, "galacticwars:energy_cell": 16},
+      "work": 9600,
+      "recipes": [
+        "galacticwars:beskar_sword",
+        "galacticwars:beskar_pickaxe",
+        "galacticwars:beskar_axe",
+        "galacticwars:beskar_shovel",
+        "galacticwars:beskar_hoe",
+        "galacticwars:beskar_helmet",
+        "galacticwars:beskar_chestplate",
+        "galacticwars:beskar_leggings",
+        "galacticwars:beskar_boots"
+      ]
+    }
+  ]
+}

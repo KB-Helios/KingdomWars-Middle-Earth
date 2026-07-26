@@ -364,6 +364,10 @@ public final class ModGameTests {
                 ModGameTests::commandCenterMultiplayerInvite);
         tests.put(id("command_center_squad_orders"), ModGameTests::commandCenterSquadOrders);
         tests.put(id("command_center_workforce_control"), ModGameTests::commandCenterWorkforceControl);
+        tests.put(id("technology_recipe_catalog"), TechnologyFabricationGameTests::loadedRecipeCatalog);
+        tests.put(id("shared_kingdom_research"), TechnologyFabricationGameTests::sharedKingdomResearch);
+        tests.put(id("atomic_fabrication_authority"),
+                TechnologyFabricationGameTests::atomicFabricationAuthority);
         tests.put(id("command_marker_runtime"), ModGameTests::commandMarkerRuntime);
         tests.put(id("blueprint_projector_runtime"), ModGameTests::blueprintProjectorRuntime);
         tests.put(id("kingdom_governance_persistence"), ModGameTests::kingdomGovernancePersistence);

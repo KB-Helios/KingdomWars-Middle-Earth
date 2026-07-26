@@ -43,6 +43,7 @@ final class GameplayContentFingerprint {
             updateMap(digest, "mission", launch.missions(), GameplayContentFingerprint::canonical);
             updateMap(digest, "trade", launch.trades(), GameplayContentFingerprint::canonical);
             updateMap(digest, "region", launch.conquestRegions(), GameplayContentFingerprint::canonical);
+            updateMap(digest, "technology", snapshot.technology().nodes(), GameplayContentFingerprint::canonical);
             return HexFormat.of().formatHex(digest.digest());
         } catch (NoSuchAlgorithmException exception) {
             throw new IllegalStateException("SHA-256 is unavailable", exception);

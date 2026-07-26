@@ -1,1 +1,20 @@
-{"type":"minecraft:crafting_shaped","category":"equipment","pattern":["XX","XS"," S"],"key":{"X":"galacticwars:nightsister_weave","S":"minecraft:stick"},"result":{"id":"galacticwars:nightsister_weave_axe","count":1}}
+{
+  "type": "galacticwars:fabrication",
+  "ingredients": [
+    {
+      "ingredient": "galacticwars:nightsister_weave",
+      "count": 3
+    },
+    {
+      "ingredient": "minecraft:stick",
+      "count": 2
+    }
+  ],
+  "result": {
+    "id": "galacticwars:nightsister_weave_axe",
+    "count": 1
+  },
+  "faction": "galacticwars:nightsister",
+  "technology": "galacticwars:weave_armaments",
+  "exportable": false
+}

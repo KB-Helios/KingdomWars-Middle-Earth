@@ -40,12 +40,17 @@ public final class FactionReputationService {
         }
         NpcAiProfile profile = snapshot.npcAiProfile(sourceFaction)
                 .orElseGet(() -> NpcAiProfile.defaults(sourceFaction));
-        return Optional.of(FactionAlignmentSavedData.get(level).applyEvent(
+        FactionAlignmentEventResult result = FactionAlignmentSavedData.get(level).applyEvent(
                 playerId,
                 eventId,
                 snapshot.factions(),
                 sourceFaction,
-                profile.rule(event)));
+                profile.rule(event));
+        ServerPlayer player = level.getServer().getPlayerList().getPlayer(playerId);
+        if (player != null) {
+            galacticwars.clonewars.progression.PlayerCampaignAttachmentRuntime.synchronize(player);
+        }
+        return Optional.of(result);
     }
 
     public static void recordNaturalNpcDamage(

@@ -1,0 +1,53 @@
+{
+  "faction": "galacticwars:republic",
+  "nodes": [
+    {
+      "id": "galacticwars:plastoid_processing",
+      "name": "Plastoid Processing",
+      "prerequisites": ["galacticwars:field_fabrication"],
+      "inputs": {"minecraft:quartz": 16, "minecraft:iron_ingot": 8},
+      "work": 1800,
+      "recipes": ["galacticwars:republic_plastoid_ingot"]
+    },
+    {
+      "id": "galacticwars:clone_field_arms",
+      "name": "Clone Field Arms",
+      "prerequisites": ["galacticwars:plastoid_processing"],
+      "inputs": {"galacticwars:republic_plastoid_ingot": 16, "galacticwars:energy_cell": 8},
+      "work": 3000,
+      "recipes": [
+        "galacticwars:dc15_blaster",
+        "galacticwars:republic_plastoid_sword",
+        "galacticwars:republic_plastoid_pickaxe",
+        "galacticwars:republic_plastoid_axe",
+        "galacticwars:republic_plastoid_shovel",
+        "galacticwars:republic_plastoid_hoe"
+      ]
+    },
+    {
+      "id": "galacticwars:clone_armor",
+      "name": "Clone Armor",
+      "prerequisites": ["galacticwars:plastoid_processing"],
+      "inputs": {"galacticwars:republic_plastoid_ingot": 32, "minecraft:leather": 8},
+      "work": 3600,
+      "recipes": [
+        "galacticwars:republic_plastoid_helmet",
+        "galacticwars:republic_plastoid_chestplate",
+        "galacticwars:republic_plastoid_leggings",
+        "galacticwars:republic_plastoid_boots",
+        "galacticwars:phase_i_clone_helmet",
+        "galacticwars:phase_i_clone_chestplate",
+        "galacticwars:phase_i_clone_leggings",
+        "galacticwars:phase_i_clone_boots"
+      ]
+    },
+    {
+      "id": "galacticwars:combined_arms",
+      "name": "Combined Arms",
+      "prerequisites": ["galacticwars:clone_field_arms", "galacticwars:clone_armor", "galacticwars:vehicle_engineering"],
+      "inputs": {"galacticwars:republic_plastoid_ingot": 48, "galacticwars:energy_cell": 16},
+      "work": 6000,
+      "recipes": []
+    }
+  ]
+}

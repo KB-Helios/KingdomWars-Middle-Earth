@@ -1,20 +1,13 @@
 {
-  "type": "minecraft:crafting_shaped",
-  "category": "equipment",
-  "group": "galacticwars:lightsabers",
-  "pattern": [
-    " D ",
-    "AEA",
-    " I "
+  "type": "galacticwars:force_ritual",
+  "ingredients": [
+    {"ingredient": "minecraft:blue_dye", "count": 1},
+    {"ingredient": "minecraft:amethyst_shard", "count": 2},
+    {"ingredient": "galacticwars:energy_cell", "count": 1},
+    {"ingredient": "minecraft:iron_ingot", "count": 1}
   ],
-  "key": {
-    "D": "minecraft:blue_dye",
-    "A": "minecraft:amethyst_shard",
-    "E": "galacticwars:energy_cell",
-    "I": "minecraft:iron_ingot"
-  },
-  "result": {
-    "id": "galacticwars:blue_lightsaber",
-    "count": 1
-  }
+  "result": {"id": "galacticwars:blue_lightsaber", "count": 1},
+  "shrine": "jedi",
+  "path": "jedi",
+  "required_rank": 1
 }

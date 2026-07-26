@@ -31,5 +31,10 @@
       "command_center"
     ]
   ],
+  "rewards": {
+    "recipes": [
+      "galacticwars:fabricator"
+    ]
+  },
   "sends_telemetry_event": false
 }

@@ -10,5 +10,6 @@ public enum KingdomPermission {
     USE_STORAGE,
     MANAGE_LOGISTICS,
     MANAGE_WORKSITES,
+    MANAGE_TECHNOLOGY,
     RECRUIT
 }

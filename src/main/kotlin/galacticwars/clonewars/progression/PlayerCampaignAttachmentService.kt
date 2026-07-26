@@ -6,14 +6,18 @@ import java.util.LinkedHashSet
 /** Pure projection/update boundary used by both loader-specific attachment adapters. */
 object PlayerCampaignAttachmentService {
     @JvmStatic
+    @JvmOverloads
     fun fromAuthoritative(
         progression: ProgressionState,
         force: ForceRuntimeState,
+        gameplay: PlayerCampaignAttachmentState.GameplayProjection =
+            PlayerCampaignAttachmentState.GameplayProjection.empty(),
     ): PlayerCampaignAttachmentState = PlayerCampaignAttachmentState(
         PlayerCampaignAttachmentState.CURRENT_SCHEMA_VERSION,
         progression.playerId,
         campaignProjection(progression),
         forceProjection(force),
+        gameplay,
     )
 
     @JvmStatic
@@ -30,6 +34,7 @@ object PlayerCampaignAttachmentService {
             current.playerId,
             updated,
             current.force,
+            current.gameplay,
         )
     }
 
@@ -44,6 +49,7 @@ object PlayerCampaignAttachmentService {
             current.playerId,
             current.campaign,
             updated,
+            current.gameplay,
         )
     }
 

@@ -24,6 +24,7 @@ public final class ModCreativeTabs {
                         output.accept(ModItems.NIGHTSISTER_WEAVE_LEAVES.get());
                         output.accept(ModItems.NIGHTSISTER_WEAVE_SAPLING.get());
                         output.accept(ModItems.COMMAND_CENTER.get());
+                        output.accept(ModItems.FABRICATOR.get());
                         output.accept(ModItems.CONTROL_BEACON.get());
                         output.accept(ModItems.JEDI_MEDITATION_SHRINE.get());
                         output.accept(ModItems.SITH_HOLOCRON_PEDESTAL.get());

@@ -10,6 +10,11 @@ import galacticwars.clonewars.force.ForceShrineService;
 import galacticwars.clonewars.classes.PlayerClassRuntime;
 import galacticwars.clonewars.menu.CommandCenterOperationsMenu;
 import galacticwars.clonewars.menu.MerchantTradeMenu;
+import galacticwars.clonewars.menu.FabricatorMenu;
+import galacticwars.clonewars.fabrication.FabricationService;
+import galacticwars.clonewars.technology.KingdomResearchService;
+import galacticwars.clonewars.settlement.CommandCenterBlockEntity;
+import galacticwars.clonewars.data.GameplayDataManager;
 import galacticwars.clonewars.vehicle.GalacticVehicleEntity;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.minecraft.resources.Identifier;
@@ -58,6 +63,14 @@ public final class GalacticNetwork {
                 MenuActionPayload.TYPE,
                 MenuActionPayload.STREAM_CODEC,
                 GalacticNetwork::handleMenuAction);
+        NetworkManager.registerC2S(
+                FabricationRequestPayload.TYPE,
+                FabricationRequestPayload.STREAM_CODEC,
+                GalacticNetwork::handleFabrication);
+        NetworkManager.registerC2S(
+                ResearchActionPayload.TYPE,
+                ResearchActionPayload.STREAM_CODEC,
+                GalacticNetwork::handleResearch);
         NetworkManager.registerC2S(
                 FieldCommandRequestPayload.TYPE,
                 FieldCommandRequestPayload.STREAM_CODEC,
@@ -198,6 +211,56 @@ public final class GalacticNetwork {
                         payload.expectedSettlementRevision());
             } else if (player.containerMenu instanceof MerchantTradeMenu merchant) {
                 merchant.handleReplayAction(player, payload.replayId(), payload.actionId());
+            }
+        });
+    }
+
+    private static void handleFabrication(
+            FabricationRequestPayload payload,
+            NetworkManager.PacketContext context
+    ) {
+        if (context.getPlayer() instanceof ServerPlayer player) {
+            context.queue(() -> {
+                if (player.containerMenu instanceof FabricatorMenu fabricator
+                        && player.containerMenu.containerId == payload.containerId()) {
+                    FabricationService.fabricate(player, fabricator, payload);
+                }
+            });
+        }
+    }
+
+    private static void handleResearch(
+            ResearchActionPayload payload,
+            NetworkManager.PacketContext context
+    ) {
+        if (!(context.getPlayer() instanceof ServerPlayer player)) {
+            return;
+        }
+        context.queue(() -> {
+            if (!(player.containerMenu instanceof CommandCenterOperationsMenu operations)
+                    || operations.containerId != payload.containerId()
+                    || payload.catalogGeneration() != GameplayDataManager.generation()
+                    || !operations.stillValid(player)
+                    || !(player.level().getBlockEntity(operations.hallPos())
+                            instanceof CommandCenterBlockEntity commandCenter)) {
+                return;
+            }
+            switch (payload.action()) {
+                case ResearchActionPayload.START -> KingdomResearchService.start(
+                        player, commandCenter, payload.nodeId(), payload.replayId(),
+                        payload.technologyRevision());
+                case ResearchActionPayload.CONTRIBUTE -> KingdomResearchService.contribute(
+                        player, commandCenter, payload.replayId(), payload.technologyRevision());
+                case ResearchActionPayload.ASSIGN_TECHNICIAN ->
+                        KingdomResearchService.assignTechnician(
+                                player,
+                                commandCenter,
+                                payload.technicianId().orElseThrow(),
+                                payload.replayId(),
+                                payload.technologyRevision());
+                case ResearchActionPayload.CANCEL -> KingdomResearchService.cancel(
+                        player, commandCenter, payload.replayId(), payload.technologyRevision());
+                default -> { }
             }
         });
     }

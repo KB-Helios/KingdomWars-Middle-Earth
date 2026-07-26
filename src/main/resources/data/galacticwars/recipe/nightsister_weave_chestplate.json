@@ -1,1 +1,16 @@
-{"type":"minecraft:crafting_shaped","category":"equipment","pattern":["X X","XXX","XXX"],"key":{"X":"galacticwars:nightsister_weave"},"result":{"id":"galacticwars:nightsister_weave_chestplate","count":1}}
+{
+  "type": "galacticwars:fabrication",
+  "ingredients": [
+    {
+      "ingredient": "galacticwars:nightsister_weave",
+      "count": 8
+    }
+  ],
+  "result": {
+    "id": "galacticwars:nightsister_weave_chestplate",
+    "count": 1
+  },
+  "faction": "galacticwars:nightsister",
+  "technology": "galacticwars:weave_armor",
+  "exportable": false
+}

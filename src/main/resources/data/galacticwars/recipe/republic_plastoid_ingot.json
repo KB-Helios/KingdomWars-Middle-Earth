@@ -1,1 +1,24 @@
-{"type":"minecraft:crafting_shapeless","category":"misc","ingredients":["minecraft:iron_ingot","minecraft:charcoal","minecraft:quartz"],"result":{"id":"galacticwars:republic_plastoid_ingot","count":1}}
+{
+  "type": "galacticwars:fabrication",
+  "ingredients": [
+    {
+      "ingredient": "minecraft:iron_ingot",
+      "count": 1
+    },
+    {
+      "ingredient": "minecraft:charcoal",
+      "count": 1
+    },
+    {
+      "ingredient": "minecraft:quartz",
+      "count": 1
+    }
+  ],
+  "result": {
+    "id": "galacticwars:republic_plastoid_ingot",
+    "count": 1
+  },
+  "faction": "galacticwars:republic",
+  "technology": "galacticwars:plastoid_processing",
+  "exportable": false
+}

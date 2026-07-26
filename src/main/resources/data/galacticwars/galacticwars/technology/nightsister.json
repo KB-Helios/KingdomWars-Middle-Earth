@@ -1,0 +1,49 @@
+{
+  "faction": "galacticwars:nightsister",
+  "nodes": [
+    {
+      "id": "galacticwars:weave_processing",
+      "name": "Weave Processing",
+      "prerequisites": ["galacticwars:field_fabrication"],
+      "inputs": {"galacticwars:nightsister_weave_log": 16, "minecraft:string": 8},
+      "work": 1800,
+      "recipes": ["galacticwars:nightsister_weave"]
+    },
+    {
+      "id": "galacticwars:weave_armaments",
+      "name": "Weave Armaments",
+      "prerequisites": ["galacticwars:weave_processing"],
+      "inputs": {"galacticwars:nightsister_weave": 16, "galacticwars:energy_cell": 4},
+      "work": 3000,
+      "recipes": [
+        "galacticwars:nightsister_bow",
+        "galacticwars:nightsister_weave_sword",
+        "galacticwars:nightsister_weave_pickaxe",
+        "galacticwars:nightsister_weave_axe",
+        "galacticwars:nightsister_weave_shovel",
+        "galacticwars:nightsister_weave_hoe"
+      ]
+    },
+    {
+      "id": "galacticwars:weave_armor",
+      "name": "Weave Armor",
+      "prerequisites": ["galacticwars:weave_processing"],
+      "inputs": {"galacticwars:nightsister_weave": 32, "minecraft:leather": 8},
+      "work": 3600,
+      "recipes": [
+        "galacticwars:nightsister_weave_helmet",
+        "galacticwars:nightsister_weave_chestplate",
+        "galacticwars:nightsister_weave_leggings",
+        "galacticwars:nightsister_weave_boots"
+      ]
+    },
+    {
+      "id": "galacticwars:ritual_lore",
+      "name": "Ritual Lore",
+      "prerequisites": ["galacticwars:weave_armaments", "galacticwars:weave_armor"],
+      "inputs": {"galacticwars:nightsister_weave": 48, "minecraft:amethyst_shard": 16},
+      "work": 6000,
+      "recipes": []
+    }
+  ]
+}

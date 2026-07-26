@@ -127,6 +127,7 @@ public final class GameplayDataManager extends SimplePreparableReloadListener<Ga
             Map<String, OverworldFactionSpawnProfile> overworldSpawnProfiles =
                     prepared.getOverworldSpawnProfiles();
             LaunchContentDefinitions launchContent = prepared.getLaunchContent();
+            galacticwars.clonewars.technology.TechnologyCatalog technology = prepared.getTechnology();
             validateRelations(factions);
             LinkedHashMap<String, ArmyUnitId> byEntityType = new LinkedHashMap<>();
             for (ArmyUnitDefinition unit : units) {
@@ -238,7 +239,8 @@ public final class GameplayDataManager extends SimplePreparableReloadListener<Ga
                     unitClasses,
                     factionPolicies,
                     npcAiProfiles,
-                    launchContent);
+                    launchContent,
+                    technology);
             CoreContentBindings.validate(loaded);
             for (CoreContentBindings.VehicleBinding binding : CoreContentBindings.vehicles().values()) {
                 requireRegistered(BuiltInRegistries.ENTITY_TYPE, binding.entityTypeId(),
@@ -1141,7 +1143,8 @@ public final class GameplayDataManager extends SimplePreparableReloadListener<Ga
                 Map.of(),
                 Map.of(),
                 Map.of(),
-                LaunchContentDefinitions.empty());
+                LaunchContentDefinitions.empty(),
+                galacticwars.clonewars.technology.TechnologyCatalog.empty());
     }
 
     record LoadResult(Optional<GameplayDataSnapshot> snapshot, Optional<Throwable> failure) {

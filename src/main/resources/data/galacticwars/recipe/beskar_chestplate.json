@@ -1,1 +1,16 @@
-{"type":"minecraft:crafting_shaped","category":"equipment","pattern":["X X","XXX","XXX"],"key":{"X":"galacticwars:beskar_ingot"},"result":{"id":"galacticwars:beskar_chestplate","count":1}}
+{
+  "type": "galacticwars:fabrication",
+  "ingredients": [
+    {
+      "ingredient": "galacticwars:beskar_ingot",
+      "count": 8
+    }
+  ],
+  "result": {
+    "id": "galacticwars:beskar_chestplate",
+    "count": 1
+  },
+  "faction": "galacticwars:mandalorian",
+  "technology": "galacticwars:beskar_forge",
+  "exportable": false
+}

@@ -1,19 +1,24 @@
 {
-  "type": "minecraft:crafting_shaped",
-  "category": "equipment",
-  "group": "galacticwars:power_tools",
-  "pattern": [
-    " P ",
-    " E ",
-    " I "
+  "type": "galacticwars:fabrication",
+  "ingredients": [
+    {
+      "ingredient": "galacticwars:republic_plastoid_ingot",
+      "count": 1
+    },
+    {
+      "ingredient": "galacticwars:energy_cell",
+      "count": 1
+    },
+    {
+      "ingredient": "minecraft:iron_ingot",
+      "count": 1
+    }
   ],
-  "key": {
-    "P": "galacticwars:republic_plastoid_ingot",
-    "E": "galacticwars:energy_cell",
-    "I": "minecraft:iron_ingot"
-  },
   "result": {
     "id": "galacticwars:sonic_excavator",
     "count": 1
-  }
+  },
+  "faction": "galacticwars:universal",
+  "technology": "galacticwars:industrial_tooling",
+  "exportable": false
 }

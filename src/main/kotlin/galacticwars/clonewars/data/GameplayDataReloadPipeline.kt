@@ -12,6 +12,8 @@ import galacticwars.clonewars.faction.ai.NpcAiProfile
 import galacticwars.clonewars.settlement.KingdomBaseBlueprint
 import galacticwars.clonewars.world.CivilianArchetypeDefinition
 import galacticwars.clonewars.world.OverworldFactionSpawnProfile
+import galacticwars.clonewars.technology.TechnologyCatalog
+import galacticwars.clonewars.technology.TechnologyTreeLoader
 import java.io.IOException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -32,6 +34,7 @@ data class PreparedGameplayData(
     val civilianArchetypes: Map<String, CivilianArchetypeDefinition>,
     val overworldSpawnProfiles: Map<String, OverworldFactionSpawnProfile>,
     val launchContent: LaunchContentDefinitions,
+    val technology: TechnologyCatalog,
 )
 
 /**
@@ -60,6 +63,12 @@ object GameplayDataReloadPipeline {
                 }
                 val launchContent = async {
                     LaunchContentValidator.load(
+                        manager,
+                        factions.keys.mapTo(linkedSetOf()) { it.path() },
+                    )
+                }
+                val technology = async {
+                    TechnologyTreeLoader.load(
                         manager,
                         factions.keys.mapTo(linkedSetOf()) { it.path() },
                     )
@@ -96,6 +105,7 @@ object GameplayDataReloadPipeline {
                     civilianArchetypes = loadedCivilianArchetypes,
                     overworldSpawnProfiles = spawnProfiles.await(),
                     launchContent = launchContent.await(),
+                    technology = technology.await(),
                 )
             }
         }

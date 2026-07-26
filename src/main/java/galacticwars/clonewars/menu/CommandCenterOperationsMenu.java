@@ -99,6 +99,10 @@ public final class CommandCenterOperationsMenu extends AbstractContainerMenu {
     private CommandCenterDashboardState dashboardState;
     private int dashboardRevision;
 
+    public BlockPos hallPos() {
+        return hallPos;
+    }
+
     public CommandCenterOperationsMenu(int id, Inventory inventory, FriendlyByteBuf buffer) {
         this(id, inventory, buffer.readBlockPos(), CommandCenterDashboardCodec.read(buffer));
     }

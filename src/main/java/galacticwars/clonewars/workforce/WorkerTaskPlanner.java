@@ -30,6 +30,7 @@ public final class WorkerTaskPlanner {
             case COOK -> WorkerTaskType.COOK_FOOD;
             case MERCHANT -> WorkerTaskType.TRADE_GOODS;
             case COURIER -> WorkerTaskType.DELIVER_SUPPLIES;
+            case TECHNICIAN -> WorkerTaskType.RESEARCH_TECHNOLOGY;
         };
     }
 }

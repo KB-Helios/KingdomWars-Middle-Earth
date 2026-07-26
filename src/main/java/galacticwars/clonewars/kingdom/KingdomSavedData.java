@@ -33,6 +33,8 @@ import galacticwars.clonewars.workforce.CourierWaypoint;
 import galacticwars.clonewars.workforce.SettlementSupplyLedger;
 import galacticwars.clonewars.workforce.SupplyDemand;
 import galacticwars.clonewars.workforce.WorkforceCodecs;
+import galacticwars.clonewars.technology.KingdomTechnologyState;
+import galacticwars.clonewars.technology.TechnologyCodecs;
 import net.minecraft.core.BlockPos;
 import net.minecraft.resources.Identifier;
 import net.minecraft.server.level.ServerLevel;
@@ -40,7 +42,7 @@ import net.minecraft.world.level.saveddata.SavedData;
 import net.minecraft.world.level.saveddata.SavedDataType;
 
 public final class KingdomSavedData extends SavedData {
-    public static final int CURRENT_SCHEMA_VERSION = 9;
+    public static final int CURRENT_SCHEMA_VERSION = 10;
     public static final Codec<KingdomSavedData> CODEC = RecordCodecBuilder.create(instance -> instance.group(
             Codec.INT.optionalFieldOf("schema_version", CURRENT_SCHEMA_VERSION).forGetter(KingdomSavedData::schemaVersion),
             KingdomCodecs.KINGDOM_RECORD.listOf().optionalFieldOf("kingdoms", List.of()).forGetter(KingdomSavedData::kingdoms),
@@ -61,7 +63,10 @@ public final class KingdomSavedData extends SavedData {
                     .forGetter(KingdomSavedData::supplyLedgers),
             KingdomCodecs.STARTER_CAMP_DEPLOYMENT.listOf()
                     .optionalFieldOf("starter_camp_deployments", List.of())
-                    .forGetter(KingdomSavedData::starterCampDeployments)
+                    .forGetter(KingdomSavedData::starterCampDeployments),
+            TechnologyCodecs.KINGDOM_STATE.listOf()
+                    .optionalFieldOf("technology", List.of())
+                    .forGetter(KingdomSavedData::technologyStates)
     ).apply(instance, KingdomSavedData::new));
     public static final SavedDataType<KingdomSavedData> TYPE = new SavedDataType<>(
             Identifier.fromNamespaceAndPath(GalacticWars.MODID, "kingdoms"),
@@ -85,10 +90,11 @@ public final class KingdomSavedData extends SavedData {
     private final Map<UUID, DiplomacyProposal> proposalsById = new LinkedHashMap<>();
     private final Map<UUID, SettlementSupplyLedger> supplyLedgersBySettlement = new LinkedHashMap<>();
     private final Map<UUID, StarterCampDeployment> starterCampDeploymentsByKingdom = new LinkedHashMap<>();
+    private final Map<UUID, KingdomTechnologyState> technologyByKingdom = new LinkedHashMap<>();
 
     public KingdomSavedData() {
         this(CURRENT_SCHEMA_VERSION, List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(),
-                List.of(), List.of());
+                List.of(), List.of(), List.of());
     }
 
     private KingdomSavedData(
@@ -101,8 +107,10 @@ public final class KingdomSavedData extends SavedData {
             List<KingdomInvite> invites,
             List<DiplomacyProposal> proposals,
             List<SettlementSupplyLedger> supplyLedgers,
-            List<StarterCampDeployment> starterCampDeployments
+            List<StarterCampDeployment> starterCampDeployments,
+            List<KingdomTechnologyState> technologyStates
     ) {
+        boolean legacyTechnology = schemaVersion < 10;
         this.schemaVersion = SavedDataSchemaPolicy.migrate(
                 schemaVersion, CURRENT_SCHEMA_VERSION, "kingdom");
         for (KingdomRecord kingdom : kingdoms) {
@@ -158,6 +166,20 @@ public final class KingdomSavedData extends SavedData {
                 starterCampDeploymentsByKingdom.putIfAbsent(deployment.kingdomId(), deployment);
             }
         }
+        for (KingdomTechnologyState state : technologyStates) {
+            KingdomRecord kingdom = kingdomsById.get(state.kingdomId());
+            if (kingdom != null && kingdom.factionId().equals(state.factionId())) {
+                technologyByKingdom.putIfAbsent(state.kingdomId(), state);
+            }
+        }
+        if (legacyTechnology) {
+            kingdomsById.values().forEach(kingdom -> technologyByKingdom.putIfAbsent(
+                    kingdom.id(),
+                    KingdomTechnologyState.legacyPending(kingdom.id(), kingdom.factionId())));
+            if (!kingdomsById.isEmpty()) {
+                this.setDirty();
+            }
+        }
     }
 
     public static KingdomSavedData get(ServerLevel level) {
@@ -178,6 +200,37 @@ public final class KingdomSavedData extends SavedData {
 
     public List<StarterCampDeployment> starterCampDeployments() {
         return List.copyOf(starterCampDeploymentsByKingdom.values());
+    }
+
+    public List<KingdomTechnologyState> technologyStates() {
+        return List.copyOf(technologyByKingdom.values());
+    }
+
+    public Optional<KingdomTechnologyState> technologyState(UUID kingdomId) {
+        return Optional.ofNullable(technologyByKingdom.get(kingdomId));
+    }
+
+    public KingdomTechnologyState technologyStateOrDefault(UUID kingdomId) {
+        KingdomRecord kingdom = kingdomsById.get(kingdomId);
+        if (kingdom == null) {
+            throw new IllegalArgumentException("Unknown kingdom " + kingdomId);
+        }
+        return technologyByKingdom.getOrDefault(
+                kingdomId, KingdomTechnologyState.empty(kingdomId, kingdom.factionId()));
+    }
+
+    public boolean storeTechnologyState(KingdomTechnologyState state, int expectedRevision) {
+        Objects.requireNonNull(state, "state");
+        KingdomRecord kingdom = kingdomsById.get(state.kingdomId());
+        KingdomTechnologyState current = technologyByKingdom.get(state.kingdomId());
+        int currentRevision = current == null ? 0 : current.revision();
+        if (kingdom == null || !kingdom.factionId().equals(state.factionId())
+                || currentRevision != expectedRevision || state.revision() <= currentRevision) {
+            return false;
+        }
+        technologyByKingdom.put(state.kingdomId(), state);
+        this.setDirty();
+        return true;
     }
 
     public Optional<StarterCampDeployment> starterCampDeployment(UUID kingdomId) {

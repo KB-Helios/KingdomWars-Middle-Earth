@@ -1,1 +1,1 @@
-{"type":"minecraft:crafting_shapeless","category":"misc","ingredients":["minecraft:paper","galacticwars:credit_chip","galacticwars:republic_plastoid_ingot"],"result":{"id":"galacticwars:republic_identity_chip","count":1}}
+{"type":"minecraft:crafting_shapeless","category":"misc","ingredients":["minecraft:paper","galacticwars:credit_chip","minecraft:iron_ingot","minecraft:white_dye"],"result":{"id":"galacticwars:republic_identity_chip","count":1}}

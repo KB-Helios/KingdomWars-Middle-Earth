@@ -1,1 +1,24 @@
-{"type":"minecraft:crafting_shaped","category":"equipment","pattern":[" BI","BRB","I  "],"key":{"B":"galacticwars:beskar_ingot","I":"minecraft:iron_ingot","R":"minecraft:redstone"},"result":{"id":"galacticwars:vibroblade","count":1}}
+{
+  "type": "galacticwars:fabrication",
+  "ingredients": [
+    {
+      "ingredient": "galacticwars:beskar_ingot",
+      "count": 3
+    },
+    {
+      "ingredient": "minecraft:iron_ingot",
+      "count": 2
+    },
+    {
+      "ingredient": "minecraft:redstone",
+      "count": 1
+    }
+  ],
+  "result": {
+    "id": "galacticwars:vibroblade",
+    "count": 1
+  },
+  "faction": "galacticwars:hutt_cartel",
+  "technology": "galacticwars:mercenary_armaments",
+  "exportable": true
+}

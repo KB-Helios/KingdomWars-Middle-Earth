@@ -13,7 +13,8 @@ public enum WorkOrderType {
     BUILD,
     COOK,
     MERCHANT,
-    COURIER;
+    COURIER,
+    RESEARCH;
 
     public String id() {
         return name().toLowerCase(Locale.ROOT);
@@ -34,6 +35,7 @@ public enum WorkOrderType {
             case COOK -> WorkerProfession.COOK;
             case MERCHANT -> WorkerProfession.MERCHANT;
             case COURIER -> WorkerProfession.COURIER;
+            case RESEARCH -> WorkerProfession.TECHNICIAN;
         };
     }
 
@@ -48,6 +50,7 @@ public enum WorkOrderType {
             case COOK -> Optional.of(COOK);
             case MERCHANT -> Optional.of(MERCHANT);
             case COURIER -> Optional.of(COURIER);
+            case TECHNICIAN -> Optional.of(RESEARCH);
         };
     }
 }

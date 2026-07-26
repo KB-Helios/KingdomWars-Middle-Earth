@@ -68,6 +68,12 @@ public final class ForceShrineService {
         }
         ForceSavedData forceData = ForceSavedData.get(level);
         ForceRuntimeState before = forceData.state(player.getUUID());
+        if (payload.action() == ForceProgressionActionPayload.RITUAL) {
+            boolean accepted = ForceRitualService.perform(
+                    player, payload.shrinePos(), payload.subjectId()).accepted();
+            send(player, payload.shrinePos(), before);
+            return accepted;
+        }
         if (!before.traditionId().equals(shrine.traditionId())) {
             return fail(player, "wrong_force_shrine");
         }

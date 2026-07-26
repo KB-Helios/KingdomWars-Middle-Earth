@@ -49,6 +49,8 @@ public final class ModItems {
             registerBlockItem("nightsister_weave_sapling", ModBlocks.NIGHTSISTER_WEAVE_SAPLING);
     public static final RegistrySupplier<BlockItem> COMMAND_CENTER =
             registerBlockItem("command_center", ModBlocks.COMMAND_CENTER);
+    public static final RegistrySupplier<BlockItem> FABRICATOR =
+            registerBlockItem("fabricator", ModBlocks.FABRICATOR);
     public static final RegistrySupplier<BlockItem> CONTROL_BEACON =
             registerBlockItem("control_beacon", ModBlocks.CONTROL_BEACON);
     public static final RegistrySupplier<BlockItem> JEDI_MEDITATION_SHRINE =
