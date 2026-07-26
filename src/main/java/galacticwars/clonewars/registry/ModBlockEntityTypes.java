@@ -5,6 +5,8 @@ import dev.architectury.registry.registries.RegistrySupplier;
 import galacticwars.clonewars.GalacticWars;
 import galacticwars.clonewars.settlement.CommandCenterBlockEntity;
 import galacticwars.clonewars.world.BlueprintSiteAnchorBlockEntity;
+import galacticwars.clonewars.world.BlueprintSiteLootBlockEntity;
+import galacticwars.clonewars.world.FactionCommandPostBlockEntity;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.world.level.block.entity.BlockEntityType;
 
@@ -22,6 +24,14 @@ public final class ModBlockEntityTypes {
             BLOCK_ENTITY_TYPES.register("blueprint_site_anchor", () -> new BlockEntityType<>(
                     BlueprintSiteAnchorBlockEntity::new,
                     Set.of(ModBlocks.BLUEPRINT_SITE_ANCHOR.get())));
+    public static final RegistrySupplier<BlockEntityType<BlueprintSiteLootBlockEntity>> BLUEPRINT_SITE_LOOT =
+            BLOCK_ENTITY_TYPES.register("blueprint_site_loot", () -> new BlockEntityType<>(
+                    BlueprintSiteLootBlockEntity::new,
+                    Set.of(ModBlocks.BLUEPRINT_SITE_LOOT.get())));
+    public static final RegistrySupplier<BlockEntityType<FactionCommandPostBlockEntity>> FACTION_COMMAND_POST =
+            BLOCK_ENTITY_TYPES.register("faction_command_post", () -> new BlockEntityType<>(
+                    FactionCommandPostBlockEntity::new,
+                    Set.of(ModBlocks.FACTION_COMMAND_POST.get())));
 
     private ModBlockEntityTypes() {
     }

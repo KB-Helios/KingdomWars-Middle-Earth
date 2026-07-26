@@ -43,8 +43,10 @@ public final class PlanetDimensionCompletenessTest {
                 assertContains(dimension, "\"block\": \"galacticwars:"
                                 + contract.surfaceBlock() + "\"",
                         id + " authored surface material");
-                assertContains(dimension, "\"structure_overrides\": []",
-                        id + " structure isolation");
+                assertContains(dimension, "\"galacticwars:blueprint_sites\"",
+                        id + " outpost structure override");
+                assertContains(dimension, "\"galacticwars:commander_centers\"",
+                        id + " commander-center structure override");
             }
             assertContains(planetDefinitions, "\"id\":\"" + id + "\"", id + " definition");
             assertContains(dimensionType, "\"minecraft:visual/fog_color\"",

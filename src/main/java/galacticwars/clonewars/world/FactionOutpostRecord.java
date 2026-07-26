@@ -4,7 +4,9 @@ import galacticwars.clonewars.recruitment.NpcServiceBranch;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.UUID;
+import net.minecraft.core.BlockPos;
 
 public record FactionOutpostRecord(
         UUID id,
@@ -16,7 +18,9 @@ public record FactionOutpostRecord(
         int radius,
         List<UUID> militaryNpcIds,
         List<UUID> civilianNpcIds,
-        long lastActivityGameTime
+        long lastActivityGameTime,
+        BlueprintSiteKind siteKind,
+        Optional<BlockPos> commandPostPosition
 ) {
     public FactionOutpostRecord {
         Objects.requireNonNull(id, "id");
@@ -28,6 +32,27 @@ public record FactionOutpostRecord(
         if (militaryNpcIds.stream().anyMatch(civilianNpcIds::contains)) {
             throw new IllegalArgumentException("NPC cannot be both military and civilian");
         }
+        siteKind = Objects.requireNonNull(siteKind, "siteKind");
+        commandPostPosition = commandPostPosition == null ? Optional.empty() : commandPostPosition;
+        if ((siteKind == BlueprintSiteKind.COMMAND_CENTER) != commandPostPosition.isPresent()) {
+            throw new IllegalArgumentException("command center site kind and command post must be defined together");
+        }
+    }
+
+    public FactionOutpostRecord(
+            UUID id,
+            String factionId,
+            String dimensionId,
+            int x,
+            int y,
+            int z,
+            int radius,
+            List<UUID> militaryNpcIds,
+            List<UUID> civilianNpcIds,
+            long lastActivityGameTime
+    ) {
+        this(id, factionId, dimensionId, x, y, z, radius, militaryNpcIds, civilianNpcIds,
+                lastActivityGameTime, BlueprintSiteKind.OUTPOST, Optional.empty());
     }
 
     public static FactionOutpostRecord create(
@@ -56,14 +81,15 @@ public record FactionOutpostRecord(
         civilians.remove(npcId);
         (branch == NpcServiceBranch.MILITARY ? military : civilians).add(npcId);
         return new FactionOutpostRecord(id, factionId, dimensionId, x, y, z, radius,
-                List.copyOf(military), List.copyOf(civilians), gameTime);
+                List.copyOf(military), List.copyOf(civilians), gameTime, siteKind, commandPostPosition);
     }
 
     public FactionOutpostRecord withoutNpc(UUID npcId, long gameTime) {
         if (!contains(npcId)) return this;
         return new FactionOutpostRecord(id, factionId, dimensionId, x, y, z, radius,
                 militaryNpcIds.stream().filter(existingNpcId -> !existingNpcId.equals(npcId)).toList(),
-                civilianNpcIds.stream().filter(existingNpcId -> !existingNpcId.equals(npcId)).toList(), gameTime);
+                civilianNpcIds.stream().filter(existingNpcId -> !existingNpcId.equals(npcId)).toList(), gameTime,
+                siteKind, commandPostPosition);
     }
 
     public FactionOutpostRecord relocatedTo(int targetX, int targetY, int targetZ, long gameTime) {
@@ -80,7 +106,10 @@ public record FactionOutpostRecord(
                 radius,
                 militaryNpcIds,
                 civilianNpcIds,
-                Math.max(lastActivityGameTime, gameTime));
+                Math.max(lastActivityGameTime, gameTime),
+                siteKind,
+                commandPostPosition.map(position -> position.offset(
+                        targetX - x, targetY - y, targetZ - z)));
     }
 
     private static String required(String value, String label) {

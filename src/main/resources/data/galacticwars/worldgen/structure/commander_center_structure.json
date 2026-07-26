@@ -1,0 +1,8 @@
+{
+  "type": "galacticwars:blueprint_structure",
+  "site_kind": "command_center",
+  "biomes": "#galacticwars:has_structure/blueprint_structure",
+  "step": "surface_structures",
+  "spawn_overrides": {},
+  "terrain_adaptation": "beard_thin"
+}

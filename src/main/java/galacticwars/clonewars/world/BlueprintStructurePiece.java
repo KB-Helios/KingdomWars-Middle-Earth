@@ -69,14 +69,37 @@ public final class BlueprintStructurePiece extends TemplateStructurePiece {
             String marker, BlockPos pos, ServerLevelAccessor level, RandomSource random, BoundingBox box
     ) {
         if (marker.equals("site_anchor")) {
-            level.setBlock(pos, ModBlocks.BLUEPRINT_SITE_ANCHOR.get().defaultBlockState(), 2);
-            if (level.getBlockEntity(pos) instanceof BlueprintSiteAnchorBlockEntity anchor) {
-                anchor.configure(blueprintId, rotationSteps, contentHash);
+            var state = ModBlocks.BLUEPRINT_SITE_ANCHOR.get().defaultBlockState();
+            level.setBlock(pos, state, 2);
+            BlueprintSiteAnchorBlockEntity anchor =
+                    level.getBlockEntity(pos) instanceof BlueprintSiteAnchorBlockEntity existing
+                            ? existing
+                            : new BlueprintSiteAnchorBlockEntity(pos, state);
+            if (level.getBlockEntity(pos) != anchor) {
+                level.getChunk(pos).setBlockEntity(anchor);
             }
+            anchor.configure(blueprintId, rotationSteps, contentHash);
             return;
         }
         if (marker.startsWith("loot:")) {
-            level.setBlock(pos, ModBlocks.BLUEPRINT_SITE_LOOT.get().defaultBlockState(), 2);
+            var state = ModBlocks.BLUEPRINT_SITE_LOOT.get().defaultBlockState();
+            level.setBlock(pos, state, 2);
+            BlueprintSiteLootBlockEntity loot =
+                    level.getBlockEntity(pos) instanceof BlueprintSiteLootBlockEntity existing
+                            ? existing
+                            : new BlueprintSiteLootBlockEntity(pos, state);
+            if (level.getBlockEntity(pos) != loot) {
+                level.getChunk(pos).setBlockEntity(loot);
+            }
+            loot.configure(marker.substring("loot:".length()));
+            return;
+        }
+        if (marker.equals("command_post")) {
+            var state = ModBlocks.FACTION_COMMAND_POST.get().defaultBlockState();
+            level.setBlock(pos, state, 2);
+            if (!(level.getBlockEntity(pos) instanceof FactionCommandPostBlockEntity)) {
+                level.getChunk(pos).setBlockEntity(new FactionCommandPostBlockEntity(pos, state));
+            }
             return;
         }
         level.setBlock(pos, Blocks.AIR.defaultBlockState(), 2);

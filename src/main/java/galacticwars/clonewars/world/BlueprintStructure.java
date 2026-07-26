@@ -1,7 +1,9 @@
 package galacticwars.clonewars.world;
 
 import com.mojang.serialization.MapCodec;
+import com.mojang.serialization.codecs.RecordCodecBuilder;
 import galacticwars.clonewars.data.GameplayDataManager;
+import galacticwars.clonewars.data.LaunchContentDefinitions;
 import galacticwars.clonewars.registry.ModWorldgenTypes;
 import galacticwars.clonewars.settlement.BaseBlockPlacement;
 import galacticwars.clonewars.settlement.KingdomBaseBlueprint;
@@ -18,10 +20,22 @@ import net.minecraft.world.level.levelgen.structure.StructureType;
 
 /** One sparse structure type selecting a data-defined faction template for the local biome. */
 public final class BlueprintStructure extends Structure {
-    public static final MapCodec<BlueprintStructure> CODEC = simpleCodec(BlueprintStructure::new);
+    private static final int PLANET_POI_EXCLUSION_RADIUS = 160;
+    public static final MapCodec<BlueprintStructure> CODEC = RecordCodecBuilder.mapCodec(instance ->
+            instance.group(
+                    settingsCodec(instance),
+                    BlueprintSiteKind.CODEC.fieldOf("site_kind").forGetter(BlueprintStructure::siteKind)
+            ).apply(instance, BlueprintStructure::new));
 
-    public BlueprintStructure(StructureSettings settings) {
+    private final BlueprintSiteKind siteKind;
+
+    public BlueprintStructure(StructureSettings settings, BlueprintSiteKind siteKind) {
         super(settings);
+        this.siteKind = java.util.Objects.requireNonNull(siteKind, "siteKind");
+    }
+
+    public BlueprintSiteKind siteKind() {
+        return siteKind;
     }
 
     @Override
@@ -33,7 +47,10 @@ public final class BlueprintStructure extends Structure {
         Holder<?> biome = context.biomeSource().getNoiseBiome(QuartPos.fromBlock(x), QuartPos.fromBlock(y),
                 QuartPos.fromBlock(z), context.randomState().sampler());
         String biomeId = biome.unwrapKey().map(key -> key.identifier().toString()).orElse("");
-        List<KingdomBaseBlueprint> eligible = eligibleBlueprintsForBiome(y, biomeId);
+        if (nearProtectedPlanetPoi(biomeId, x, z)) {
+            return Optional.empty();
+        }
+        List<KingdomBaseBlueprint> eligible = eligibleBlueprintsForBiome(y, biomeId, siteKind);
         if (eligible.isEmpty()) {
             return Optional.empty();
         }
@@ -51,14 +68,39 @@ public final class BlueprintStructure extends Structure {
                 new BlueprintStructurePiece(context.structureTemplateManager(), selected, rotationSteps, position))));
     }
 
-    private static List<KingdomBaseBlueprint> eligibleBlueprintsForBiome(int y, String biomeId) {
+    static List<KingdomBaseBlueprint> eligibleBlueprintsForBiome(
+            int y, String biomeId, BlueprintSiteKind siteKind
+    ) {
         return GameplayDataManager.snapshot().blueprints().values().stream()
                 .filter(blueprint -> blueprint.worldgen().isPresent())
                 .filter(blueprint -> blueprint.worldgen().orElseThrow().biomes().contains(biomeId))
+                .filter(blueprint -> blueprint.worldgen().orElseThrow().siteKind() == siteKind)
                 .filter(blueprint -> y >= blueprint.terrainConstraints().minY()
                         && y <= blueprint.terrainConstraints().maxY())
                 .sorted(Comparator.comparing(KingdomBaseBlueprint::id))
                 .toList();
+    }
+
+    static boolean nearProtectedPlanetPoi(String biomeId, int x, int z) {
+        if (!biomeId.startsWith("galacticwars:")) {
+            return false;
+        }
+        String planetId = biomeId.substring(biomeId.indexOf(':') + 1);
+        LaunchContentDefinitions.PlanetDefinition planet =
+                GameplayDataManager.snapshot().launchContent().planets().get(planetId);
+        if (planet == null) {
+            return false;
+        }
+        long limit = (long) PLANET_POI_EXCLUSION_RADIUS * PLANET_POI_EXCLUSION_RADIUS;
+        return planet.pointsOfInterest().stream()
+                .filter(poi -> poi.role().equals("arrival")
+                        || poi.role().equals("economy")
+                        || poi.role().equals("contested"))
+                .anyMatch(poi -> {
+                    long dx = (long) poi.x() - x;
+                    long dz = (long) poi.z() - z;
+                    return dx * dx + dz * dz < limit;
+                });
     }
 
     private static KingdomBaseBlueprint pickByWeight(

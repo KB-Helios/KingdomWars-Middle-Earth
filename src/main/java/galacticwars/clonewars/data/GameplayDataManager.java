@@ -54,6 +54,7 @@ import galacticwars.clonewars.settlement.BlueprintRosterEntry;
 import galacticwars.clonewars.settlement.BlueprintTerrainConstraints;
 import galacticwars.clonewars.settlement.BlueprintWorldgenProfile;
 import galacticwars.clonewars.settlement.KingdomBaseBlueprint;
+import galacticwars.clonewars.world.BlueprintSiteKind;
 import galacticwars.clonewars.world.OverworldFactionSpawnProfile;
 import galacticwars.clonewars.world.CivilianArchetypeDefinition;
 import net.minecraft.core.Registry;
@@ -604,12 +605,14 @@ public final class GameplayDataManager extends SimplePreparableReloadListener<Ga
         for (ResourceJson resource : resources(manager, "galacticwars/blueprints")) {
             KingdomBaseBlueprint blueprint = parseBlueprint(manager, resource.id(), resource.json());
             blueprint.worldgen().ifPresent(profile -> {
-                String factionPath = profile.factionId().substring(profile.factionId().indexOf(':') + 1);
-                Identifier lootResource = Identifier.fromNamespaceAndPath(GalacticWars.MODID,
-                        "loot_table/chests/faction_site/" + factionPath + ".json");
-                if (manager.getResource(lootResource).isEmpty()) {
-                    throw new IllegalArgumentException("Blueprint " + blueprint.id()
-                            + " references missing faction site loot table " + lootResource);
+                for (String tableId : profile.lootTables().values()) {
+                    Identifier id = Identifier.parse(tableId);
+                    Identifier lootResource = Identifier.fromNamespaceAndPath(
+                            id.getNamespace(), "loot_table/" + id.getPath() + ".json");
+                    if (manager.getResource(lootResource).isEmpty()) {
+                        throw new IllegalArgumentException("Blueprint " + blueprint.id()
+                                + " references missing faction site loot table " + lootResource);
+                    }
                 }
             });
             if (blueprints.putIfAbsent(blueprint.id(), blueprint) != null) {
@@ -724,7 +727,7 @@ public final class GameplayDataManager extends SimplePreparableReloadListener<Ga
 
     static KingdomBaseBlueprint parseBlueprint(ResourceManager manager, Identifier resourceId, JsonObject json) {
         int schema = integer(json, "schema_version", -1);
-        if (schema != 1 && schema != 2) {
+        if (schema != 1 && schema != 2 && schema != 3) {
             throw new IllegalArgumentException("Unsupported blueprint schema in " + resourceId);
         }
         String id = GameplayDataSnapshot.normalizeBlueprintId(requiredString(json, "id", resourceId));
@@ -742,31 +745,40 @@ public final class GameplayDataManager extends SimplePreparableReloadListener<Ga
         for (JsonElement element : rotationJson) {
             allowedRotations.add(element.getAsInt());
         }
-        String templateId = schema == 2 ? requiredString(json, "template", resourceId) : "";
-        TemplateContents template = schema == 2
+        String templateId = schema >= 2 ? requiredString(json, "template", resourceId) : "";
+        TemplateContents template = schema >= 2
                 ? loadTemplate(Objects.requireNonNull(manager, "resource manager for schema v2"), templateId, resourceId)
                 : null;
-        ArrayList<BaseBlockPlacement> placements = schema == 2
+        ArrayList<BaseBlockPlacement> placements = schema >= 2
                 ? new ArrayList<>(template.placements())
                 : parseInlinePlacements(requiredArray(json, "placements", resourceId), resourceId);
         JsonObject rewards = object(json, "rewards", new JsonObject());
-        Set<BlueprintMode> modes = schema == 2 ? parseModes(json, resourceId) : Set.of(BlueprintMode.CONSTRUCTION);
+        Set<BlueprintMode> modes = schema >= 2 ? parseModes(json, resourceId) : Set.of(BlueprintMode.CONSTRUCTION);
         JsonObject terrain = object(json, "terrain", new JsonObject());
         BlueprintTerrainConstraints constraints = new BlueprintTerrainConstraints(
                 integer(terrain, "max_slope", 4), integer(terrain, "min_y", -64), integer(terrain, "max_y", 320));
         JsonObject construction = object(json, "construction", new JsonObject());
-        Map<String, Integer> costs = schema == 2 && construction.has("costs")
+        Map<String, Integer> costs = schema >= 2 && construction.has("costs")
                 ? integerMap(construction, "costs", resourceId) : Map.of();
         Optional<BlueprintWorldgenProfile> worldgen = modes.contains(BlueprintMode.WORLDGEN)
-                ? Optional.of(parseWorldgen(requiredObject(json, "worldgen", resourceId), resourceId))
+                ? Optional.of(parseWorldgen(
+                        requiredObject(json, "worldgen", resourceId), resourceId, schema))
                 : Optional.empty();
-        if (schema == 2 && modes.contains(BlueprintMode.WORLDGEN) && template.siteAnchorCount() != 1) {
+        if (schema >= 2 && modes.contains(BlueprintMode.WORLDGEN) && template.siteAnchorCount() != 1) {
             throw new IllegalArgumentException("Worldgen blueprint " + id
                     + " template must contain exactly one site_anchor marker");
         }
-        if (schema == 2 && worldgen.isPresent()
+        if (schema >= 2 && worldgen.isPresent()
                 && !template.lootMarkers().equals(Set.copyOf(worldgen.orElseThrow().lootMarkers()))) {
             throw new IllegalArgumentException("Loot markers do not match template contents for " + id);
+        }
+        if (schema >= 3 && worldgen.isPresent()) {
+            BlueprintSiteKind siteKind = worldgen.orElseThrow().siteKind();
+            int expectedCommandPosts = siteKind == BlueprintSiteKind.COMMAND_CENTER ? 1 : 0;
+            if (template.commandPostCount() != expectedCommandPosts) {
+                throw new IllegalArgumentException("Worldgen blueprint " + id + " requires "
+                        + expectedCommandPosts + " command_post markers");
+            }
         }
         if (!costs.isEmpty()) {
             Map<String, Integer> derived = new java.util.TreeMap<>();
@@ -791,7 +803,8 @@ public final class GameplayDataManager extends SimplePreparableReloadListener<Ga
                 constraints,
                 costs,
                 worldgen,
-                stringSet(json, "compatible_definition_hashes"));
+                stringSet(json, "compatible_definition_hashes"),
+                stringSet(json, "compatible_content_hashes"));
     }
 
     private static ArrayList<BaseBlockPlacement> parseInlinePlacements(JsonArray placementJson, Identifier resourceId) {
@@ -817,7 +830,9 @@ public final class GameplayDataManager extends SimplePreparableReloadListener<Ga
         return Set.copyOf(modes);
     }
 
-    private static BlueprintWorldgenProfile parseWorldgen(JsonObject json, Identifier resourceId) {
+    private static BlueprintWorldgenProfile parseWorldgen(
+            JsonObject json, Identifier resourceId, int schema
+    ) {
         ArrayList<BlueprintRosterEntry> roster = new ArrayList<>();
         for (JsonElement element : requiredArray(json, "roster", resourceId)) {
             JsonObject entry = element.getAsJsonObject();
@@ -826,8 +841,22 @@ public final class GameplayDataManager extends SimplePreparableReloadListener<Ga
                     string(entry, "service_branch", "military"),
                     string(entry, "role", "")));
         }
-        return new BlueprintWorldgenProfile(strings(json, "biomes"), requiredString(json, "faction", resourceId),
-                integer(json, "site_radius", 32), roster, strings(json, "loot_markers"),
+        if (schema < 3) {
+            return new BlueprintWorldgenProfile(
+                    strings(json, "biomes"),
+                    requiredString(json, "faction", resourceId),
+                    integer(json, "site_radius", 32),
+                    roster,
+                    strings(json, "loot_markers"),
+                    integer(json, "placement_weight", 1));
+        }
+        return new BlueprintWorldgenProfile(
+                strings(json, "biomes"),
+                requiredString(json, "faction", resourceId),
+                BlueprintSiteKind.byId(requiredString(json, "site_kind", resourceId)),
+                integer(json, "site_radius", 32),
+                roster,
+                stringMap(json, "loot_tables", resourceId),
                 integer(json, "placement_weight", 1));
     }
 
@@ -849,6 +878,7 @@ public final class GameplayDataManager extends SimplePreparableReloadListener<Ga
             ArrayList<BaseBlockPlacement> placements = new ArrayList<>();
             HashSet<String> occupiedPositions = new HashSet<>();
             int siteAnchors = 0;
+            int commandPosts = 0;
             LinkedHashSet<String> lootMarkers = new LinkedHashSet<>();
             for (int index = 0; index < blocks.size(); index++) {
                 CompoundTag block = blocks.getCompoundOrEmpty(index);
@@ -876,6 +906,7 @@ public final class GameplayDataManager extends SimplePreparableReloadListener<Ga
                 if (blockId.equals("minecraft:structure_block")) {
                     String marker = block.getCompoundOrEmpty("nbt").getStringOr("metadata", "");
                     siteAnchors += marker.equals("site_anchor") ? 1 : 0;
+                    commandPosts += marker.equals("command_post") ? 1 : 0;
                     if (marker.startsWith("loot:")) {
                         String lootMarker = marker.substring("loot:".length());
                         if (lootMarker.isBlank() || !lootMarkers.add(lootMarker)) {
@@ -895,7 +926,8 @@ public final class GameplayDataManager extends SimplePreparableReloadListener<Ga
                 requireRegistered(BuiltInRegistries.ENTITY_TYPE, entityId,
                         "template entity for " + templateId);
             }
-            return new TemplateContents(List.copyOf(placements), siteAnchors, Set.copyOf(lootMarkers));
+            return new TemplateContents(
+                    List.copyOf(placements), siteAnchors, commandPosts, Set.copyOf(lootMarkers));
         } catch (IOException exception) {
             throw new IllegalArgumentException("Could not read template " + templateId, exception);
         }
@@ -904,6 +936,7 @@ public final class GameplayDataManager extends SimplePreparableReloadListener<Ga
     private record TemplateContents(
             List<BaseBlockPlacement> placements,
             int siteAnchorCount,
+            int commandPostCount,
             Set<String> lootMarkers
     ) {
     }
@@ -1002,6 +1035,23 @@ public final class GameplayDataManager extends SimplePreparableReloadListener<Ga
         LinkedHashMap<String, Integer> values = new LinkedHashMap<>();
         for (Map.Entry<String, JsonElement> entry : object.entrySet()) {
             values.put(entry.getKey(), entry.getValue().getAsInt());
+        }
+        return Map.copyOf(values);
+    }
+
+    private static Map<String, String> stringMap(
+            JsonObject json,
+            String key,
+            Identifier resourceId
+    ) {
+        JsonObject object = requiredObject(json, key, resourceId);
+        LinkedHashMap<String, String> values = new LinkedHashMap<>();
+        for (Map.Entry<String, JsonElement> entry : object.entrySet()) {
+            if (!entry.getValue().isJsonPrimitive() || entry.getValue().getAsString().isBlank()) {
+                throw new IllegalArgumentException(
+                        "Resource " + resourceId + " has invalid string map " + key);
+            }
+            values.put(entry.getKey(), entry.getValue().getAsString());
         }
         return Map.copyOf(values);
     }
