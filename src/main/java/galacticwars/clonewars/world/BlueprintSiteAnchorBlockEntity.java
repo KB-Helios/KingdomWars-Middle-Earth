@@ -87,6 +87,7 @@ public final class BlueprintSiteAnchorBlockEntity extends BlockEntity {
         UUID siteId = computeSiteId(level, pos);
         Optional<BlockPos> commandPost = findCommandPost(level, pos);
         if ((profile.siteKind() == BlueprintSiteKind.COMMAND_CENTER) != commandPost.isPresent()) {
+            markInvalid();
             return;
         }
 
@@ -101,7 +102,15 @@ public final class BlueprintSiteAnchorBlockEntity extends BlockEntity {
                 profile.siteKind(), commandPost);
         boolean commandPostReady = configureCommandPost(
                 level, commandPost, siteId, profile.factionId());
+        if (!commandPostReady) {
+            markInvalid();
+            return;
+        }
         boolean lootReady = initializeLoot(level, pos, profile.lootTables(), siteId);
+        if (!lootReady) {
+            markInvalid();
+            return;
+        }
         boolean residentsReady = spawnResidents(
                 level, pos, profile.siteRadius(), siteId, plan.residents());
         if (commandPostReady && lootReady && residentsReady) {
@@ -224,6 +233,11 @@ public final class BlueprintSiteAnchorBlockEntity extends BlockEntity {
     ) {
         ResourceKey<LootTable> loot = ResourceKey.create(
                 Registries.LOOT_TABLE, Identifier.parse(tableId));
+        BlockEntity existing = level.getBlockEntity(target);
+        if (existing instanceof RandomizableContainerBlockEntity container
+                && container.getLootTable() != null) {
+            return container.getLootTable().identifier().toString().equals(tableId);
+        }
         level.setBlock(target, Blocks.CHEST.defaultBlockState(), 3);
         if (!(level.getBlockEntity(target) instanceof RandomizableContainerBlockEntity container)) {
             return false;

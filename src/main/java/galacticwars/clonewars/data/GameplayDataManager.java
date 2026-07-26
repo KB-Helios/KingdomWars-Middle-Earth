@@ -1047,7 +1047,7 @@ public final class GameplayDataManager extends SimplePreparableReloadListener<Ga
         JsonObject object = requiredObject(json, key, resourceId);
         LinkedHashMap<String, String> values = new LinkedHashMap<>();
         for (Map.Entry<String, JsonElement> entry : object.entrySet()) {
-            if (!entry.getValue().isJsonPrimitive() || entry.getValue().getAsString().isBlank()) {
+            if (!entry.getValue().isJsonPrimitive() || !entry.getValue().getAsJsonPrimitive().isString() || entry.getValue().getAsString().isBlank()) {
                 throw new IllegalArgumentException(
                         "Resource " + resourceId + " has invalid string map " + key);
             }
