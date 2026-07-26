@@ -37,7 +37,8 @@ public record KingdomBaseBlueprint(
         BlueprintTerrainConstraints terrainConstraints,
         Map<String, Integer> constructionCostOverrides,
         Optional<BlueprintWorldgenProfile> worldgen,
-        Set<String> compatibleDefinitionHashes
+        Set<String> compatibleDefinitionHashes,
+        Set<String> compatibleContentHashes
 ) {
     public static final String DEFAULT_NAMESPACE = "galacticwars";
     public static final String STARTER_CAMP_ID = DEFAULT_NAMESPACE + ":starter_camp";
@@ -61,6 +62,7 @@ public record KingdomBaseBlueprint(
         constructionCostOverrides = normalizeCostOverrides(constructionCostOverrides);
         worldgen = Objects.requireNonNull(worldgen, "worldgen");
         compatibleDefinitionHashes = normalizeCompatibleHashes(compatibleDefinitionHashes);
+        compatibleContentHashes = normalizeCompatibleHashes(compatibleContentHashes);
         validateWorldgenConfiguration(templateId, modes, worldgen);
     }
 
@@ -78,7 +80,7 @@ public record KingdomBaseBlueprint(
     ) {
         this(id, displayName, anchor, allowedRotations, placements, housingReward, storageSlotReward,
                 worksiteType, worksiteCapacity, commanderSlotReward, "", Set.of(BlueprintMode.CONSTRUCTION),
-                BlueprintTerrainConstraints.DEFAULT, Map.of(), Optional.empty(), Set.of());
+                BlueprintTerrainConstraints.DEFAULT, Map.of(), Optional.empty(), Set.of(), Set.of());
     }
 
     public KingdomBaseBlueprint(
@@ -251,6 +253,10 @@ public record KingdomBaseBlueprint(
         return definitionHash().equals(hash) || compatibleDefinitionHashes.contains(hash);
     }
 
+    public boolean matchesContentHash(String hash) {
+        return contentHash().equals(hash) || compatibleContentHashes.contains(hash);
+    }
+
     /** Hashes the complete descriptor and parsed template contents for persisted worldgen pieces. */
     public String contentHash() {
         try {
@@ -283,6 +289,7 @@ public record KingdomBaseBlueprint(
             worldgen.ifPresent(profile -> {
                 profile.biomes().stream().sorted().forEach(value -> update(digest, value));
                 update(digest, profile.factionId());
+                update(digest, profile.siteKind().id());
                 update(digest, profile.siteRadius());
                 for (BlueprintRosterEntry entry : profile.roster()) {
                     update(digest, entry.entityTypeId());
@@ -292,7 +299,10 @@ public record KingdomBaseBlueprint(
                     update(digest, entry.serviceBranch());
                     update(digest, entry.role());
                 }
-                profile.lootMarkers().stream().sorted().forEach(value -> update(digest, value));
+                new TreeMap<>(profile.lootTables()).forEach((marker, table) -> {
+                    update(digest, marker);
+                    update(digest, table);
+                });
                 update(digest, profile.placementWeight());
             });
             return HexFormat.of().formatHex(digest.digest());

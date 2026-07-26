@@ -1,0 +1,7 @@
+{
+  "variants": {
+    "": {
+      "model": "galacticwars:block/faction_command_post"
+    }
+  }
+}

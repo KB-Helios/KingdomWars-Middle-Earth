@@ -8,6 +8,8 @@ import galacticwars.clonewars.settlement.CommandCenterBlock;
 import galacticwars.clonewars.world.NightsisterWeaveTreeGrower;
 import galacticwars.clonewars.world.PlayerTriggeredSaplingBlock;
 import galacticwars.clonewars.world.BlueprintSiteAnchorBlock;
+import galacticwars.clonewars.world.BlueprintSiteLootBlock;
+import galacticwars.clonewars.world.FactionCommandPostBlock;
 import net.minecraft.core.particles.ParticleTypes;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.resources.Identifier;
@@ -62,9 +64,13 @@ public final class ModBlocks {
     public static final RegistrySupplier<BlueprintSiteAnchorBlock> BLUEPRINT_SITE_ANCHOR = register(
             "blueprint_site_anchor", properties -> new BlueprintSiteAnchorBlock(properties
                     .mapColor(MapColor.NONE).strength(-1.0F, 3_600_000.0F).noOcclusion()));
-    public static final RegistrySupplier<Block> BLUEPRINT_SITE_LOOT = registerSimple(
-            "blueprint_site_loot", properties -> properties
-                    .mapColor(MapColor.NONE).strength(-1.0F, 3_600_000.0F).noOcclusion());
+    public static final RegistrySupplier<BlueprintSiteLootBlock> BLUEPRINT_SITE_LOOT = register(
+            "blueprint_site_loot", properties -> new BlueprintSiteLootBlock(properties
+                    .mapColor(MapColor.NONE).strength(-1.0F, 3_600_000.0F).noOcclusion()));
+    public static final RegistrySupplier<FactionCommandPostBlock> FACTION_COMMAND_POST = register(
+            "faction_command_post", properties -> new FactionCommandPostBlock(properties
+                    .mapColor(MapColor.METAL).strength(-1.0F, 3_600_000.0F)
+                    .lightLevel(state -> 6).sound(SoundType.METAL)));
     public static final RegistrySupplier<ForceShrineBlock> JEDI_MEDITATION_SHRINE = register(
             "jedi_meditation_shrine", properties -> new ForceShrineBlock("jedi", properties
                     .mapColor(MapColor.STONE).strength(3.5F, 12.0F).lightLevel(state -> 8)

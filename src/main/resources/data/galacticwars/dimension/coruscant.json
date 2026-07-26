@@ -6,7 +6,10 @@
       "biome": "galacticwars:coruscant",
       "features": true,
       "lakes": false,
-      "structure_overrides": [],
+      "structure_overrides": [
+        "galacticwars:blueprint_sites",
+        "galacticwars:commander_centers"
+      ],
       "layers": [
         {"height": 1, "block": "minecraft:bedrock"},
         {"height": 100, "block": "minecraft:stone"},

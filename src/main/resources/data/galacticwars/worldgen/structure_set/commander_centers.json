@@ -1,0 +1,11 @@
+{
+  "structures": [
+    { "structure": "galacticwars:commander_center_structure", "weight": 1 }
+  ],
+  "placement": {
+    "type": "minecraft:random_spread",
+    "salt": 194762079,
+    "spacing": 96,
+    "separation": 32
+  }
+}

@@ -5,11 +5,11 @@ import com.mojang.serialization.codecs.RecordCodecBuilder;
 import galacticwars.clonewars.GalacticWars;
 import galacticwars.clonewars.recruitment.NpcServiceBranch;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
-import java.util.LinkedHashSet;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.UUIDUtil;
 import net.minecraft.resources.Identifier;
@@ -18,7 +18,7 @@ import net.minecraft.world.level.saveddata.SavedData;
 import net.minecraft.world.level.saveddata.SavedDataType;
 
 public final class FactionOutpostSavedData extends SavedData {
-    public static final int SCHEMA_VERSION = 3;
+    public static final int SCHEMA_VERSION = 4;
     public static final int MAX_PERSISTED_ALERTS = 256;
     private static final Codec<FactionOutpostRecord> OUTPOST_CODEC = RecordCodecBuilder.create(instance -> instance.group(
             UUIDUtil.CODEC.fieldOf("id").forGetter(FactionOutpostRecord::id),
@@ -32,7 +32,11 @@ public final class FactionOutpostSavedData extends SavedData {
                     .forGetter(FactionOutpostRecord::militaryNpcIds),
             UUIDUtil.CODEC.listOf().optionalFieldOf("civilian_npcs", List.of())
                     .forGetter(FactionOutpostRecord::civilianNpcIds),
-            Codec.LONG.optionalFieldOf("last_activity", 0L).forGetter(FactionOutpostRecord::lastActivityGameTime)
+            Codec.LONG.optionalFieldOf("last_activity", 0L).forGetter(FactionOutpostRecord::lastActivityGameTime),
+            BlueprintSiteKind.CODEC.optionalFieldOf("site_kind", BlueprintSiteKind.OUTPOST)
+                    .forGetter(FactionOutpostRecord::siteKind),
+            BlockPos.CODEC.optionalFieldOf("command_post")
+                    .forGetter(FactionOutpostRecord::commandPostPosition)
     ).apply(instance, FactionOutpostRecord::new));
 
     private static final Codec<FactionOutpostSiteProgress> SITE_PROGRESS_CODEC =
@@ -299,15 +303,74 @@ public final class FactionOutpostSavedData extends SavedData {
             List<UUID> civilianNpcIds,
             long gameTime
     ) {
+        FactionOutpostRecord outpost = publishGeneratedSiteRecord(
+                id, factionId, dimensionId, position, radius, militaryNpcIds, civilianNpcIds,
+                gameTime, BlueprintSiteKind.OUTPOST, Optional.empty());
+        markSiteGenerated(id);
+        return outpost;
+    }
+
+    public FactionOutpostRecord registerGeneratedSite(
+            UUID id,
+            String factionId,
+            String dimensionId,
+            BlockPos position,
+            int radius,
+            List<UUID> militaryNpcIds,
+            List<UUID> civilianNpcIds,
+            long gameTime,
+            BlueprintSiteKind siteKind,
+            Optional<BlockPos> commandPostPosition
+    ) {
+        FactionOutpostRecord outpost = publishGeneratedSiteRecord(
+                id, factionId, dimensionId, position, radius, militaryNpcIds, civilianNpcIds,
+                gameTime, siteKind, commandPostPosition);
+        markSiteGenerated(id);
+        return outpost;
+    }
+
+    /**
+     * Publishes deterministic generated-site identity without marking initialization complete.
+     * Callers can safely replay residents, command posts, and containers before
+     * {@link #markSiteGenerated(UUID)} seals the transaction.
+     */
+    public FactionOutpostRecord publishGeneratedSiteRecord(
+            UUID id,
+            String factionId,
+            String dimensionId,
+            BlockPos position,
+            int radius,
+            List<UUID> militaryNpcIds,
+            List<UUID> civilianNpcIds,
+            long gameTime,
+            BlueprintSiteKind siteKind,
+            Optional<BlockPos> commandPostPosition
+    ) {
         FactionOutpostRecord existing = outpostsById.get(id);
         if (existing != null) {
-            return existing;
+            if (!existing.factionId().equals(factionId)
+                    || !existing.dimensionId().equals(dimensionId)
+                    || existing.x() != position.getX()
+                    || existing.y() != position.getY()
+                    || existing.z() != position.getZ()) {
+                return existing;
+            }
+            FactionOutpostRecord reconciled = new FactionOutpostRecord(
+                    id, factionId, dimensionId,
+                    position.getX(), position.getY(), position.getZ(), radius,
+                    militaryNpcIds, civilianNpcIds,
+                    Math.max(existing.lastActivityGameTime(), gameTime),
+                    siteKind, commandPostPosition);
+            if (!reconciled.equals(existing)) {
+                index(reconciled);
+                this.setDirty();
+            }
+            return reconciled;
         }
         FactionOutpostRecord created = new FactionOutpostRecord(id, factionId, dimensionId,
                 position.getX(), position.getY(), position.getZ(), radius,
-                militaryNpcIds, civilianNpcIds, gameTime);
+                militaryNpcIds, civilianNpcIds, gameTime, siteKind, commandPostPosition);
         index(created);
-        generatedSiteIds.add(id);
         this.setDirty();
         return created;
     }

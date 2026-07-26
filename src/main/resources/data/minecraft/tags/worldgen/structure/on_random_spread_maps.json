@@ -1,4 +1,7 @@
 {
   "replace": false,
-  "values": ["galacticwars:blueprint_structure"]
+  "values": [
+    "galacticwars:blueprint_structure",
+    "galacticwars:commander_center_structure"
+  ]
 }

@@ -134,6 +134,9 @@ import galacticwars.clonewars.workforce.WorkerProfession;
 import galacticwars.clonewars.world.PlanetTravelService;
 import galacticwars.clonewars.world.PlanetTravelGameTests;
 import galacticwars.clonewars.world.BlueprintSiteAnchorBlockEntity;
+import galacticwars.clonewars.world.BlueprintSiteKind;
+import galacticwars.clonewars.world.BlueprintSiteLootBlockEntity;
+import galacticwars.clonewars.world.FactionCommandPostBlockEntity;
 import galacticwars.clonewars.world.PlanetArrivalService;
 import galacticwars.clonewars.world.PlanetFactionSpawnPolicy;
 import galacticwars.clonewars.world.FactionOutpostRecord;
@@ -162,6 +165,7 @@ import net.minecraft.resources.Identifier;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.tags.TagKey;
 import net.minecraft.util.ProblemReporter;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
@@ -191,6 +195,7 @@ import net.minecraft.world.level.block.entity.DispenserBlockEntity;
 import net.minecraft.world.level.block.entity.SpawnerBlockEntity;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import net.minecraft.world.level.storage.TagValueOutput;
+import net.minecraft.world.level.levelgen.structure.Structure;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.EntityHitResult;
@@ -364,6 +369,9 @@ public final class ModGameTests {
         tests.put(id("kingdom_governance_persistence"), ModGameTests::kingdomGovernancePersistence);
         tests.put(id("kingdom_multiplayer_runtime"), ModGameTests::kingdomMultiplayerRuntime);
         tests.put(id("overworld_faction_outpost_runtime"), ModGameTests::blueprintSiteRuntime);
+        tests.put(id("commander_center_replay_runtime"), ModGameTests::commanderCenterReplayRuntime);
+        tests.put(id("planet_structure_registry_runtime"), ModGameTests::planetStructureRegistryRuntime);
+        tests.put(id("blueprint_site_compatible_hash"), ModGameTests::blueprintSiteCompatibleHash);
         tests.put(id("blueprint_site_content_hash_mismatch"), ModGameTests::blueprintSiteContentHashMismatch);
         tests.put(id("blueprint_unknown_block_rejection"), ModGameTests::blueprintUnknownBlockRejection);
         tests.put(id("chunk_generation_rejection_serialization"),
@@ -4447,10 +4455,14 @@ public final class ModGameTests {
     private static void blueprintSiteRuntime(GameTestHelper helper) {
         ServerLevel level = helper.getLevel();
         BlockPos anchorPos = helper.absolutePos(new BlockPos(2, 1, 2));
-        BlockPos lootPos = anchorPos.offset(2, 0, 0);
+        BlockPos primaryLootPos = anchorPos.offset(2, 0, 0);
+        BlockPos suppliesLootPos = anchorPos.offset(-2, 0, 0);
         level.setBlock(anchorPos.below(), Blocks.STONE.defaultBlockState(), 3);
         level.setBlock(anchorPos, ModBlocks.BLUEPRINT_SITE_ANCHOR.get().defaultBlockState(), 3);
-        level.setBlock(lootPos, ModBlocks.BLUEPRINT_SITE_LOOT.get().defaultBlockState(), 3);
+        level.setBlock(primaryLootPos, ModBlocks.BLUEPRINT_SITE_LOOT.get().defaultBlockState(), 3);
+        level.setBlock(suppliesLootPos, ModBlocks.BLUEPRINT_SITE_LOOT.get().defaultBlockState(), 3);
+        level.removeBlockEntity(primaryLootPos);
+        level.removeBlockEntity(suppliesLootPos);
         if (!(level.getBlockEntity(anchorPos) instanceof BlueprintSiteAnchorBlockEntity anchor)) {
             helper.fail("Blueprint site anchor block entity was not created");
             return;
@@ -4464,16 +4476,21 @@ public final class ModGameTests {
                 .findFirst().orElse(null);
         if (outpost == null || !outpost.factionId().equals("galacticwars:hutt_cartel")
                 || !data.siteGenerated(outpost.id())) {
-            helper.fail("Blueprint site did not atomically register its faction outpost");
+            helper.fail("Blueprint site did not atomically register its faction outpost"
+                    + " [record=" + (outpost != null)
+                    + ", generated=" + (outpost != null && data.siteGenerated(outpost.id()))
+                    + ", initialized=" + anchor.isInitialized()
+                    + ", primary=" + hasLazyLoot(level, primaryLootPos)
+                    + ", supplies=" + hasLazyLoot(level, suppliesLootPos) + "]");
             return;
         }
         int expectedResidents = outpost.militaryNpcIds().size() + outpost.civilianNpcIds().size();
         int loadedResidents = level.getEntitiesOfClass(GalacticRecruitEntity.class,
                 new AABB(anchorPos).inflate(12.0D), recruit -> outpost.contains(recruit.getUUID())).size();
         if (expectedResidents < 3 || loadedResidents != expectedResidents
-                || !(level.getBlockEntity(lootPos)
-                instanceof net.minecraft.world.level.block.entity.RandomizableContainerBlockEntity container)
-                || container.getLootTable() == null) {
+                || !hasLazyLoot(level, primaryLootPos)
+                || !hasLazyLoot(level, suppliesLootPos)
+                || !anchor.isInitialized()) {
             helper.fail("Blueprint site residents or lazy loot were incomplete");
             return;
         }
@@ -4485,6 +4502,201 @@ public final class ModGameTests {
         if (afterReplay != loadedResidents || restored.outpost(outpost.id()).isEmpty()
                 || !restored.siteGenerated(outpost.id())) {
             helper.fail("Blueprint site initialization was not reload-idempotent");
+            return;
+        }
+        helper.succeed();
+    }
+
+    private static void commanderCenterReplayRuntime(GameTestHelper helper) {
+        ServerLevel level = helper.getLevel();
+        BlockPos anchorPos = helper.absolutePos(new BlockPos(2, 1, 2));
+        BlockPos primaryLootPos = anchorPos.offset(2, 0, 0);
+        BlockPos suppliesLootPos = anchorPos.offset(-2, 0, 0);
+        BlockPos commandCachePos = anchorPos.offset(0, 0, 2);
+        BlockPos commandPostPos = anchorPos.offset(0, 0, -2);
+        level.setBlock(anchorPos.below(), Blocks.STONE.defaultBlockState(), 3);
+        level.setBlock(anchorPos, ModBlocks.BLUEPRINT_SITE_ANCHOR.get().defaultBlockState(), 3);
+        placeBlueprintLootMarker(level, primaryLootPos, "primary");
+        placeBlueprintLootMarker(level, suppliesLootPos, "supplies");
+        placeBlueprintLootMarker(level, commandCachePos, "command_cache");
+        level.setBlock(commandPostPos, ModBlocks.FACTION_COMMAND_POST.get().defaultBlockState(), 3);
+        if (!(level.getBlockEntity(anchorPos) instanceof BlueprintSiteAnchorBlockEntity anchor)) {
+            helper.fail("Commander-center anchor block entity was not created");
+            return;
+        }
+
+        String blueprintId = "galacticwars:hutt_command_center";
+        anchor.configure(blueprintId, 0);
+        UUID siteId = UUID.nameUUIDFromBytes((level.dimension().identifier() + ":"
+                + anchorPos.asLong() + ":" + blueprintId).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        FactionOutpostSavedData data = FactionOutpostSavedData.get(level);
+        data.publishGeneratedSiteRecord(
+                siteId,
+                "galacticwars:hutt_cartel",
+                level.dimension().identifier().toString(),
+                anchorPos,
+                48,
+                List.of(),
+                List.of(),
+                level.getGameTime(),
+                BlueprintSiteKind.OUTPOST,
+                Optional.empty());
+        if (data.siteGenerated(siteId)) {
+            helper.fail("Interrupted commander center was marked complete before reconciliation");
+            return;
+        }
+
+        BlueprintSiteAnchorBlockEntity.serverTick(level, anchorPos, level.getBlockState(anchorPos), anchor);
+        FactionOutpostRecord outpost = data.outpost(siteId).orElse(null);
+        if (outpost == null
+                || outpost.siteKind() != BlueprintSiteKind.COMMAND_CENTER
+                || !outpost.commandPostPosition().equals(Optional.of(commandPostPos))
+                || !anchor.isInitialized()
+                || !data.siteGenerated(siteId)) {
+            helper.fail("Interrupted commander-center record was not reconciled"
+                    + " [record=" + (outpost != null)
+                    + ", kind=" + (outpost == null ? "missing" : outpost.siteKind().id())
+                    + ", post=" + (outpost != null && outpost.commandPostPosition().isPresent())
+                    + ", generated=" + data.siteGenerated(siteId)
+                    + ", initialized=" + anchor.isInitialized()
+                    + ", primary=" + hasLazyLoot(level, primaryLootPos)
+                    + ", supplies=" + hasLazyLoot(level, suppliesLootPos)
+                    + ", cache=" + hasLazyLoot(level, commandCachePos) + "]");
+            return;
+        }
+        if (!(level.getBlockEntity(commandPostPos) instanceof FactionCommandPostBlockEntity commandPost)
+                || !commandPost.configured()
+                || !siteId.equals(commandPost.siteId())
+                || level.getBlockEntity(commandPostPos) instanceof CommandCenterBlockEntity) {
+            helper.fail("Generated NPC command post became claimable or lost site identity");
+            return;
+        }
+        int expectedResidents = outpost.militaryNpcIds().size() + outpost.civilianNpcIds().size();
+        List<GalacticRecruitEntity> loaded = level.getEntitiesOfClass(
+                GalacticRecruitEntity.class,
+                new AABB(anchorPos).inflate(12.0D),
+                recruit -> outpost.contains(recruit.getUUID()));
+        long commanders = loaded.stream()
+                .filter(recruit -> recruit.getNpcRole() == NpcRole.COMMANDER)
+                .count();
+        if (loaded.size() != expectedResidents || expectedResidents < 6 || commanders != 1
+                || !hasLazyLoot(level, primaryLootPos)
+                || !hasLazyLoot(level, suppliesLootPos)
+                || !hasLazyLoot(level, commandCachePos)) {
+            helper.fail("Commander-center residents, commander, or loot were incomplete");
+            return;
+        }
+
+        BlueprintSiteAnchorBlockEntity.serverTick(level, anchorPos, level.getBlockState(anchorPos), anchor);
+        int replayResidents = level.getEntitiesOfClass(
+                GalacticRecruitEntity.class,
+                new AABB(anchorPos).inflate(12.0D),
+                recruit -> outpost.contains(recruit.getUUID())).size();
+        if (replayResidents != loaded.size()) {
+            helper.fail("Commander-center replay duplicated residents");
+            return;
+        }
+        helper.succeed();
+    }
+
+    private static void planetStructureRegistryRuntime(GameTestHelper helper) {
+        Map<String, String> expectedFactions = Map.of(
+                "tatooine", "galacticwars:hutt_cartel",
+                "geonosis", "galacticwars:separatist",
+                "kamino", "galacticwars:republic",
+                "coruscant", "galacticwars:republic");
+        Map<BlueprintSiteKind, TagKey<Structure>> structureTags = Map.of(
+                BlueprintSiteKind.OUTPOST,
+                TagKey.create(Registries.STRUCTURE, id("blueprint_sites")),
+                BlueprintSiteKind.COMMAND_CENTER,
+                TagKey.create(Registries.STRUCTURE, id("commander_centers")));
+
+        var registries = helper.getLevel().registryAccess();
+        for (var planetEntry : expectedFactions.entrySet()) {
+            boolean hasOutpost = GameplayDataManager.snapshot().blueprints().values().stream()
+                    .filter(blueprint -> blueprint.worldgen().isPresent())
+                    .map(blueprint -> blueprint.worldgen().orElseThrow())
+                    .anyMatch(profile -> profile.siteKind() == BlueprintSiteKind.OUTPOST
+                            && profile.factionId().equals(planetEntry.getValue())
+                            && profile.biomes().contains("galacticwars:" + planetEntry.getKey()));
+            boolean hasCommanderCenter = GameplayDataManager.snapshot().blueprints().values().stream()
+                    .filter(blueprint -> blueprint.worldgen().isPresent())
+                    .map(blueprint -> blueprint.worldgen().orElseThrow())
+                    .anyMatch(profile -> profile.siteKind() == BlueprintSiteKind.COMMAND_CENTER
+                            && profile.factionId().equals(planetEntry.getValue())
+                            && profile.biomes().contains("galacticwars:" + planetEntry.getKey()));
+            if (!hasOutpost || !hasCommanderCenter) {
+                helper.fail("Runtime blueprint routing is incomplete for " + planetEntry.getKey());
+                return;
+            }
+        }
+
+        var structures = registries.lookupOrThrow(Registries.STRUCTURE);
+        var structureSets = registries.lookupOrThrow(Registries.STRUCTURE_SET);
+        for (var structureEntry : structureTags.entrySet()) {
+            String structureId = structureEntry.getKey() == BlueprintSiteKind.OUTPOST
+                    ? "blueprint_structure" : "commander_center_structure";
+            var structureHolder = structures.get(ResourceKey.create(
+                    Registries.STRUCTURE, id(structureId))).orElse(null);
+            if (structureHolder == null
+                    || !(structureHolder.value() instanceof galacticwars.clonewars.world.BlueprintStructure structure)
+                    || structure.siteKind() != structureEntry.getKey()) {
+                helper.fail("Registered structure kind mismatch for " + structureId);
+                return;
+            }
+            String setId = structureEntry.getKey() == BlueprintSiteKind.OUTPOST
+                    ? "blueprint_sites" : "commander_centers";
+            if (structureSets.get(ResourceKey.create(
+                    Registries.STRUCTURE_SET, id(setId))).isEmpty()) {
+                helper.fail("Missing registered structure set " + setId);
+                return;
+            }
+        }
+        helper.succeed();
+    }
+
+    private static void blueprintSiteCompatibleHash(GameTestHelper helper) {
+        ServerLevel level = helper.getLevel();
+        BlockPos anchorPos = helper.absolutePos(new BlockPos(2, 1, 2));
+        BlockPos primaryLootPos = anchorPos.offset(2, 0, 0);
+        BlockPos suppliesLootPos = anchorPos.offset(-2, 0, 0);
+        level.setBlock(anchorPos.below(), Blocks.STONE.defaultBlockState(), 3);
+        level.setBlock(anchorPos, ModBlocks.BLUEPRINT_SITE_ANCHOR.get().defaultBlockState(), 3);
+        placeBlueprintLootMarker(level, primaryLootPos, "primary");
+        placeBlueprintLootMarker(level, suppliesLootPos, "supplies");
+        if (!(level.getBlockEntity(anchorPos) instanceof BlueprintSiteAnchorBlockEntity anchor)) {
+            helper.fail("Compatible-hash site anchor block entity was not created");
+            return;
+        }
+        anchor.configure(
+                "galacticwars:hutt_salvage_depot",
+                0,
+                "c0bcfbc3a785dcb038746273c17e4542dcdeb04ce762af4cae5f4ed9a89048a7");
+        BlueprintSiteAnchorBlockEntity.serverTick(level, anchorPos, level.getBlockState(anchorPos), anchor);
+        FactionOutpostRecord outpost = FactionOutpostSavedData.get(level).outposts().stream()
+                .filter(candidate -> candidate.x() == anchorPos.getX()
+                        && candidate.y() == anchorPos.getY()
+                        && candidate.z() == anchorPos.getZ())
+                .findFirst()
+                .orElse(null);
+        if (outpost == null
+                || outpost.siteKind() != BlueprintSiteKind.OUTPOST
+                || !anchor.isInitialized()
+                || !hasLazyLoot(level, primaryLootPos)
+                || !hasLazyLoot(level, suppliesLootPos)) {
+            String legacyHash =
+                    "c0bcfbc3a785dcb038746273c17e4542dcdeb04ce762af4cae5f4ed9a89048a7";
+            boolean hashAccepted = GameplayDataManager.snapshot()
+                    .blueprint("galacticwars:hutt_salvage_depot")
+                    .map(blueprint -> blueprint.matchesContentHash(legacyHash))
+                    .orElse(false);
+            helper.fail("Compatible pre-v3 blueprint content hash did not initialize"
+                    + " [record=" + (outpost != null)
+                    + ", invalid=" + anchor.isInitializationInvalid()
+                    + ", initialized=" + anchor.isInitialized()
+                    + ", hashAccepted=" + hashAccepted
+                    + ", primary=" + hasLazyLoot(level, primaryLootPos)
+                    + ", supplies=" + hasLazyLoot(level, suppliesLootPos) + "]");
             return;
         }
         helper.succeed();
@@ -4526,6 +4738,20 @@ public final class ModGameTests {
             }
             helper.succeed();
         }
+    }
+
+    private static void placeBlueprintLootMarker(ServerLevel level, BlockPos position, String marker) {
+        level.setBlock(position, ModBlocks.BLUEPRINT_SITE_LOOT.get().defaultBlockState(), 3);
+        if (!(level.getBlockEntity(position) instanceof BlueprintSiteLootBlockEntity loot)) {
+            throw new IllegalStateException("Blueprint loot marker block entity was not created");
+        }
+        loot.configure(marker);
+    }
+
+    private static boolean hasLazyLoot(ServerLevel level, BlockPos position) {
+        return level.getBlockEntity(position)
+                instanceof net.minecraft.world.level.block.entity.RandomizableContainerBlockEntity container
+                && container.getLootTable() != null;
     }
 
     private static void playerClassEmbodiedRuntime(GameTestHelper helper) {

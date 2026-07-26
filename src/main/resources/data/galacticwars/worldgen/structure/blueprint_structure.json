@@ -1,5 +1,6 @@
 {
   "type": "galacticwars:blueprint_structure",
+  "site_kind": "outpost",
   "biomes": "#galacticwars:has_structure/blueprint_structure",
   "step": "surface_structures",
   "spawn_overrides": {},

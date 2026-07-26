@@ -9,7 +9,11 @@ import galacticwars.clonewars.settlement.BlueprintRosterEntry;
 import galacticwars.clonewars.settlement.KingdomBaseBlueprint;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
@@ -31,6 +35,9 @@ import net.minecraft.world.level.storage.loot.LootTable;
 
 /** Persistent, invisible handoff from worldgen workers to the authoritative server tick. */
 public final class BlueprintSiteAnchorBlockEntity extends BlockEntity {
+    private static final int MARKER_SCAN_HORIZONTAL = 4;
+    private static final int MARKER_SCAN_BELOW = 4;
+    private static final int MARKER_SCAN_ABOVE = 12;
     private String blueprintId = "";
     private int rotationSteps;
     private String contentHash = "";
@@ -72,27 +79,44 @@ public final class BlueprintSiteAnchorBlockEntity extends BlockEntity {
             markInvalid();
             return;
         }
-        if (!contentHash.isEmpty() && !contentHash.equals(blueprint.contentHash())) {
+        if (!contentHash.isEmpty() && !blueprint.matchesContentHash(contentHash)) {
             markInvalid();
             return;
         }
         var profile = blueprint.worldgen().orElseThrow();
         UUID siteId = computeSiteId(level, pos);
-        FactionOutpostSavedData data = FactionOutpostSavedData.get(level);
-        if (data.outpost(siteId).isPresent()) {
-            markInitialized();
+        Optional<BlockPos> commandPost = findCommandPost(level, pos);
+        if ((profile.siteKind() == BlueprintSiteKind.COMMAND_CENTER) != commandPost.isPresent()) {
+            markInvalid();
             return;
         }
 
         RandomSource random = RandomSource.create(siteId.getMostSignificantBits() ^ siteId.getLeastSignificantBits());
         ResidentPlan plan = buildResidentPlan(siteId, profile.roster(), random);
 
-        // Seal the one-shot transaction before exposing containers or residents.
-        data.registerGeneratedSite(siteId, profile.factionId(), level.dimension().identifier().toString(),
-                pos, profile.siteRadius(), plan.military(), plan.civilians(), level.getGameTime());
-        markInitialized();
-        initializeLoot(level, pos, profile.factionId(), siteId);
-        spawnResidents(level, pos, profile.siteRadius(), siteId, plan.residents());
+        // Publish deterministic identity before exposing containers or residents. Every following
+        // operation is replay-safe, so an interrupted tick resumes instead of duplicating the site.
+        FactionOutpostSavedData data = FactionOutpostSavedData.get(level);
+        data.publishGeneratedSiteRecord(siteId, profile.factionId(), level.dimension().identifier().toString(),
+                pos, profile.siteRadius(), plan.military(), plan.civilians(), level.getGameTime(),
+                profile.siteKind(), commandPost);
+        boolean commandPostReady = configureCommandPost(
+                level, commandPost, siteId, profile.factionId());
+        if (!commandPostReady) {
+            markInvalid();
+            return;
+        }
+        boolean lootReady = initializeLoot(level, pos, profile.lootTables(), siteId);
+        if (!lootReady) {
+            markInvalid();
+            return;
+        }
+        boolean residentsReady = spawnResidents(
+                level, pos, profile.siteRadius(), siteId, plan.residents());
+        if (commandPostReady && lootReady && residentsReady) {
+            data.markSiteGenerated(siteId);
+            markInitialized();
+        }
     }
 
     private UUID computeSiteId(ServerLevel level, BlockPos pos) {
@@ -137,33 +161,112 @@ public final class BlueprintSiteAnchorBlockEntity extends BlockEntity {
         return invalid;
     }
 
-    private static void initializeLoot(ServerLevel level, BlockPos center, String factionId, UUID siteId) {
-        String factionPath = factionId.substring(factionId.indexOf(':') + 1);
-        ResourceKey<LootTable> loot = ResourceKey.create(Registries.LOOT_TABLE,
-                Identifier.fromNamespaceAndPath("galacticwars", "chests/faction_site/" + factionPath));
-        for (BlockPos target : BlockPos.betweenClosed(center.offset(-12, -2, -12), center.offset(12, 6, 12))) {
-            if (level.getBlockState(target).is(galacticwars.clonewars.registry.ModBlocks.BLUEPRINT_SITE_LOOT.get())) {
-                level.setBlock(target, Blocks.CHEST.defaultBlockState(), 3);
-                if (level.getBlockEntity(target) instanceof RandomizableContainerBlockEntity container) {
-                    if (container.getLootTable() == null) {
-                        container.setLootTable(loot);
-                        container.setLootTableSeed(siteId.getLeastSignificantBits() ^ target.asLong());
-                        container.setChanged();
-                    }
-                }
-            }
-        }
+    public boolean isInitialized() {
+        return initialized;
     }
 
-    private static void spawnResidents(
+    private static boolean initializeLoot(
+            ServerLevel level,
+            BlockPos center,
+            java.util.Map<String, String> lootTables,
+            UUID siteId
+    ) {
+        Set<String> resolvedMarkers = new LinkedHashSet<>();
+        List<String> existingTables = new ArrayList<>();
+        List<BlockPos> legacyMarkers = new ArrayList<>();
+        for (BlockPos target : markerScan(center)) {
+            if (level.getBlockState(target)
+                    .is(galacticwars.clonewars.registry.ModBlocks.BLUEPRINT_SITE_LOOT.get())) {
+                if (!(level.getBlockEntity(target) instanceof BlueprintSiteLootBlockEntity marker)
+                        || marker.marker().isBlank()) {
+                    legacyMarkers.add(target.immutable());
+                    continue;
+                }
+                String markerName = marker.marker();
+                String tableId = lootTables.get(markerName);
+                if (tableId == null || !installLootChest(
+                        level, target, markerName, tableId, siteId)) {
+                    return false;
+                }
+                resolvedMarkers.add(markerName);
+                continue;
+            }
+            if (level.getBlockEntity(target) instanceof RandomizableContainerBlockEntity container
+                    && container.getLootTable() != null) {
+                existingTables.add(container.getLootTable().identifier().toString());
+            }
+        }
+        List<String> markerNames = lootTables.keySet().stream().sorted().toList();
+        for (String tableId : existingTables) {
+            markerNames.stream()
+                    .filter(marker -> !resolvedMarkers.contains(marker))
+                    .filter(marker -> lootTables.get(marker).equals(tableId))
+                    .findFirst()
+                    .ifPresent(resolvedMarkers::add);
+        }
+        legacyMarkers.sort(Comparator.comparingInt((BlockPos position) -> position.getX())
+                .thenComparingInt(position -> position.getY())
+                .thenComparingInt(position -> position.getZ()));
+        List<String> unresolvedMarkers = markerNames.stream()
+                .filter(marker -> !resolvedMarkers.contains(marker))
+                .toList();
+        if (legacyMarkers.size() != unresolvedMarkers.size()) {
+            return false;
+        }
+        for (int index = 0; index < legacyMarkers.size(); index++) {
+            String markerName = unresolvedMarkers.get(index);
+            if (!installLootChest(level, legacyMarkers.get(index), markerName,
+                    lootTables.get(markerName), siteId)) {
+                return false;
+            }
+            resolvedMarkers.add(markerName);
+        }
+        return resolvedMarkers.equals(lootTables.keySet());
+    }
+
+    private static boolean installLootChest(
+            ServerLevel level,
+            BlockPos target,
+            String markerName,
+            String tableId,
+            UUID siteId
+    ) {
+        ResourceKey<LootTable> loot = ResourceKey.create(
+                Registries.LOOT_TABLE, Identifier.parse(tableId));
+        BlockEntity existing = level.getBlockEntity(target);
+        if (existing instanceof RandomizableContainerBlockEntity container
+                && container.getLootTable() != null) {
+            return container.getLootTable().identifier().toString().equals(tableId);
+        }
+        level.setBlock(target, Blocks.CHEST.defaultBlockState(), 3);
+        if (!(level.getBlockEntity(target) instanceof RandomizableContainerBlockEntity container)) {
+            return false;
+        }
+        if (container.getLootTable() == null) {
+            container.setLootTable(loot);
+            container.setLootTableSeed(siteId.getMostSignificantBits()
+                    ^ siteId.getLeastSignificantBits()
+                    ^ target.asLong()
+                    ^ markerName.hashCode());
+            container.setChanged();
+        }
+        return container.getLootTable() != null
+                && container.getLootTable().identifier().toString().equals(tableId);
+    }
+
+    private static boolean spawnResidents(
             ServerLevel level, BlockPos center, int radius, UUID siteId, List<PendingResident> residents
     ) {
         int index = 0;
         for (PendingResident pending : residents) {
+            if (level.getEntity(pending.id()) != null) {
+                index++;
+                continue;
+            }
             var type = BuiltInRegistries.ENTITY_TYPE.getValue(Identifier.parse(pending.entityTypeId()));
             Entity entity = type == null ? null : type.create(level, EntitySpawnReason.STRUCTURE);
             if (!(entity instanceof GalacticRecruitEntity recruit)) {
-                continue;
+                return false;
             }
             int dx = (index % 5) - 2;
             int dz = (index / 5) - 2;
@@ -173,8 +276,49 @@ public final class BlueprintSiteAnchorBlockEntity extends BlockEntity {
             recruit.initializeBlueprintSiteResident(
                     siteId, pending.branch(), pending.role(), center, radius);
             recruit.setPersistenceRequired();
-            level.addFreshEntity(recruit);
+            if (!level.addFreshEntity(recruit) && level.getEntity(pending.id()) == null) {
+                return false;
+            }
         }
+        return true;
+    }
+
+    private static Optional<BlockPos> findCommandPost(ServerLevel level, BlockPos center) {
+        BlockPos found = null;
+        for (BlockPos target : markerScan(center)) {
+            if (!level.getBlockState(target)
+                    .is(galacticwars.clonewars.registry.ModBlocks.FACTION_COMMAND_POST.get())) {
+                continue;
+            }
+            if (found != null) {
+                return Optional.empty();
+            }
+            found = target.immutable();
+        }
+        return Optional.ofNullable(found);
+    }
+
+    private static boolean configureCommandPost(
+            ServerLevel level,
+            Optional<BlockPos> position,
+            UUID siteId,
+            String factionId
+    ) {
+        if (position.isEmpty()) {
+            return true;
+        }
+        if (!(level.getBlockEntity(position.orElseThrow())
+                instanceof FactionCommandPostBlockEntity commandPost)) {
+            return false;
+        }
+        commandPost.configure(siteId, factionId);
+        return commandPost.configured();
+    }
+
+    private static Iterable<BlockPos> markerScan(BlockPos center) {
+        return BlockPos.betweenClosed(
+                center.offset(-MARKER_SCAN_HORIZONTAL, -MARKER_SCAN_BELOW, -MARKER_SCAN_HORIZONTAL),
+                center.offset(MARKER_SCAN_HORIZONTAL, MARKER_SCAN_ABOVE, MARKER_SCAN_HORIZONTAL));
     }
 
     @Override

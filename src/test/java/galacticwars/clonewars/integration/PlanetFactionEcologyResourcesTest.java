@@ -117,8 +117,15 @@ public final class PlanetFactionEcologyResourcesTest {
 
         String siteAnchor = read(Path.of(
                 "src/main/java/galacticwars/clonewars/world/BlueprintSiteAnchorBlockEntity.java"));
-        assertContains(siteAnchor, "data.registerGeneratedSite(",
+        assertContains(siteAnchor, "data.publishGeneratedSiteRecord(",
                 "generated site must publish identity before residents");
+        assertContains(siteAnchor, "data.markSiteGenerated(siteId);",
+                "generated site must mark completion after reconciliation");
+        if (siteAnchor.indexOf("data.publishGeneratedSiteRecord(")
+                >= siteAnchor.indexOf("data.markSiteGenerated(siteId);")) {
+            throw new AssertionError(
+                    "generated site completion must follow deterministic identity publication");
+        }
         assertContains(siteAnchor, "initialized = true", "persistent one-shot site initialization");
         assertContains(siteAnchor, "recruit.setPersistenceRequired()", "persistent site residents");
 

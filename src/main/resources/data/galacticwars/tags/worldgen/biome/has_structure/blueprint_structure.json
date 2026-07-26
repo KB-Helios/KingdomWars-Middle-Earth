@@ -13,6 +13,10 @@
     "minecraft:swamp",
     "minecraft:mangrove_swamp",
     "minecraft:dark_forest",
-    "minecraft:old_growth_pine_taiga"
+    "minecraft:old_growth_pine_taiga",
+    "galacticwars:tatooine",
+    "galacticwars:geonosis",
+    "galacticwars:kamino",
+    "galacticwars:coruscant"
   ]
 }
