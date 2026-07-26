@@ -22,6 +22,7 @@ import galacticwars.clonewars.faction.FactionId;
 import galacticwars.clonewars.faction.FactionRuntimePolicy;
 import galacticwars.clonewars.faction.ai.NpcAiProfile;
 import galacticwars.clonewars.settlement.KingdomBaseBlueprint;
+import galacticwars.clonewars.technology.TechnologyCatalog;
 import galacticwars.clonewars.world.OverworldFactionSpawnProfile;
 import galacticwars.clonewars.world.CivilianArchetypeDefinition;
 
@@ -37,7 +38,8 @@ public record GameplayDataSnapshot(
         Map<UnitClassId, UnitClassDefinition> unitClasses,
         Map<FactionId, FactionRuntimePolicy> factionPolicies,
         Map<FactionId, NpcAiProfile> npcAiProfiles,
-        LaunchContentDefinitions launchContent
+        LaunchContentDefinitions launchContent,
+        TechnologyCatalog technology
 ) {
     public GameplayDataSnapshot {
         Objects.requireNonNull(factions, "factions");
@@ -66,6 +68,7 @@ public record GameplayDataSnapshot(
         factionPolicies = immutableMap(factionPolicies, "factionPolicies");
         npcAiProfiles = immutableMap(npcAiProfiles, "npcAiProfiles");
         Objects.requireNonNull(launchContent, "launchContent");
+        Objects.requireNonNull(technology, "technology");
     }
 
     public GameplayDataSnapshot(
@@ -76,7 +79,8 @@ public record GameplayDataSnapshot(
             Map<String, KingdomBaseBlueprint> blueprints
     ) {
         this(factions, units, unitIdsByEntityType, unitAliases, blueprints, Map.of(), Map.of(),
-                Map.of(), Map.of(), Map.of(), Map.of(), LaunchContentDefinitions.empty());
+                Map.of(), Map.of(), Map.of(), Map.of(), LaunchContentDefinitions.empty(),
+                TechnologyCatalog.empty());
     }
 
     public GameplayDataSnapshot(
@@ -88,7 +92,8 @@ public record GameplayDataSnapshot(
             Map<String, OverworldFactionSpawnProfile> overworldSpawnProfiles
     ) {
         this(factions, units, unitIdsByEntityType, unitAliases, blueprints, overworldSpawnProfiles, Map.of(),
-                Map.of(), Map.of(), Map.of(), Map.of(), LaunchContentDefinitions.empty());
+                Map.of(), Map.of(), Map.of(), Map.of(), LaunchContentDefinitions.empty(),
+                TechnologyCatalog.empty());
     }
 
     public GameplayDataSnapshot(
@@ -102,7 +107,27 @@ public record GameplayDataSnapshot(
     ) {
         this(factions, units, unitIdsByEntityType, unitAliases, blueprints, overworldSpawnProfiles,
                 civilianArchetypesByEntityType, Map.of(), Map.of(), Map.of(), Map.of(),
-                LaunchContentDefinitions.empty());
+                LaunchContentDefinitions.empty(), TechnologyCatalog.empty());
+    }
+
+    /** Compatibility constructor for tests and integrations authored before kingdom technology. */
+    public GameplayDataSnapshot(
+            FactionCatalog factions,
+            ArmyUnitCatalog units,
+            Map<String, ArmyUnitId> unitIdsByEntityType,
+            Map<String, ArmyUnitId> unitAliases,
+            Map<String, KingdomBaseBlueprint> blueprints,
+            Map<String, OverworldFactionSpawnProfile> overworldSpawnProfiles,
+            Map<String, CivilianArchetypeDefinition> civilianArchetypesByEntityType,
+            Map<AbilityId, AbilityDefinition> abilities,
+            Map<UnitClassId, UnitClassDefinition> unitClasses,
+            Map<FactionId, FactionRuntimePolicy> factionPolicies,
+            Map<FactionId, NpcAiProfile> npcAiProfiles,
+            LaunchContentDefinitions launchContent
+    ) {
+        this(factions, units, unitIdsByEntityType, unitAliases, blueprints, overworldSpawnProfiles,
+                civilianArchetypesByEntityType, abilities, unitClasses, factionPolicies,
+                npcAiProfiles, launchContent, TechnologyCatalog.empty());
     }
 
     public Optional<FactionDefinition> faction(String id) {

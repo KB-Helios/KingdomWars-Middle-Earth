@@ -25,13 +25,23 @@ public final class ClientGameplayCatalog {
         payload.vehicles().forEach(vehicle -> vehicles.put(vehicle.vehicleId(), vehicle));
         LinkedHashMap<String, GameplayCatalogPayload.BlueprintEntry> blueprints = new LinkedHashMap<>();
         payload.blueprints().forEach(blueprint -> blueprints.put(blueprint.blueprintId(), blueprint));
+        LinkedHashMap<String, GameplayCatalogPayload.TechnologyEntry> technology = new LinkedHashMap<>();
+        payload.technology().forEach(node -> technology.put(node.nodeId(), node));
+        LinkedHashMap<String, GameplayCatalogPayload.FabricationEntry> fabrication = new LinkedHashMap<>();
+        payload.fabrication().forEach(recipe -> fabrication.put(recipe.recipeId(), recipe));
+        LinkedHashMap<String, GameplayCatalogPayload.RelationPolicyEntry> relationPolicies =
+                new LinkedHashMap<>();
+        payload.relationPolicies().forEach(policy -> relationPolicies.put(policy.factionId(), policy));
         SNAPSHOT.set(new Snapshot(
                 REVISIONS.incrementAndGet(),
                 payload.generation(),
                 payload.contentHash(),
                 payload.classes(),
                 vehicles,
-                blueprints));
+                blueprints,
+                technology,
+                fabrication,
+                relationPolicies));
     }
 
     public static Snapshot snapshot() {
@@ -48,7 +58,10 @@ public final class ClientGameplayCatalog {
             String serverContentHash,
             List<GameplayCatalogPayload.ClassEntry> classes,
             Map<String, GameplayCatalogPayload.VehicleEntry> vehicles,
-            Map<String, GameplayCatalogPayload.BlueprintEntry> blueprints
+            Map<String, GameplayCatalogPayload.BlueprintEntry> blueprints,
+            Map<String, GameplayCatalogPayload.TechnologyEntry> technology,
+            Map<String, GameplayCatalogPayload.FabricationEntry> fabrication,
+            Map<String, GameplayCatalogPayload.RelationPolicyEntry> relationPolicies
     ) {
         public Snapshot {
             if (revision < 0L || serverGeneration < -1L) {
@@ -61,6 +74,12 @@ public final class ClientGameplayCatalog {
                     Objects.requireNonNull(vehicles, "vehicles")));
             blueprints = Collections.unmodifiableMap(new LinkedHashMap<>(
                     Objects.requireNonNull(blueprints, "blueprints")));
+            technology = Collections.unmodifiableMap(new LinkedHashMap<>(
+                    Objects.requireNonNull(technology, "technology")));
+            fabrication = Collections.unmodifiableMap(new LinkedHashMap<>(
+                    Objects.requireNonNull(fabrication, "fabrication")));
+            relationPolicies = Collections.unmodifiableMap(new LinkedHashMap<>(
+                    Objects.requireNonNull(relationPolicies, "relationPolicies")));
         }
 
         public Optional<GameplayCatalogPayload.VehicleEntry> vehicle(String vehicleId) {
@@ -77,8 +96,21 @@ public final class ClientGameplayCatalog {
             return Optional.ofNullable(blueprints.get(blueprintId));
         }
 
+        public Optional<GameplayCatalogPayload.TechnologyEntry> technology(String nodeId) {
+            return Optional.ofNullable(technology.get(nodeId));
+        }
+
+        public Optional<GameplayCatalogPayload.FabricationEntry> fabrication(String recipeId) {
+            return Optional.ofNullable(fabrication.get(recipeId));
+        }
+
+        public Optional<GameplayCatalogPayload.RelationPolicyEntry> relationPolicy(String factionId) {
+            return Optional.ofNullable(relationPolicies.get(factionId));
+        }
+
         private static Snapshot empty() {
-            return new Snapshot(0L, -1L, "", List.of(), Map.of(), Map.of());
+            return new Snapshot(
+                    0L, -1L, "", List.of(), Map.of(), Map.of(), Map.of(), Map.of(), Map.of());
         }
     }
 }

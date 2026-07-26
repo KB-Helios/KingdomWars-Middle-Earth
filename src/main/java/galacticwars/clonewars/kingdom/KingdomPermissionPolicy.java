@@ -15,6 +15,7 @@ public final class KingdomPermissionPolicy {
             KingdomPermission.USE_STORAGE,
             KingdomPermission.MANAGE_LOGISTICS,
             KingdomPermission.MANAGE_WORKSITES,
+            KingdomPermission.MANAGE_TECHNOLOGY,
             KingdomPermission.RECRUIT));
     private static final Set<KingdomPermission> BUILDER = Set.copyOf(EnumSet.of(
             KingdomPermission.BUILD,

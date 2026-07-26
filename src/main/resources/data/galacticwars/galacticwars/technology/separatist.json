@@ -1,0 +1,49 @@
+{
+  "faction": "galacticwars:separatist",
+  "nodes": [
+    {
+      "id": "galacticwars:alloy_reclamation",
+      "name": "Alloy Reclamation",
+      "prerequisites": ["galacticwars:field_fabrication"],
+      "inputs": {"minecraft:copper_ingot": 16, "minecraft:iron_ingot": 8},
+      "work": 1800,
+      "recipes": ["galacticwars:separatist_alloy_shard", "galacticwars:separatist_alloy_ingot"]
+    },
+    {
+      "id": "galacticwars:droid_field_arms",
+      "name": "Droid Field Arms",
+      "prerequisites": ["galacticwars:alloy_reclamation"],
+      "inputs": {"galacticwars:separatist_alloy_ingot": 16, "galacticwars:energy_cell": 8},
+      "work": 3000,
+      "recipes": [
+        "galacticwars:e5_blaster",
+        "galacticwars:separatist_alloy_sword",
+        "galacticwars:separatist_alloy_pickaxe",
+        "galacticwars:separatist_alloy_axe",
+        "galacticwars:separatist_alloy_shovel",
+        "galacticwars:separatist_alloy_hoe"
+      ]
+    },
+    {
+      "id": "galacticwars:droid_armor",
+      "name": "Droid Armor",
+      "prerequisites": ["galacticwars:alloy_reclamation"],
+      "inputs": {"galacticwars:separatist_alloy_ingot": 32, "minecraft:redstone": 16},
+      "work": 3600,
+      "recipes": [
+        "galacticwars:separatist_alloy_helmet",
+        "galacticwars:separatist_alloy_chestplate",
+        "galacticwars:separatist_alloy_leggings",
+        "galacticwars:separatist_alloy_boots"
+      ]
+    },
+    {
+      "id": "galacticwars:foundry_vehicles",
+      "name": "Foundry Vehicles",
+      "prerequisites": ["galacticwars:droid_field_arms", "galacticwars:droid_armor", "galacticwars:vehicle_engineering"],
+      "inputs": {"galacticwars:separatist_alloy_ingot": 48, "galacticwars:energy_cell": 16},
+      "work": 6000,
+      "recipes": []
+    }
+  ]
+}

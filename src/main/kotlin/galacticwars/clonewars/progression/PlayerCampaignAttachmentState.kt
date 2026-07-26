@@ -3,6 +3,7 @@ package galacticwars.clonewars.progression
 import com.mojang.serialization.Codec
 import com.mojang.serialization.DataResult
 import com.mojang.serialization.codecs.RecordCodecBuilder
+import com.mojang.datafixers.util.Either
 import java.util.Collections
 import java.util.LinkedHashMap
 import java.util.LinkedHashSet
@@ -22,11 +23,20 @@ class PlayerCampaignAttachmentState(
     playerId: UUID,
     campaign: CampaignProjection,
     force: ForceProjection,
+    gameplay: GameplayProjection,
 ) {
+    constructor(
+        schemaVersion: Int,
+        playerId: UUID,
+        campaign: CampaignProjection,
+        force: ForceProjection,
+    ) : this(schemaVersion, playerId, campaign, force, GameplayProjection.empty())
+
     val schemaVersion: Int = schemaVersion
     val playerId: UUID = playerId
     val campaign: CampaignProjection = campaign
     val force: ForceProjection = force
+    val gameplay: GameplayProjection = gameplay
 
     init {
         require(schemaVersion == CURRENT_SCHEMA_VERSION) {
@@ -42,22 +52,111 @@ class PlayerCampaignAttachmentState(
 
     fun force(): ForceProjection = force
 
+    fun gameplay(): GameplayProjection = gameplay
+
     override fun equals(other: Any?): Boolean = this === other ||
         other is PlayerCampaignAttachmentState &&
         schemaVersion == other.schemaVersion &&
         playerId == other.playerId &&
         campaign == other.campaign &&
-        force == other.force
+        force == other.force &&
+        gameplay == other.gameplay
 
     override fun hashCode(): Int {
         var result = schemaVersion
         result = 31 * result + playerId.hashCode()
         result = 31 * result + campaign.hashCode()
-        return 31 * result + force.hashCode()
+        result = 31 * result + force.hashCode()
+        return 31 * result + gameplay.hashCode()
     }
 
     override fun toString(): String = "PlayerCampaignAttachmentState[" +
-        "schemaVersion=$schemaVersion, playerId=$playerId, campaign=$campaign, force=$force]"
+        "schemaVersion=$schemaVersion, playerId=$playerId, campaign=$campaign, force=$force, gameplay=$gameplay]"
+
+    class GameplayProjection(
+        reputation: Map<String, Int>,
+        completedTechnology: Set<String>,
+        activeResearchNode: String?,
+        requiredResearchInputs: Map<String, Int>,
+        deliveredResearchInputs: Map<String, Int>,
+        technicianId: String?,
+        researchProgress: Int,
+        researchRequired: Int,
+        kingdomRevision: Int,
+        effectiveCapabilities: Set<String>,
+    ) {
+        val reputation: Map<String, Int> = Collections.unmodifiableMap(LinkedHashMap(reputation))
+        val completedTechnology: Set<String> = immutableSet(
+            completedTechnology,
+            MAX_COMPLETED_TECHNOLOGY,
+            "completedTechnology",
+        )
+        val activeResearchNode: String = activeResearchNode.orEmpty()
+        val requiredResearchInputs: Map<String, Int> =
+            Collections.unmodifiableMap(LinkedHashMap(requiredResearchInputs))
+        val deliveredResearchInputs: Map<String, Int> =
+            Collections.unmodifiableMap(LinkedHashMap(deliveredResearchInputs))
+        val technicianId: String = technicianId.orEmpty()
+        val researchProgress: Int = researchProgress
+        val researchRequired: Int = researchRequired
+        val kingdomRevision: Int = kingdomRevision
+        val effectiveCapabilities: Set<String> = immutableSet(
+            effectiveCapabilities,
+            MAX_EFFECTIVE_CAPABILITIES,
+            "effectiveCapabilities",
+        )
+
+        init {
+            require(this.reputation.size <= MAX_REPUTATION_FACTIONS)
+            require(this.reputation.keys.all(::validIdentifier))
+            require(this.reputation.values.all { it in -100..100 })
+            require(this.activeResearchNode.isEmpty() || validIdentifier(this.activeResearchNode))
+            require(this.requiredResearchInputs.size <= 16)
+            require(this.requiredResearchInputs.keys.all(::validIdentifier))
+            require(this.requiredResearchInputs.values.all { it in 1..4_096 })
+            require(this.deliveredResearchInputs.size <= 16)
+            require(this.deliveredResearchInputs.keys.all { it in this.requiredResearchInputs })
+            require(this.deliveredResearchInputs.all { (key, value) ->
+                value in 1..(this.requiredResearchInputs[key] ?: 0)
+            })
+            require(this.technicianId.isEmpty() || this.technicianId.length <= 64)
+            require(researchProgress >= 0 && researchRequired >= 0 && researchProgress <= researchRequired)
+            require(kingdomRevision >= 0)
+        }
+
+        override fun equals(other: Any?): Boolean = this === other ||
+            other is GameplayProjection &&
+            reputation == other.reputation &&
+            completedTechnology == other.completedTechnology &&
+            activeResearchNode == other.activeResearchNode &&
+            requiredResearchInputs == other.requiredResearchInputs &&
+            deliveredResearchInputs == other.deliveredResearchInputs &&
+            technicianId == other.technicianId &&
+            researchProgress == other.researchProgress &&
+            researchRequired == other.researchRequired &&
+            kingdomRevision == other.kingdomRevision &&
+            effectiveCapabilities == other.effectiveCapabilities
+
+        override fun hashCode(): Int = Objects.hash(
+            reputation,
+            completedTechnology,
+            activeResearchNode,
+            requiredResearchInputs,
+            deliveredResearchInputs,
+            technicianId,
+            researchProgress,
+            researchRequired,
+            kingdomRevision,
+            effectiveCapabilities,
+        )
+
+        companion object {
+            @JvmStatic
+            fun empty(): GameplayProjection = GameplayProjection(
+                emptyMap(), emptySet(), "", emptyMap(), emptyMap(), "", 0, 0, 0, emptySet(),
+            )
+        }
+    }
 
     class CampaignProjection(
         factionId: String?,
@@ -179,11 +278,14 @@ class PlayerCampaignAttachmentState(
     }
 
     companion object {
-        const val CURRENT_SCHEMA_VERSION: Int = 1
+        const val CURRENT_SCHEMA_VERSION: Int = 2
         const val MAX_IDENTIFIER_LENGTH: Int = 256
         const val MAX_SUBJECTS_PER_TYPE: Int = 64
         const val MAX_UNLOCKS: Int = 256
         const val MAX_FORCE_COOLDOWNS: Int = 32
+        const val MAX_REPUTATION_FACTIONS: Int = 8
+        const val MAX_COMPLETED_TECHNOLOGY: Int = 256
+        const val MAX_EFFECTIVE_CAPABILITIES: Int = 256
         const val MAX_SYNC_PAYLOAD_BYTES: Int = 1_048_576
 
         @JvmField
@@ -243,8 +345,35 @@ class PlayerCampaignAttachmentState(
             ).apply(instance, ::ForceProjection)
         }
 
-        @JvmField
-        val CODEC: Codec<PlayerCampaignAttachmentState> = RecordCodecBuilder.create { instance ->
+        private val GAMEPLAY_CODEC: Codec<GameplayProjection> = RecordCodecBuilder.create { instance ->
+            instance.group(
+                Codec.unboundedMap(Codec.STRING, Codec.intRange(-100, 100))
+                    .optionalFieldOf("reputation", emptyMap())
+                    .forGetter { value: GameplayProjection -> value.reputation },
+                STRING_SET_CODEC.optionalFieldOf("completed_technology", emptySet())
+                    .forGetter { value: GameplayProjection -> value.completedTechnology },
+                Codec.STRING.optionalFieldOf("active_research_node", "")
+                    .forGetter { value: GameplayProjection -> value.activeResearchNode },
+                Codec.unboundedMap(Codec.STRING, Codec.intRange(1, 4_096))
+                    .optionalFieldOf("required_research_inputs", emptyMap())
+                    .forGetter { value: GameplayProjection -> value.requiredResearchInputs },
+                Codec.unboundedMap(Codec.STRING, Codec.intRange(1, 4_096))
+                    .optionalFieldOf("delivered_research_inputs", emptyMap())
+                    .forGetter { value: GameplayProjection -> value.deliveredResearchInputs },
+                Codec.STRING.optionalFieldOf("technician_id", "")
+                    .forGetter { value: GameplayProjection -> value.technicianId },
+                Codec.intRange(0, Int.MAX_VALUE).optionalFieldOf("research_progress", 0)
+                    .forGetter { value: GameplayProjection -> value.researchProgress },
+                Codec.intRange(0, Int.MAX_VALUE).optionalFieldOf("research_required", 0)
+                    .forGetter { value: GameplayProjection -> value.researchRequired },
+                Codec.intRange(0, Int.MAX_VALUE).optionalFieldOf("kingdom_revision", 0)
+                    .forGetter { value: GameplayProjection -> value.kingdomRevision },
+                STRING_SET_CODEC.optionalFieldOf("effective_capabilities", emptySet())
+                    .forGetter { value: GameplayProjection -> value.effectiveCapabilities },
+            ).apply(instance, ::GameplayProjection)
+        }
+
+        private val CURRENT_CODEC: Codec<PlayerCampaignAttachmentState> = RecordCodecBuilder.create { instance ->
             instance.group(
                 Codec.intRange(CURRENT_SCHEMA_VERSION, CURRENT_SCHEMA_VERSION)
                     .fieldOf("schema_version")
@@ -255,8 +384,38 @@ class PlayerCampaignAttachmentState(
                     .forGetter { value: PlayerCampaignAttachmentState -> value.campaign },
                 FORCE_CODEC.fieldOf("force")
                     .forGetter { value: PlayerCampaignAttachmentState -> value.force },
+                GAMEPLAY_CODEC.optionalFieldOf("gameplay", GameplayProjection.empty())
+                    .forGetter { value: PlayerCampaignAttachmentState -> value.gameplay },
             ).apply(instance, ::PlayerCampaignAttachmentState)
         }
+
+        private val LEGACY_CODEC: Codec<PlayerCampaignAttachmentState> = RecordCodecBuilder.create { instance ->
+            instance.group(
+                Codec.intRange(1, 1).fieldOf("schema_version")
+                    .forGetter { _: PlayerCampaignAttachmentState -> 1 },
+                UUIDUtil.CODEC.fieldOf("player_id")
+                    .forGetter { value: PlayerCampaignAttachmentState -> value.playerId },
+                CAMPAIGN_CODEC.fieldOf("progression")
+                    .forGetter { value: PlayerCampaignAttachmentState -> value.campaign },
+                FORCE_CODEC.fieldOf("force")
+                    .forGetter { value: PlayerCampaignAttachmentState -> value.force },
+            ).apply(instance) { _, playerId, campaign, force ->
+                PlayerCampaignAttachmentState(
+                    CURRENT_SCHEMA_VERSION,
+                    playerId,
+                    campaign,
+                    force,
+                    GameplayProjection.empty(),
+                )
+            }
+        }
+
+        @JvmField
+        val CODEC: Codec<PlayerCampaignAttachmentState> =
+            Codec.either(CURRENT_CODEC, LEGACY_CODEC).xmap(
+                { either -> either.map({ it }, { it }) },
+                { value -> Either.left(value) },
+            )
 
         @JvmField
         val STREAM_CODEC: StreamCodec<RegistryFriendlyByteBuf, PlayerCampaignAttachmentState> =
@@ -283,11 +442,29 @@ class PlayerCampaignAttachmentState(
             writeString(buffer, value.force.tradition)
             buffer.writeVarInt(value.force.energy)
             writeCooldowns(buffer, value.force.cooldownEnds)
+            writeStringIntMap(buffer, value.gameplay.reputation, MAX_REPUTATION_FACTIONS, "reputation")
+            writeStringSet(
+                buffer,
+                value.gameplay.completedTechnology,
+                MAX_COMPLETED_TECHNOLOGY,
+            )
+            writeString(buffer, value.gameplay.activeResearchNode)
+            writeStringIntMap(buffer, value.gameplay.requiredResearchInputs, 16, "requiredResearchInputs")
+            writeStringIntMap(buffer, value.gameplay.deliveredResearchInputs, 16, "deliveredResearchInputs")
+            writeString(buffer, value.gameplay.technicianId)
+            buffer.writeVarInt(value.gameplay.researchProgress)
+            buffer.writeVarInt(value.gameplay.researchRequired)
+            buffer.writeVarInt(value.gameplay.kingdomRevision)
+            writeStringSet(
+                buffer,
+                value.gameplay.effectiveCapabilities,
+                MAX_EFFECTIVE_CAPABILITIES,
+            )
         }
 
         private fun read(buffer: RegistryFriendlyByteBuf): PlayerCampaignAttachmentState {
             val schemaVersion = buffer.readVarInt()
-            require(schemaVersion == CURRENT_SCHEMA_VERSION) {
+            require(schemaVersion in 1..CURRENT_SCHEMA_VERSION) {
                 "Unsupported player campaign attachment schema $schemaVersion"
             }
             val playerId = buffer.readUUID()
@@ -303,7 +480,61 @@ class PlayerCampaignAttachmentState(
                 buffer.readVarInt(),
                 readCooldowns(buffer),
             )
-            return PlayerCampaignAttachmentState(schemaVersion, playerId, campaign, force)
+            val gameplay = if (schemaVersion >= 2) {
+                GameplayProjection(
+                    readStringIntMap(buffer, MAX_REPUTATION_FACTIONS, "reputation"),
+                    readStringSet(buffer, MAX_COMPLETED_TECHNOLOGY, "completedTechnology"),
+                    readString(buffer),
+                    readStringIntMap(buffer, 16, "requiredResearchInputs", 1, 4_096),
+                    readStringIntMap(buffer, 16, "deliveredResearchInputs", 1, 4_096),
+                    readString(buffer),
+                    nonNegative(buffer.readVarInt(), "researchProgress"),
+                    nonNegative(buffer.readVarInt(), "researchRequired"),
+                    nonNegative(buffer.readVarInt(), "kingdomRevision"),
+                    readStringSet(buffer, MAX_EFFECTIVE_CAPABILITIES, "effectiveCapabilities"),
+                )
+            } else {
+                GameplayProjection.empty()
+            }
+            return PlayerCampaignAttachmentState(
+                CURRENT_SCHEMA_VERSION,
+                playerId,
+                campaign,
+                force,
+                gameplay,
+            )
+        }
+
+        private fun writeStringIntMap(
+            buffer: RegistryFriendlyByteBuf,
+            values: Map<String, Int>,
+            maximum: Int,
+            label: String,
+        ) {
+            writeSize(buffer, values.size, maximum, label)
+            values.toSortedMap().forEach { (key, value) ->
+                writeString(buffer, key)
+                buffer.writeVarInt(value)
+            }
+        }
+
+        private fun readStringIntMap(
+            buffer: RegistryFriendlyByteBuf,
+            maximum: Int,
+            label: String,
+            minimumValue: Int = -100,
+            maximumValue: Int = 100,
+        ): Map<String, Int> {
+            val size = readSize(buffer, maximum, label)
+            val values = LinkedHashMap<String, Int>(size)
+            repeat(size) {
+                val key = readString(buffer)
+                val value = buffer.readVarInt()
+                require(value in minimumValue..maximumValue && values.put(key, value) == null) {
+                    "Invalid or duplicate value in $label"
+                }
+            }
+            return values
         }
 
         private fun writeEventTotals(

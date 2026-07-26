@@ -1,1 +1,16 @@
-{"type":"minecraft:crafting_shaped","category":"equipment","pattern":["X X","X X"],"key":{"X":"galacticwars:beskar_ingot"},"result":{"id":"galacticwars:beskar_boots","count":1}}
+{
+  "type": "galacticwars:fabrication",
+  "ingredients": [
+    {
+      "ingredient": "galacticwars:beskar_ingot",
+      "count": 4
+    }
+  ],
+  "result": {
+    "id": "galacticwars:beskar_boots",
+    "count": 1
+  },
+  "faction": "galacticwars:mandalorian",
+  "technology": "galacticwars:beskar_forge",
+  "exportable": false
+}

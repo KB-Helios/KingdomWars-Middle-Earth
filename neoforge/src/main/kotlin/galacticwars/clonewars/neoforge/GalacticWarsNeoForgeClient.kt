@@ -11,6 +11,7 @@ import galacticwars.clonewars.client.gui.BlasterHeatHud
 import galacticwars.clonewars.client.gui.ClassHud
 import galacticwars.clonewars.client.gui.CommandCenterNavigationScreen
 import galacticwars.clonewars.client.gui.CommandCenterOperationsScreen
+import galacticwars.clonewars.client.gui.FabricatorScreen
 import galacticwars.clonewars.client.gui.FactionSelectionScreen
 import galacticwars.clonewars.client.gui.ForceHud
 import galacticwars.clonewars.client.gui.ObjectiveMarkerHud
@@ -61,6 +62,7 @@ object GalacticWarsNeoForgeClient {
             ModMenuTypes.COMMAND_CENTER_OPERATIONS.get(),
             ::CommandCenterOperationsScreen,
         )
+        event.register(ModMenuTypes.FABRICATOR.get(), ::FabricatorScreen)
     }
 
     @SubscribeEvent

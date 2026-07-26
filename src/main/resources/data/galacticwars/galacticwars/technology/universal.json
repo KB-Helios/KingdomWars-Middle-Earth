@@ -1,0 +1,58 @@
+{
+  "faction": "galacticwars:universal",
+  "nodes": [
+    {
+      "id": "galacticwars:field_fabrication",
+      "name": "Field Fabrication",
+      "prerequisites": [],
+      "inputs": {
+        "minecraft:iron_ingot": 16,
+        "minecraft:redstone": 8
+      },
+      "work": 1200,
+      "recipes": []
+    },
+    {
+      "id": "galacticwars:industrial_tooling",
+      "name": "Industrial Tooling",
+      "prerequisites": ["galacticwars:field_fabrication"],
+      "inputs": {
+        "minecraft:iron_ingot": 24,
+        "galacticwars:energy_cell": 4
+      },
+      "work": 2400,
+      "recipes": [
+        "galacticwars:power_drill",
+        "galacticwars:plasma_cutter",
+        "galacticwars:sonic_excavator",
+        "galacticwars:hydrospanner"
+      ]
+    },
+    {
+      "id": "galacticwars:hyperspace_navigation",
+      "name": "Hyperspace Navigation",
+      "prerequisites": ["galacticwars:field_fabrication"],
+      "inputs": {
+        "minecraft:gold_ingot": 16,
+        "minecraft:ender_pearl": 4,
+        "galacticwars:energy_cell": 8
+      },
+      "work": 3600,
+      "recipes": ["galacticwars:hyperspace_navigator"]
+    },
+    {
+      "id": "galacticwars:vehicle_engineering",
+      "name": "Vehicle Engineering",
+      "prerequisites": [
+        "galacticwars:industrial_tooling",
+        "galacticwars:hyperspace_navigation"
+      ],
+      "inputs": {
+        "minecraft:iron_block": 8,
+        "galacticwars:energy_cell": 16
+      },
+      "work": 4800,
+      "recipes": []
+    }
+  ]
+}

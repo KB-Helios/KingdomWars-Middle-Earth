@@ -28,10 +28,7 @@ public final class SurvivalAcquisitionIntegrityTest {
     private static final Map<String, String> ADVERTISED_PLAYER_ITEMS = advertisedPlayerItems();
     private static final Set<String> MANDATORY_PROGRESSION_BLOCKS = Set.of("command_center");
     private static final Set<String> ONBOARDING_RECIPE_REWARDS = Set.of(
-            "command_center", "energy_cell", "dc15_blaster", "e5_blaster", "westar_blaster",
-            "scatter_blaster", "claim_transponder", "blue_lightsaber", "green_lightsaber",
-            "red_lightsaber", "purple_lightsaber", "yellow_lightsaber", "white_lightsaber",
-            "power_drill", "plasma_cutter", "sonic_excavator", "hydrospanner");
+            "command_center", "fabricator", "energy_cell", "claim_transponder");
 
     private SurvivalAcquisitionIntegrityTest() {
     }
@@ -125,7 +122,7 @@ public final class SurvivalAcquisitionIntegrityTest {
             }
         }
         assertTrue(rewardedRecipes.containsAll(ONBOARDING_RECIPE_REWARDS),
-                "Onboarding milestones must unlock every starter command, weapon, and tool recipe");
+                "Onboarding milestones must unlock only the baseline progression recipes");
 
         JsonObject creditRecipeUnlock = readJson(ADVANCEMENTS.resolve("recipes/credit_chip.json"));
         assertTrue(creditRecipeUnlock.toString().contains("minecraft:copper_ingot")

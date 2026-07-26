@@ -15,6 +15,7 @@ import galacticwars.clonewars.registry.ModEntityTypes;
 import galacticwars.clonewars.registry.ModItems;
 import galacticwars.clonewars.registry.ModMenuTypes;
 import galacticwars.clonewars.registry.ModSounds;
+import galacticwars.clonewars.registry.ModRecipeTypes;
 import galacticwars.clonewars.registry.ModWorldgenTypes;
 import galacticwars.clonewars.runtime.GalacticRuntimeEvents;
 import galacticwars.clonewars.world.FactionNaturalSpawnRules;
@@ -44,6 +45,7 @@ public final class GalacticWars {
         ModEntityTypes.register();
         ModDataComponents.register();
         ModItems.register();
+        ModRecipeTypes.register();
         ModMenuTypes.register();
         ModSounds.register();
         ModWorldgenTypes.register();

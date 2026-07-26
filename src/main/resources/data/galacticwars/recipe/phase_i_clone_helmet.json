@@ -1,1 +1,16 @@
-{"type":"minecraft:crafting_shaped","category":"equipment","pattern":["XXX","X X"],"key":{"X":"galacticwars:republic_plastoid_ingot"},"result":{"id":"galacticwars:phase_i_clone_helmet","count":1}}
+{
+  "type": "galacticwars:fabrication",
+  "ingredients": [
+    {
+      "ingredient": "galacticwars:republic_plastoid_ingot",
+      "count": 5
+    }
+  ],
+  "result": {
+    "id": "galacticwars:phase_i_clone_helmet",
+    "count": 1
+  },
+  "faction": "galacticwars:republic",
+  "technology": "galacticwars:clone_armor",
+  "exportable": false
+}

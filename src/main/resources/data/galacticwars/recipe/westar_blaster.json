@@ -1,20 +1,32 @@
 {
-  "type": "minecraft:crafting_shaped",
-  "category": "equipment",
-  "pattern": [
-    "MGM",
-    " CE",
-    "  I"
+  "type": "galacticwars:fabrication",
+  "ingredients": [
+    {
+      "ingredient": "galacticwars:mandalorian_alloy_ingot",
+      "count": 2
+    },
+    {
+      "ingredient": "minecraft:gold_ingot",
+      "count": 1
+    },
+    {
+      "ingredient": "minecraft:copper_ingot",
+      "count": 1
+    },
+    {
+      "ingredient": "galacticwars:energy_cell",
+      "count": 1
+    },
+    {
+      "ingredient": "minecraft:iron_ingot",
+      "count": 1
+    }
   ],
-  "key": {
-    "M": "galacticwars:mandalorian_alloy_ingot",
-    "G": "minecraft:gold_ingot",
-    "C": "minecraft:copper_ingot",
-    "E": "galacticwars:energy_cell",
-    "I": "minecraft:iron_ingot"
-  },
   "result": {
     "id": "galacticwars:westar_blaster",
     "count": 1
-  }
+  },
+  "faction": "galacticwars:mandalorian",
+  "technology": "galacticwars:clan_armaments",
+  "exportable": true
 }

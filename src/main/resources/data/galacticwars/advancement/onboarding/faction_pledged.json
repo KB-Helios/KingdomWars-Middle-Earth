@@ -26,11 +26,7 @@
   ],
   "rewards": {
     "recipes": [
-      "galacticwars:energy_cell",
-      "galacticwars:dc15_blaster",
-      "galacticwars:e5_blaster",
-      "galacticwars:westar_blaster",
-      "galacticwars:scatter_blaster"
+      "galacticwars:energy_cell"
     ]
   },
   "sends_telemetry_event": false

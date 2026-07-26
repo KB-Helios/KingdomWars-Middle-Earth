@@ -27,11 +27,17 @@ public record GameplayCatalogPayload(
         String contentHash,
         List<ClassEntry> classes,
         List<VehicleEntry> vehicles,
-        List<BlueprintEntry> blueprints
+        List<BlueprintEntry> blueprints,
+        List<TechnologyEntry> technology,
+        List<FabricationEntry> fabrication,
+        List<RelationPolicyEntry> relationPolicies
 ) implements CustomPacketPayload {
     public static final int MAX_CLASSES = 128;
     public static final int MAX_VEHICLES = 64;
     public static final int MAX_BLUEPRINTS = 128;
+    public static final int MAX_TECHNOLOGY = 256;
+    public static final int MAX_FABRICATION = 256;
+    public static final int MAX_RELATION_POLICIES = 16;
     public static final int MAX_ABILITIES_PER_CLASS = 8;
     public static final int MAX_REQUIREMENTS_PER_CLASS = 16;
     public static final int MAX_TEXT_BYTES = 192;
@@ -50,13 +56,20 @@ public record GameplayCatalogPayload(
                         writeList(buffer, payload.classes(), MAX_CLASSES, ClassEntry::write);
                         writeList(buffer, payload.vehicles(), MAX_VEHICLES, VehicleEntry::write);
                         writeList(buffer, payload.blueprints(), MAX_BLUEPRINTS, BlueprintEntry::write);
+                        writeList(buffer, payload.technology(), MAX_TECHNOLOGY, TechnologyEntry::write);
+                        writeList(buffer, payload.fabrication(), MAX_FABRICATION, FabricationEntry::write);
+                        writeList(buffer, payload.relationPolicies(), MAX_RELATION_POLICIES,
+                                RelationPolicyEntry::write);
                     },
                     buffer -> new GameplayCatalogPayload(
                             buffer.readVarLong(),
                             buffer.readUtf(64),
                             readList(buffer, MAX_CLASSES, ClassEntry::read),
                             readList(buffer, MAX_VEHICLES, VehicleEntry::read),
-                            readList(buffer, MAX_BLUEPRINTS, BlueprintEntry::read)));
+                            readList(buffer, MAX_BLUEPRINTS, BlueprintEntry::read),
+                            readList(buffer, MAX_TECHNOLOGY, TechnologyEntry::read),
+                            readList(buffer, MAX_FABRICATION, FabricationEntry::read),
+                            readList(buffer, MAX_RELATION_POLICIES, RelationPolicyEntry::read)));
 
     public GameplayCatalogPayload {
         if (generation < 0L) {
@@ -70,9 +83,27 @@ public record GameplayCatalogPayload(
         classes = boundedCopy(classes, MAX_CLASSES, "classes");
         vehicles = boundedCopy(vehicles, MAX_VEHICLES, "vehicles");
         blueprints = boundedCopy(blueprints, MAX_BLUEPRINTS, "blueprints");
+        technology = boundedCopy(technology, MAX_TECHNOLOGY, "technology");
+        fabrication = boundedCopy(fabrication, MAX_FABRICATION, "fabrication");
+        relationPolicies = boundedCopy(
+                relationPolicies, MAX_RELATION_POLICIES, "relationPolicies");
         requireUnique(classes.stream().map(ClassEntry::classId).toList(), "class id");
         requireUnique(vehicles.stream().map(VehicleEntry::vehicleId).toList(), "vehicle id");
         requireUnique(blueprints.stream().map(BlueprintEntry::blueprintId).toList(), "blueprint id");
+        requireUnique(technology.stream().map(TechnologyEntry::nodeId).toList(), "technology id");
+        requireUnique(fabrication.stream().map(FabricationEntry::recipeId).toList(), "fabrication id");
+        requireUnique(relationPolicies.stream().map(RelationPolicyEntry::factionId).toList(),
+                "relation policy faction");
+    }
+
+    public GameplayCatalogPayload(
+            long generation,
+            String contentHash,
+            List<ClassEntry> classes,
+            List<VehicleEntry> vehicles,
+            List<BlueprintEntry> blueprints
+    ) {
+        this(generation, contentHash, classes, vehicles, blueprints, List.of(), List.of(), List.of());
     }
 
     public static GameplayCatalogPayload fromSnapshot(
@@ -114,7 +145,48 @@ public record GameplayCatalogPayload(
                 .map(definition -> new BlueprintEntry(
                         definition.id(), definition.displayName(), definition.placements().size()))
                 .toList();
-        return new GameplayCatalogPayload(generation, contentHash, classes, vehicles, blueprints);
+        List<TechnologyEntry> technology = snapshot.technology().nodes().values().stream()
+                .sorted(java.util.Comparator.comparing(
+                        galacticwars.clonewars.technology.TechnologyNodeDefinition::id))
+                .map(node -> new TechnologyEntry(
+                        node.id(),
+                        node.factionId(),
+                        node.displayName(),
+                        node.prerequisites().stream().sorted().toList(),
+                        node.requiredInputs().entrySet().stream()
+                                .sorted(java.util.Map.Entry.comparingByKey())
+                                .map(entry -> new CostEntry(entry.getKey(), entry.getValue()))
+                                .toList(),
+                        node.requiredWork(),
+                        node.recipeIds().stream().sorted().toList()))
+                .toList();
+        List<FabricationEntry> fabrication = snapshot.technology().nodes().values().stream()
+                .flatMap(node -> node.recipeIds().stream().map(recipe -> new FabricationEntry(
+                        recipe,
+                        node.factionId(),
+                        node.id(),
+                        galacticwars.clonewars.progression.GameplayAccessResolver.EXPORTABLE_RECIPES
+                                .contains(recipe))))
+                .sorted(java.util.Comparator.comparing(FabricationEntry::recipeId))
+                .toList();
+        List<RelationPolicyEntry> relationPolicies = snapshot.factions().definitions().values().stream()
+                .sorted(java.util.Comparator.comparing(faction -> faction.id().toString()))
+                .map(faction -> {
+                    var profile = snapshot.npcAiProfile(faction.id())
+                            .orElseGet(() -> galacticwars.clonewars.faction.ai.NpcAiProfile.defaults(
+                                    faction.id()));
+                    return new RelationPolicyEntry(
+                            faction.id().toString(),
+                            profile.friendlyThreshold(),
+                            profile.neutralThreshold(),
+                            profile.waryThreshold(),
+                            profile.friendlyTradePricePercent(),
+                            faction.minimumHiringAlignment());
+                })
+                .toList();
+        return new GameplayCatalogPayload(
+                generation, contentHash, classes, vehicles, blueprints, technology, fabrication,
+                relationPolicies);
     }
 
     @Override
@@ -232,6 +304,132 @@ public record GameplayCatalogPayload(
 
         private static BlueprintEntry read(RegistryFriendlyByteBuf buffer) {
             return new BlueprintEntry(readText(buffer), readText(buffer), buffer.readVarInt());
+        }
+    }
+
+    public record CostEntry(String itemId, int count) {
+        public CostEntry {
+            itemId = identifier(itemId, "technology cost item");
+            if (count < 1 || count > 4_096) {
+                throw new IllegalArgumentException("technology cost is outside its bound");
+            }
+        }
+
+        private static void write(RegistryFriendlyByteBuf buffer, CostEntry value) {
+            writeText(buffer, value.itemId());
+            buffer.writeVarInt(value.count());
+        }
+
+        private static CostEntry read(RegistryFriendlyByteBuf buffer) {
+            return new CostEntry(readText(buffer), buffer.readVarInt());
+        }
+    }
+
+    public record TechnologyEntry(
+            String nodeId,
+            String factionId,
+            String displayName,
+            List<String> prerequisites,
+            List<CostEntry> costs,
+            int requiredWork,
+            List<String> recipeIds
+    ) {
+        public TechnologyEntry {
+            nodeId = identifier(nodeId, "technology node");
+            factionId = identifier(factionId, "technology faction");
+            displayName = display(displayName, "technology display name");
+            prerequisites = boundedCopy(prerequisites, 16, "technology prerequisites").stream()
+                    .map(value -> identifier(value, "technology prerequisite")).toList();
+            costs = boundedCopy(costs, 16, "technology costs");
+            recipeIds = boundedCopy(recipeIds, 64, "technology recipes").stream()
+                    .map(value -> identifier(value, "technology recipe")).toList();
+            if (requiredWork < 20 || requiredWork > 720_000) {
+                throw new IllegalArgumentException("technology work is outside its bound");
+            }
+        }
+
+        private static void write(RegistryFriendlyByteBuf buffer, TechnologyEntry value) {
+            writeText(buffer, value.nodeId());
+            writeText(buffer, value.factionId());
+            writeText(buffer, value.displayName());
+            writeList(buffer, value.prerequisites(), 16, GameplayCatalogPayload::writeText);
+            writeList(buffer, value.costs(), 16, CostEntry::write);
+            buffer.writeVarInt(value.requiredWork());
+            writeList(buffer, value.recipeIds(), 64, GameplayCatalogPayload::writeText);
+        }
+
+        private static TechnologyEntry read(RegistryFriendlyByteBuf buffer) {
+            return new TechnologyEntry(
+                    readText(buffer),
+                    readText(buffer),
+                    readText(buffer),
+                    readList(buffer, 16, GameplayCatalogPayload::readText),
+                    readList(buffer, 16, CostEntry::read),
+                    buffer.readVarInt(),
+                    readList(buffer, 64, GameplayCatalogPayload::readText));
+        }
+    }
+
+    public record FabricationEntry(
+            String recipeId,
+            String factionId,
+            String technologyId,
+            boolean exportable
+    ) {
+        public FabricationEntry {
+            recipeId = identifier(recipeId, "fabrication recipe");
+            factionId = identifier(factionId, "fabrication faction");
+            technologyId = identifier(technologyId, "fabrication technology");
+        }
+
+        private static void write(RegistryFriendlyByteBuf buffer, FabricationEntry value) {
+            writeText(buffer, value.recipeId());
+            writeText(buffer, value.factionId());
+            writeText(buffer, value.technologyId());
+            buffer.writeBoolean(value.exportable());
+        }
+
+        private static FabricationEntry read(RegistryFriendlyByteBuf buffer) {
+            return new FabricationEntry(
+                    readText(buffer), readText(buffer), readText(buffer), buffer.readBoolean());
+        }
+    }
+
+    public record RelationPolicyEntry(
+            String factionId,
+            int friendlyThreshold,
+            int neutralThreshold,
+            int waryThreshold,
+            int friendlyTradePricePercent,
+            int recruitmentThreshold
+    ) {
+        public RelationPolicyEntry {
+            factionId = identifier(factionId, "relation faction");
+            if (friendlyThreshold > 100 || waryThreshold < -100
+                    || friendlyThreshold <= neutralThreshold || neutralThreshold <= waryThreshold
+                    || friendlyTradePricePercent < 1 || friendlyTradePricePercent > 100
+                    || recruitmentThreshold < -100 || recruitmentThreshold > 100) {
+                throw new IllegalArgumentException("Invalid relation policy for " + factionId);
+            }
+        }
+
+        private static void write(RegistryFriendlyByteBuf buffer, RelationPolicyEntry value) {
+            writeText(buffer, value.factionId());
+            buffer.writeVarInt(value.friendlyThreshold());
+            buffer.writeVarInt(value.neutralThreshold());
+            buffer.writeVarInt(value.waryThreshold());
+            buffer.writeVarInt(value.friendlyTradePricePercent());
+            buffer.writeVarInt(value.recruitmentThreshold());
+        }
+
+        private static RelationPolicyEntry read(RegistryFriendlyByteBuf buffer) {
+            return new RelationPolicyEntry(
+                    readText(buffer),
+                    buffer.readVarInt(),
+                    buffer.readVarInt(),
+                    buffer.readVarInt(),
+                    buffer.readVarInt(),
+                    buffer.readVarInt());
         }
     }
 

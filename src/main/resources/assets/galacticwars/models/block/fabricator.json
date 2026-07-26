@@ -1,0 +1,12 @@
+{
+  "parent": "minecraft:block/cube",
+  "textures": {
+    "down": "galacticwars:block/command_center_bottom",
+    "up": "galacticwars:block/command_center_top",
+    "north": "galacticwars:block/command_center_side",
+    "south": "galacticwars:block/command_center_side",
+    "west": "galacticwars:block/command_center_side",
+    "east": "galacticwars:block/command_center_side",
+    "particle": "galacticwars:block/command_center_side"
+  }
+}

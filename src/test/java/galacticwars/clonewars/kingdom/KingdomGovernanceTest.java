@@ -23,6 +23,7 @@ public final class KingdomGovernanceTest {
         malformedMemberRolesUseSafeFallback();
         permissionSetsArePrecomputedAndImmutable();
         logisticsAuthorityBelongsToOperationalLeaders();
+        technologyAuthorityBelongsToOwnerAndOfficers();
         courierRouteUpdatesAreRevisionedOnAssignedWorksites();
         courierRouteAdmissionRequiresRuntimeDimensionAndClaims();
         System.out.println("KingdomGovernanceTest passed");
@@ -121,6 +122,19 @@ public final class KingdomGovernanceTest {
                 KingdomPermission.MANAGE_LOGISTICS), "builder logistics denial");
         assertTrue(!KingdomPermissionPolicy.allows(KingdomMemberRole.MEMBER,
                 KingdomPermission.MANAGE_LOGISTICS), "member logistics denial");
+    }
+
+    private static void technologyAuthorityBelongsToOwnerAndOfficers() {
+        assertTrue(KingdomPermissionPolicy.allows(KingdomMemberRole.OWNER,
+                KingdomPermission.MANAGE_TECHNOLOGY), "owner technology authority");
+        assertTrue(KingdomPermissionPolicy.allows(KingdomMemberRole.OFFICER,
+                KingdomPermission.MANAGE_TECHNOLOGY), "officer technology authority");
+        assertTrue(!KingdomPermissionPolicy.allows(KingdomMemberRole.QUARTERMASTER,
+                KingdomPermission.MANAGE_TECHNOLOGY), "quartermaster technology denial");
+        assertTrue(!KingdomPermissionPolicy.allows(KingdomMemberRole.BUILDER,
+                KingdomPermission.MANAGE_TECHNOLOGY), "builder technology denial");
+        assertTrue(!KingdomPermissionPolicy.allows(KingdomMemberRole.MEMBER,
+                KingdomPermission.MANAGE_TECHNOLOGY), "member technology denial");
     }
 
     private static void courierRouteUpdatesAreRevisionedOnAssignedWorksites() {

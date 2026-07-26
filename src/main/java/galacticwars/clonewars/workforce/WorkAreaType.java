@@ -11,5 +11,6 @@ public enum WorkAreaType {
     KITCHEN,
     MARKET,
     WORKER_HOME,
-    COURIER_ROUTE
+    COURIER_ROUTE,
+    LABORATORY
 }

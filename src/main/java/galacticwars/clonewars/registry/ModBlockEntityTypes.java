@@ -7,6 +7,7 @@ import galacticwars.clonewars.settlement.CommandCenterBlockEntity;
 import galacticwars.clonewars.world.BlueprintSiteAnchorBlockEntity;
 import galacticwars.clonewars.world.BlueprintSiteLootBlockEntity;
 import galacticwars.clonewars.world.FactionCommandPostBlockEntity;
+import galacticwars.clonewars.fabrication.FabricatorBlockEntity;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.world.level.block.entity.BlockEntityType;
 
@@ -32,6 +33,10 @@ public final class ModBlockEntityTypes {
             BLOCK_ENTITY_TYPES.register("faction_command_post", () -> new BlockEntityType<>(
                     FactionCommandPostBlockEntity::new,
                     Set.of(ModBlocks.FACTION_COMMAND_POST.get())));
+    public static final RegistrySupplier<BlockEntityType<FabricatorBlockEntity>> FABRICATOR =
+            BLOCK_ENTITY_TYPES.register("fabricator", () -> new BlockEntityType<>(
+                    FabricatorBlockEntity::new,
+                    Set.of(ModBlocks.FABRICATOR.get())));
 
     private ModBlockEntityTypes() {
     }

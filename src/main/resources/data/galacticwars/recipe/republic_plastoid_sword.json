@@ -1,1 +1,20 @@
-{"type":"minecraft:crafting_shaped","category":"equipment","pattern":["X","X","S"],"key":{"X":"galacticwars:republic_plastoid_ingot","S":"minecraft:stick"},"result":{"id":"galacticwars:republic_plastoid_sword","count":1}}
+{
+  "type": "galacticwars:fabrication",
+  "ingredients": [
+    {
+      "ingredient": "galacticwars:republic_plastoid_ingot",
+      "count": 2
+    },
+    {
+      "ingredient": "minecraft:stick",
+      "count": 1
+    }
+  ],
+  "result": {
+    "id": "galacticwars:republic_plastoid_sword",
+    "count": 1
+  },
+  "faction": "galacticwars:republic",
+  "technology": "galacticwars:clone_field_arms",
+  "exportable": false
+}

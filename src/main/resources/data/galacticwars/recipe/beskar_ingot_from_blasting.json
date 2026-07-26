@@ -1,1 +1,15 @@
-{"type":"minecraft:blasting","ingredient":"galacticwars:raw_beskar","result":{"id":"galacticwars:beskar_ingot"},"experience":0.7,"cookingtime":100}
+{
+  "type": "galacticwars:fabrication",
+  "ingredients": [
+    {
+      "ingredient": "galacticwars:raw_beskar",
+      "count": 1
+    }
+  ],
+  "result": {
+    "id": "galacticwars:beskar_ingot"
+  },
+  "faction": "galacticwars:mandalorian",
+  "technology": "galacticwars:beskar_metallurgy",
+  "exportable": false
+}

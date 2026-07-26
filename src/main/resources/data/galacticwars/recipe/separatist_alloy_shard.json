@@ -1,1 +1,20 @@
-{"type":"minecraft:crafting_shapeless","category":"misc","ingredients":["minecraft:iron_ingot","minecraft:netherrack"],"result":{"id":"galacticwars:separatist_alloy_shard","count":4}}
+{
+  "type": "galacticwars:fabrication",
+  "ingredients": [
+    {
+      "ingredient": "minecraft:iron_ingot",
+      "count": 1
+    },
+    {
+      "ingredient": "minecraft:netherrack",
+      "count": 1
+    }
+  ],
+  "result": {
+    "id": "galacticwars:separatist_alloy_shard",
+    "count": 4
+  },
+  "faction": "galacticwars:separatist",
+  "technology": "galacticwars:alloy_reclamation",
+  "exportable": false
+}

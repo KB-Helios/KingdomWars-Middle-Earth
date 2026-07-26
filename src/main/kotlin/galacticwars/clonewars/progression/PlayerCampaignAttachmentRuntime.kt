@@ -63,9 +63,57 @@ object PlayerCampaignAttachmentRuntime {
         OnboardingAdvancementService.synchronize(player, authoritativeProgression)
         ObjectiveMarkerService.synchronize(player, authoritativeProgression)
         val authoritativeForce = ForceSavedData.get(level).state(playerId)
+        val kingdoms = galacticwars.clonewars.kingdom.KingdomSavedData.get(level)
+        val kingdom = kingdoms.kingdomForPlayer(playerId).orElse(null)
+        if (kingdom != null) {
+            galacticwars.clonewars.technology.TechnologyMigrationService.migrateKingdom(level, kingdom)
+        }
+        val technology = kingdom?.let { kingdoms.technologyStateOrDefault(it.id()) }
+        val project = technology?.activeProject()?.orElse(null)
+        val definition = project?.let {
+            galacticwars.clonewars.data.GameplayDataManager.snapshot().technology()
+                .node(it.nodeId()).orElse(null)
+        }
+        val reputation = galacticwars.clonewars.faction.FactionAlignmentSavedData.get(level)
+            .alignment(playerId).scores().entries
+            .sortedBy { it.key.toString() }
+            .associateTo(linkedMapOf()) { it.key.toString() to it.value }
+        val capabilities = linkedSetOf<String>().apply {
+            addAll(authoritativeProgression.unlocks)
+            technology?.completedNodes()?.forEach { add("technology:$it") }
+            galacticwars.clonewars.progression.GameplayAccessResolver.EXPORTABLE_RECIPES.forEach { recipeId ->
+                val node = galacticwars.clonewars.data.GameplayDataManager.snapshot().technology()
+                    .nodeForRecipe(recipeId).orElse(null)
+                if (node != null && galacticwars.clonewars.progression.GameplayAccessResolver.fabrication(
+                        player,
+                        recipeId,
+                        node.factionId(),
+                        node.id(),
+                        true,
+                        true,
+                        true,
+                    ).allowed()
+                ) {
+                    add("recipe:$recipeId")
+                }
+            }
+        }
+        val gameplayProjection = PlayerCampaignAttachmentState.GameplayProjection(
+            reputation,
+            technology?.completedNodes()?.toSet().orEmpty(),
+            project?.nodeId().orEmpty(),
+            project?.requiredInputs().orEmpty(),
+            project?.deliveredInputs().orEmpty(),
+            project?.technicianId()?.map { it.toString() }?.orElse("").orEmpty(),
+            project?.workProgress() ?: 0,
+            definition?.requiredWork() ?: 0,
+            technology?.revision() ?: 0,
+            capabilities,
+        )
         val projected = PlayerCampaignAttachmentService.fromAuthoritative(
             authoritativeProgression,
             authoritativeForce,
+            gameplayProjection,
         )
         check(projected.playerId == playerId) {
             "Authoritative player campaign projection belongs to another player"

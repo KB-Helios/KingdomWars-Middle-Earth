@@ -1,0 +1,29 @@
+{
+  "faction": "galacticwars:hutt_cartel",
+  "nodes": [
+    {
+      "id": "galacticwars:salvage_fabrication",
+      "name": "Salvage Fabrication",
+      "prerequisites": ["galacticwars:field_fabrication"],
+      "inputs": {"minecraft:iron_ingot": 12, "minecraft:copper_ingot": 12},
+      "work": 1800,
+      "recipes": []
+    },
+    {
+      "id": "galacticwars:mercenary_armaments",
+      "name": "Mercenary Armaments",
+      "prerequisites": ["galacticwars:salvage_fabrication"],
+      "inputs": {"minecraft:iron_ingot": 24, "galacticwars:energy_cell": 8},
+      "work": 3200,
+      "recipes": ["galacticwars:scatter_blaster", "galacticwars:vibroblade"]
+    },
+    {
+      "id": "galacticwars:contraband_navigation",
+      "name": "Contraband Navigation",
+      "prerequisites": ["galacticwars:salvage_fabrication", "galacticwars:hyperspace_navigation"],
+      "inputs": {"minecraft:gold_ingot": 24, "galacticwars:credit_chip": 16},
+      "work": 4800,
+      "recipes": []
+    }
+  ]
+}

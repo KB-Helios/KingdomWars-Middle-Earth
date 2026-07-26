@@ -1,20 +1,32 @@
 {
-  "type": "minecraft:crafting_shaped",
-  "category": "equipment",
-  "pattern": [
-    "BRB",
-    "CEC",
-    " I "
+  "type": "galacticwars:fabrication",
+  "ingredients": [
+    {
+      "ingredient": "galacticwars:beskar_ingot",
+      "count": 2
+    },
+    {
+      "ingredient": "minecraft:redstone_block",
+      "count": 1
+    },
+    {
+      "ingredient": "minecraft:copper_ingot",
+      "count": 2
+    },
+    {
+      "ingredient": "galacticwars:energy_cell",
+      "count": 1
+    },
+    {
+      "ingredient": "minecraft:iron_ingot",
+      "count": 1
+    }
   ],
-  "key": {
-    "B": "galacticwars:beskar_ingot",
-    "R": "minecraft:redstone_block",
-    "C": "minecraft:copper_ingot",
-    "E": "galacticwars:energy_cell",
-    "I": "minecraft:iron_ingot"
-  },
   "result": {
     "id": "galacticwars:scatter_blaster",
     "count": 1
-  }
+  },
+  "faction": "galacticwars:hutt_cartel",
+  "technology": "galacticwars:mercenary_armaments",
+  "exportable": true
 }

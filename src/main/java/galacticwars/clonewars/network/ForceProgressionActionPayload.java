@@ -19,12 +19,13 @@ public record ForceProgressionActionPayload(
     public static final int LEARN = 0;
     public static final int EQUIP = 1;
     public static final int RESPEC = 2;
+    public static final int RITUAL = 3;
 
     public ForceProgressionActionPayload {
         Objects.requireNonNull(replayId, "replayId");
         Objects.requireNonNull(shrinePos, "shrinePos");
         Objects.requireNonNull(subjectId, "subjectId");
-        if (action < LEARN || action > RESPEC || subjectId.length() > 64 || slot < -1 || slot > 2) {
+        if (action < LEARN || action > RITUAL || subjectId.length() > 128 || slot < -1 || slot > 2) {
             throw new IllegalArgumentException("Invalid Force progression action");
         }
     }
@@ -36,11 +37,11 @@ public record ForceProgressionActionPayload(
                 buffer.writeUUID(payload.replayId());
                 buffer.writeLong(payload.shrinePos().asLong());
                 buffer.writeVarInt(payload.action());
-                buffer.writeUtf(payload.subjectId(), 64);
+                buffer.writeUtf(payload.subjectId(), 128);
                 buffer.writeVarInt(payload.slot());
             }, buffer -> new ForceProgressionActionPayload(
                     buffer.readUUID(), BlockPos.of(buffer.readLong()), buffer.readVarInt(),
-                    buffer.readUtf(64), buffer.readVarInt()));
+                    buffer.readUtf(128), buffer.readVarInt()));
 
     @Override
     public Type<ForceProgressionActionPayload> type() {

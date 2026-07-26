@@ -12,7 +12,8 @@ public enum WorkerProfession {
     BUILDER("builder"),
     COOK("cook"),
     MERCHANT("merchant"),
-    COURIER("courier");
+    COURIER("courier"),
+    TECHNICIAN("technician");
 
     private final String id;
 

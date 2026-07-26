@@ -1,1 +1,16 @@
-{"type":"minecraft:crafting_shaped","category":"misc","pattern":["XX","XX"],"key":{"X":"galacticwars:separatist_alloy_shard"},"result":{"id":"galacticwars:separatist_alloy_ingot","count":1}}
+{
+  "type": "galacticwars:fabrication",
+  "ingredients": [
+    {
+      "ingredient": "galacticwars:separatist_alloy_shard",
+      "count": 4
+    }
+  ],
+  "result": {
+    "id": "galacticwars:separatist_alloy_ingot",
+    "count": 1
+  },
+  "faction": "galacticwars:separatist",
+  "technology": "galacticwars:alloy_reclamation",
+  "exportable": false
+}

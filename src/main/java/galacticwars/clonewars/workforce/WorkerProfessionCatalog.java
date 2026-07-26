@@ -60,7 +60,13 @@ public final class WorkerProfessionCatalog {
                     WorkAreaType.COURIER_ROUTE,
                     16,
                     FIRST_COMMAND_BUTTON_ID + 8,
-                    "minecraft:chest"));
+                    "minecraft:chest"),
+            new WorkerProfessionDefinition(
+                    WorkerProfession.TECHNICIAN,
+                    WorkAreaType.LABORATORY,
+                    16,
+                    FIRST_COMMAND_BUTTON_ID + 13,
+                    "minecraft:redstone"));
     private WorkerProfessionCatalog() {
     }
 

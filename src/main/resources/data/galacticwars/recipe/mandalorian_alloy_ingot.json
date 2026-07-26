@@ -1,1 +1,20 @@
-{"type":"minecraft:crafting_shapeless","category":"misc","ingredients":["minecraft:iron_ingot","galacticwars:mandalorian_fiber"],"result":{"id":"galacticwars:mandalorian_alloy_ingot","count":1}}
+{
+  "type": "galacticwars:fabrication",
+  "ingredients": [
+    {
+      "ingredient": "minecraft:iron_ingot",
+      "count": 1
+    },
+    {
+      "ingredient": "galacticwars:mandalorian_fiber",
+      "count": 1
+    }
+  ],
+  "result": {
+    "id": "galacticwars:mandalorian_alloy_ingot",
+    "count": 1
+  },
+  "faction": "galacticwars:mandalorian",
+  "technology": "galacticwars:alloy_forging",
+  "exportable": false
+}

@@ -1,1 +1,16 @@
-{"type":"minecraft:crafting_shaped","category":"equipment","pattern":["X X","XXX","XXX"],"key":{"X":"galacticwars:separatist_alloy_ingot"},"result":{"id":"galacticwars:separatist_alloy_chestplate","count":1}}
+{
+  "type": "galacticwars:fabrication",
+  "ingredients": [
+    {
+      "ingredient": "galacticwars:separatist_alloy_ingot",
+      "count": 8
+    }
+  ],
+  "result": {
+    "id": "galacticwars:separatist_alloy_chestplate",
+    "count": 1
+  },
+  "faction": "galacticwars:separatist",
+  "technology": "galacticwars:droid_armor",
+  "exportable": false
+}

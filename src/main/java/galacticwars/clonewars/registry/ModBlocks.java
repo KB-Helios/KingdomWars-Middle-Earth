@@ -10,6 +10,7 @@ import galacticwars.clonewars.world.PlayerTriggeredSaplingBlock;
 import galacticwars.clonewars.world.BlueprintSiteAnchorBlock;
 import galacticwars.clonewars.world.BlueprintSiteLootBlock;
 import galacticwars.clonewars.world.FactionCommandPostBlock;
+import galacticwars.clonewars.fabrication.FabricatorBlock;
 import net.minecraft.core.particles.ParticleTypes;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.resources.Identifier;
@@ -57,6 +58,10 @@ public final class ModBlocks {
     public static final RegistrySupplier<CommandCenterBlock> COMMAND_CENTER = register(
             "command_center", properties -> new CommandCenterBlock(
                     properties.mapColor(MapColor.STONE).strength(4.0F, 1200.0F).sound(SoundType.STONE)));
+    public static final RegistrySupplier<FabricatorBlock> FABRICATOR = register(
+            "fabricator", properties -> new FabricatorBlock(properties
+                    .mapColor(MapColor.METAL).strength(4.0F, 12.0F)
+                    .sound(SoundType.METAL).requiresCorrectToolForDrops()));
     public static final RegistrySupplier<Block> CONTROL_BEACON = registerSimple(
             "control_beacon", properties -> properties
                     .mapColor(MapColor.METAL).strength(-1.0F, 3_600_000.0F).lightLevel(state -> 10)

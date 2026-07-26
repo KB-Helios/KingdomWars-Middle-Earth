@@ -1245,7 +1245,7 @@ public class GalacticRecruitEntity extends TamableAnimal
             case MINER -> new ItemStack(Items.RAW_IRON);
             case BUILDER -> new ItemStack(galacticwars.clonewars.registry.ModItems.DURACRETE.get());
             case COOK -> new ItemStack(Items.BREAD);
-            case MERCHANT, COURIER -> ItemStack.EMPTY;
+            case MERCHANT, COURIER, TECHNICIAN -> ItemStack.EMPTY;
         };
     }
 
@@ -2001,12 +2001,44 @@ public class GalacticRecruitEntity extends TamableAnimal
         if (profession == null) {
             return false;
         }
+        if (profession == WorkerProfession.TECHNICIAN) {
+            return this.authoritativeResearchCommandCenter(serverLevel) != null;
+        }
         String dimensionId = serverLevel.dimension().identifier().toString();
         return KingdomSavedData.get(serverLevel)
                 .assignedWorksite(this.getOwnerReference().getUUID(), this.getUUID())
                 .filter(worksite -> worksite.accepts(profession))
                 .filter(worksite -> worksite.dimensionId().equals(dimensionId))
                 .isPresent();
+    }
+
+    private @Nullable BlockPos authoritativeResearchCommandCenter(ServerLevel serverLevel) {
+        if (this.getWorkerProfession().filter(WorkerProfession.TECHNICIAN::equals).isEmpty()) {
+            return null;
+        }
+        KingdomSavedData data = KingdomSavedData.get(serverLevel);
+        KingdomRecord kingdom = data.kingdomForRecruit(this.getUUID())
+                .filter(candidate -> data.isHallActive(candidate.ownerId()))
+                .orElse(null);
+        if (kingdom == null
+                || !kingdom.settlement().dimensionId()
+                        .equals(serverLevel.dimension().identifier().toString())
+                || data.technologyStateOrDefault(kingdom.id()).activeProject()
+                        .flatMap(project -> project.technicianId())
+                        .filter(this.getUUID()::equals)
+                        .isEmpty()) {
+            return null;
+        }
+        BlockPos commandCenterPos = new BlockPos(
+                kingdom.settlement().hallX(),
+                kingdom.settlement().hallY(),
+                kingdom.settlement().hallZ());
+        if (!serverLevel.isLoaded(commandCenterPos)
+                || !(serverLevel.getBlockEntity(commandCenterPos) instanceof CommandCenterBlockEntity hall)
+                || !kingdom.ownerId().equals(hall.ownerId())) {
+            return null;
+        }
+        return commandCenterPos;
     }
 
     private void reconcileWorkerAuthority(ServerLevel serverLevel) {
@@ -2022,6 +2054,33 @@ public class GalacticRecruitEntity extends TamableAnimal
         }
         UUID ownerId = this.getOwnerReference().getUUID();
         KingdomSavedData data = KingdomSavedData.get(serverLevel);
+        if (profession == WorkerProfession.TECHNICIAN) {
+            BlockPos commandCenterPos = this.authoritativeResearchCommandCenter(serverLevel);
+            if (commandCenterPos == null) {
+                if (this.workerReason.equals("researching")
+                        || this.workerReason.equals("travel_to_command_center")
+                        || this.workerReason.equals("research_assigned")
+                        || this.workerReason.startsWith("command_center_")) {
+                    this.pauseWorkerNavigation();
+                    this.setWorkTarget(null);
+                    this.setRecruitCommand(RecruitmentAction.FOLLOW_OWNER);
+                    this.workerCooldownTicks = 20;
+                    this.transitionWorker(WorkerPhase.BLOCKED, "awaiting_research", null);
+                }
+                return;
+            }
+            boolean targetChanged = !commandCenterPos.equals(this.workTarget);
+            this.setWorkRadius(8);
+            this.setWorkTarget(commandCenterPos);
+            this.setStorageTarget(null);
+            this.moveTarget = commandCenterPos;
+            this.setRecruitCommand(RecruitmentAction.WORK_AT_SITE);
+            if (targetChanged) {
+                this.workerCooldownTicks = 0;
+                this.transitionWorker(WorkerPhase.ACQUIRE_ORDER, "research_assigned", commandCenterPos);
+            }
+            return;
+        }
         if (profession == WorkerProfession.BUILDER && this.activeBuildProjectId != null) {
             BuildProject linkedProject = this.activeBuildProject().orElse(null);
             if (linkedProject == null
@@ -2180,6 +2239,54 @@ public class GalacticRecruitEntity extends TamableAnimal
         return previousPhase != this.workerPhase || !previousReason.equals(this.workerReason);
     }
 
+    public boolean beginTechnologyResearch(BlockPos commandCenterPos) {
+        Objects.requireNonNull(commandCenterPos, "commandCenterPos");
+        if (!(this.level() instanceof ServerLevel serverLevel)
+                || this.getWorkerProfession().filter(WorkerProfession.TECHNICIAN::equals).isEmpty()
+                || !commandCenterPos.equals(this.authoritativeResearchCommandCenter(serverLevel))) {
+            return false;
+        }
+        this.setWorkRadius(8);
+        this.setWorkTarget(commandCenterPos);
+        this.setStorageTarget(null);
+        this.moveTarget = commandCenterPos.immutable();
+        this.setRecruitCommand(RecruitmentAction.WORK_AT_SITE);
+        this.workerCooldownTicks = 0;
+        this.transitionWorker(WorkerPhase.ACQUIRE_ORDER, "research_assigned", commandCenterPos);
+        this.tickTechnologyResearch(serverLevel);
+        return true;
+    }
+
+    public void stopTechnologyResearch(BlockPos commandCenterPos) {
+        Objects.requireNonNull(commandCenterPos, "commandCenterPos");
+        if (this.getWorkerProfession().filter(WorkerProfession.TECHNICIAN::equals).isEmpty()
+                || !commandCenterPos.equals(this.workTarget)) {
+            return;
+        }
+        this.pauseWorkerNavigation();
+        this.setWorkTarget(null);
+        this.moveTarget = null;
+        this.setRecruitCommand(RecruitmentAction.FOLLOW_OWNER);
+        this.workerCooldownTicks = 20;
+        this.transitionWorker(WorkerPhase.BLOCKED, "awaiting_research", null);
+    }
+
+    public boolean isActivelyResearchingAt(BlockPos commandCenterPos) {
+        if (!(this.level() instanceof ServerLevel serverLevel)
+                || !this.shouldRunWorkerCycle()
+                || !this.workerReason.equals("researching")
+                || this.getTarget() != null
+                || this.hurtTime > 0
+                || !commandCenterPos.equals(this.workTarget)
+                || !commandCenterPos.equals(this.authoritativeResearchCommandCenter(serverLevel))) {
+            return false;
+        }
+        return this.distanceToSqr(
+                commandCenterPos.getX() + 0.5D,
+                commandCenterPos.getY() + 0.5D,
+                commandCenterPos.getZ() + 0.5D) <= 64.0D;
+    }
+
     public void tickWorkerController() {
         if (!this.shouldRunWorkerCycle() || !(this.level() instanceof ServerLevel serverLevel)) {
             return;
@@ -2188,6 +2295,10 @@ public class GalacticRecruitEntity extends TamableAnimal
             this.workerCooldownTicks = 40;
             this.transitionWorker(WorkerPhase.COOLDOWN, "combat_interrupted", null);
             this.pauseWorkerNavigation();
+            return;
+        }
+        if (this.getWorkerProfession().filter(WorkerProfession.TECHNICIAN::equals).isPresent()) {
+            this.tickTechnologyResearch(serverLevel);
             return;
         }
         if (this.workerPhase == WorkerPhase.FIND_TARGET
@@ -2219,6 +2330,61 @@ public class GalacticRecruitEntity extends TamableAnimal
 
     public void pauseWorkerNavigation() {
         this.getNavigation().stop();
+    }
+
+    private void tickTechnologyResearch(ServerLevel serverLevel) {
+        BlockPos commandCenterPos = this.authoritativeResearchCommandCenter(serverLevel);
+        if (commandCenterPos == null || !commandCenterPos.equals(this.workTarget)) {
+            if (this.workTarget != null) {
+                this.stopTechnologyResearch(this.workTarget);
+            }
+            return;
+        }
+        if (!serverLevel.isLoaded(commandCenterPos)
+                || !(serverLevel.getBlockEntity(commandCenterPos) instanceof CommandCenterBlockEntity)) {
+            this.workerCooldownTicks = 20;
+            this.pauseWorkerNavigation();
+            this.transitionWorker(WorkerPhase.BLOCKED, "command_center_unavailable", commandCenterPos);
+            return;
+        }
+        double distance = this.distanceToSqr(
+                commandCenterPos.getX() + 0.5D,
+                commandCenterPos.getY() + 0.5D,
+                commandCenterPos.getZ() + 0.5D);
+        if (distance <= 64.0D) {
+            this.workerNavigationFailures = 0;
+            this.pauseWorkerNavigation();
+            if (this.workerPhase != WorkerPhase.COOLDOWN
+                    || !this.workerReason.equals("researching")
+                    || !commandCenterPos.equals(this.activeWorkTarget)) {
+                this.transitionWorker(WorkerPhase.COOLDOWN, "researching", commandCenterPos);
+            }
+            return;
+        }
+        if (this.workerPhase != WorkerPhase.NAVIGATE_SOURCE
+                || !this.workerReason.equals("travel_to_command_center")
+                || !commandCenterPos.equals(this.activeWorkTarget)) {
+            this.transitionWorker(
+                    WorkerPhase.NAVIGATE_SOURCE, "travel_to_command_center", commandCenterPos);
+        }
+        if (this.tickCount % 10 == 0) {
+            boolean pathStarted = this.getNavigation().moveTo(
+                    commandCenterPos.getX() + 0.5D,
+                    commandCenterPos.getY(),
+                    commandCenterPos.getZ() + 0.5D,
+                    1.0D);
+            if (!pathStarted) {
+                this.workerNavigationFailures++;
+                if (this.workerNavigationFailures >= 3) {
+                    this.workerCooldownTicks = 100;
+                    this.pauseWorkerNavigation();
+                    this.transitionWorker(
+                            WorkerPhase.BLOCKED, "command_center_unreachable", commandCenterPos);
+                }
+            } else {
+                this.workerNavigationFailures = 0;
+            }
+        }
     }
 
     private void tickAcquireOrder() {
@@ -5857,6 +6023,7 @@ public class GalacticRecruitEntity extends TamableAnimal
             case COOK -> new ItemStack(Items.BREAD);
             case MERCHANT -> new ItemStack(galacticwars.clonewars.registry.ModItems.CREDIT_CHIP.get());
             case COURIER -> new ItemStack(Items.CHEST);
+            case TECHNICIAN -> new ItemStack(Items.REDSTONE);
         };
         this.setItemSlot(EquipmentSlot.MAINHAND, heldItem);
     }

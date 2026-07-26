@@ -54,6 +54,25 @@ public final class ForceProgressionScreen extends Screen {
                 addNodeRow(nodes.get(index), columnLeft, 76 + index * 29, panelWidth / 2 - 8);
             }
         }
+        List<RitualOption> rituals = ritualOptions(snapshot.tradition());
+        int ritualWidth = rituals.isEmpty() ? 0 : Math.min(104, (panelWidth - 8) / rituals.size());
+        for (int index = 0; index < rituals.size(); index++) {
+            RitualOption ritual = rituals.get(index);
+            Button button = Button.builder(
+                            Component.literal(display(ritual.recipeId())),
+                            pressed -> send(
+                                    ForceProgressionActionPayload.RITUAL,
+                                    ritual.recipeId(),
+                                    -1))
+                    .bounds(left + 4 + index * ritualWidth, height - 60, ritualWidth - 2, 20)
+                    .build();
+            button.active = snapshot.rank() >= ritual.requiredRank();
+            if (!button.active) {
+                button.setTooltip(Tooltip.create(Component.translatable(
+                        "screen.galacticwars.force.requires_rank", ritual.requiredRank())));
+            }
+            addRenderableWidget(button);
+        }
         Button respec = Button.builder(
                         Component.translatable("screen.galacticwars.force.respec", snapshot.respecCost()),
                         pressed -> send(ForceProgressionActionPayload.RESPEC, "", -1))
@@ -114,6 +133,22 @@ public final class ForceProgressionScreen extends Screen {
     private boolean equippedAt(String ability, int slot) {
         return slot < snapshot.equippedAbilities().size()
                 && snapshot.equippedAbilities().get(slot).equals(ability);
+    }
+
+    private static List<RitualOption> ritualOptions(String tradition) {
+        return switch (tradition) {
+            case "jedi" -> List.of(
+                    new RitualOption("galacticwars:blue_lightsaber", 1),
+                    new RitualOption("galacticwars:green_lightsaber", 1),
+                    new RitualOption("galacticwars:yellow_lightsaber", 3),
+                    new RitualOption("galacticwars:purple_lightsaber", 5),
+                    new RitualOption("galacticwars:white_lightsaber", 7));
+            case "sith" -> List.of(new RitualOption("galacticwars:red_lightsaber", 1));
+            default -> List.of();
+        };
+    }
+
+    private record RitualOption(String recipeId, int requiredRank) {
     }
 
     @Override
