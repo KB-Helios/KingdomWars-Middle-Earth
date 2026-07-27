@@ -11,6 +11,7 @@ import java.util.Optional;
 import java.util.Set;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.ai.behavior.declarative.MemoryCondition;
+import net.minecraft.world.entity.ai.memory.MemoryModuleType;
 import net.tslat.smartbrainlib.api.core.behaviour.base.ExtendedBehaviour;
 import net.tslat.smartbrainlib.util.BrainUtil;
 
@@ -38,6 +39,9 @@ public final class ArmyPatrolBehaviour extends ExtendedBehaviour<GalacticRecruit
     @Override
     protected void tick(GalacticRecruitEntity recruit) {
         if (!(recruit.level() instanceof ServerLevel level)) {
+            return;
+        }
+        if (BrainUtil.hasMemory(recruit, MemoryModuleType.ATTACK_TARGET)) {
             return;
         }
         ArmyBrainState state = BrainUtil.getMemory(recruit, ArmyBrainMemoryTypes.ARMY_STATE);

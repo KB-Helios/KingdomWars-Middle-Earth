@@ -32,8 +32,8 @@ public final class RecruitSitBehaviour extends ExtendedBehaviour<GalacticRecruit
     protected void start(GalacticRecruitEntity recruit) {
         BrainUtil.clearMemories(recruit,
                 MemoryModuleType.WALK_TARGET,
-                MemoryModuleType.LOOK_TARGET);
-        recruit.getNavigation().stop();
+                MemoryModuleType.LOOK_TARGET,
+                MemoryModuleType.PATH);
         recruit.getMoveControl().setWait();
         recruit.setInSittingPose(true);
         stopHorizontalMovement(recruit);
@@ -42,7 +42,8 @@ public final class RecruitSitBehaviour extends ExtendedBehaviour<GalacticRecruit
 
     @Override
     protected void tick(GalacticRecruitEntity recruit) {
-        recruit.getNavigation().stop();
+        BrainUtil.clearMemories(
+                recruit, MemoryModuleType.WALK_TARGET, MemoryModuleType.PATH);
         recruit.getMoveControl().setWait();
         recruit.setInSittingPose(true);
         stopHorizontalMovement(recruit);

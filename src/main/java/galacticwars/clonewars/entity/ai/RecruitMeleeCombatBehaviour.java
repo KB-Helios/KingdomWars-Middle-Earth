@@ -56,8 +56,8 @@ public final class RecruitMeleeCombatBehaviour
                 new EntityTracker(target, true));
         if (recruit.isWithinMeleeAttackRange(target)
                 && recruit.getSensing().hasLineOfSight(target)) {
-            BrainUtil.clearMemory(recruit, MemoryModuleType.WALK_TARGET);
-            recruit.getNavigation().stop();
+            BrainUtil.clearMemories(
+                    recruit, MemoryModuleType.WALK_TARGET, MemoryModuleType.PATH);
             if (attackCooldownTicks == 0) {
                 recruit.swing(InteractionHand.MAIN_HAND);
                 recruit.doHurtTarget(level, target);
@@ -73,8 +73,8 @@ public final class RecruitMeleeCombatBehaviour
     protected void stop(GalacticRecruitEntity recruit) {
         BrainUtil.clearMemories(recruit,
                 MemoryModuleType.WALK_TARGET,
-                MemoryModuleType.LOOK_TARGET);
-        recruit.getNavigation().stop();
+                MemoryModuleType.LOOK_TARGET,
+                MemoryModuleType.PATH);
         recruit.setAggressive(false);
     }
 

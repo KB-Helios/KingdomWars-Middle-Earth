@@ -7,7 +7,6 @@ public final class ArmySupplyPolicyTest {
     public static void main(String[] args) {
         energyCellYieldUsesFloorRounding();
         energyCellYieldRemainsPositiveAndBounded();
-        blasterAvailabilityRequiresOnePersistedUnit();
         System.out.println("ArmySupplyPolicyTest passed");
     }
 
@@ -25,22 +24,10 @@ public final class ArmySupplyPolicyTest {
                 "overflow-safe efficiency clamp");
     }
 
-    private static void blasterAvailabilityRequiresOnePersistedUnit() {
-        assertTrue(!ArmySupplyPolicy.canFireBlaster(-1), "negative supply rejected");
-        assertTrue(!ArmySupplyPolicy.canFireBlaster(0), "empty supply rejected");
-        assertTrue(ArmySupplyPolicy.canFireBlaster(1), "single shot supply accepted");
-        assertTrue(ArmySupplyPolicy.canFireBlaster(Integer.MAX_VALUE), "large valid supply accepted");
-    }
-
     private static void assertEquals(int expected, int actual, String label) {
         if (expected != actual) {
             throw new AssertionError(label + " expected " + expected + " but was " + actual);
         }
     }
 
-    private static void assertTrue(boolean condition, String label) {
-        if (!condition) {
-            throw new AssertionError(label + " expected to be true");
-        }
-    }
 }

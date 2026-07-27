@@ -12,7 +12,7 @@ import net.tslat.smartbrainlib.api.core.behaviour.base.ExtendedBehaviour;
 import net.tslat.smartbrainlib.util.BrainUtil;
 
 /**
- * Consumes SmartBrain walk memories while keeping non-brain navigation controllers independent.
+ * Consumes SmartBrain walk memories as the sole recruit navigation authority.
  *
  * <p>SmartBrainLib's stock mover does not start its computed path on Minecraft 26.2, so this
  * behaviour dispatches the published memory through Minecraft navigation without moving
@@ -20,11 +20,9 @@ import net.tslat.smartbrainlib.util.BrainUtil;
  */
 public final class RecruitWalkTargetBehaviour
         extends ExtendedBehaviour<GalacticRecruitEntity> {
-    private static final int REPATH_INTERVAL = 20;
     private static final double MOVED_TARGET_DISTANCE_SQUARED = 4.0D;
 
     private BlockPos lastTargetPos;
-    private int nextRepathTick;
     private boolean controlsNavigation;
 
     public RecruitWalkTargetBehaviour() {
@@ -67,6 +65,9 @@ public final class RecruitWalkTargetBehaviour
         BlockPos targetPos = walkTarget.getTarget().currentBlockPosition();
         if (targetPos.distManhattan(recruit.blockPosition())
                 <= walkTarget.getCloseEnoughDist()) {
+            BrainUtil.setMemory(recruit, ArmyBrainMemoryTypes.NAVIGATION_RESULT,
+                    new RecruitNavigationResult(
+                            targetPos, RecruitNavigationResult.State.ARRIVED, recruit.tickCount));
             BrainUtil.clearMemory(recruit, MemoryModuleType.WALK_TARGET);
             stopOwnedNavigation(recruit);
             return;
@@ -76,8 +77,7 @@ public final class RecruitWalkTargetBehaviour
                 || lastTargetPos.distSqr(targetPos) > MOVED_TARGET_DISTANCE_SQUARED;
         if (!controlsNavigation
                 || recruit.getNavigation().isDone()
-                || targetMoved
-                || recruit.tickCount >= nextRepathTick) {
+                || targetMoved) {
             startPath(recruit, walkTarget, targetPos);
         } else {
             BrainUtil.setOrClearMemory(recruit.getBrain(), MemoryModuleType.PATH,
@@ -96,7 +96,6 @@ public final class RecruitWalkTargetBehaviour
             BlockPos targetPos
     ) {
         lastTargetPos = targetPos.immutable();
-        nextRepathTick = recruit.tickCount + REPATH_INTERVAL;
         boolean wasControllingNavigation = controlsNavigation;
         // The coordinate overload owns path construction and installs its move-control state in
         // one operation. Re-submitting a precomputed Path can leave that state idle on 26.2.
@@ -112,10 +111,16 @@ public final class RecruitWalkTargetBehaviour
             }
             controlsNavigation = false;
             BrainUtil.clearMemory(recruit, MemoryModuleType.PATH);
+            BrainUtil.setMemory(recruit, ArmyBrainMemoryTypes.NAVIGATION_RESULT,
+                    new RecruitNavigationResult(
+                            targetPos, RecruitNavigationResult.State.UNREACHABLE, recruit.tickCount));
             return;
         }
         BrainUtil.setOrClearMemory(recruit.getBrain(), MemoryModuleType.PATH,
                 path);
+        BrainUtil.setMemory(recruit, ArmyBrainMemoryTypes.NAVIGATION_RESULT,
+                new RecruitNavigationResult(
+                        targetPos, RecruitNavigationResult.State.MOVING, recruit.tickCount));
     }
 
     private void stopOwnedNavigation(GalacticRecruitEntity recruit) {
@@ -128,7 +133,6 @@ public final class RecruitWalkTargetBehaviour
     private void releaseWithoutStopping(GalacticRecruitEntity recruit) {
         controlsNavigation = false;
         lastTargetPos = null;
-        nextRepathTick = 0;
         BrainUtil.clearMemory(recruit, MemoryModuleType.PATH);
     }
 }

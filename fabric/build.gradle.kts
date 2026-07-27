@@ -39,6 +39,7 @@ architectury {
 }
 
 loom {
+    accessWidenerPath.set(rootProject.file("src/main/resources/galacticwars.accesswidener"))
     mods {
         maybeCreate("main").apply {
             sourceSet("main")

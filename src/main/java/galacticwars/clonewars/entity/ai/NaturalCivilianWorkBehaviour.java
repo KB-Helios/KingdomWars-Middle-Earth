@@ -51,8 +51,8 @@ public final class NaturalCivilianWorkBehaviour
         BrainUtil.setMemory(civilian, MemoryModuleType.LOOK_TARGET,
                 new BlockPosTracker(workstation));
         if (civilian.blockPosition().closerThan(workstation, 2.5D)) {
-            BrainUtil.clearMemory(civilian, MemoryModuleType.WALK_TARGET);
-            civilian.getNavigation().stop();
+            BrainUtil.clearMemories(
+                    civilian, MemoryModuleType.WALK_TARGET, MemoryModuleType.PATH);
             civilian.tryProduceNaturalSettlementSupplies();
         } else if (civilian.getNavigation().isDone()) {
             setWalkTarget(civilian);
@@ -63,8 +63,8 @@ public final class NaturalCivilianWorkBehaviour
     protected void stop(GalacticRecruitEntity civilian) {
         BrainUtil.clearMemories(civilian,
                 MemoryModuleType.WALK_TARGET,
-                MemoryModuleType.LOOK_TARGET);
-        civilian.getNavigation().stop();
+                MemoryModuleType.LOOK_TARGET,
+                MemoryModuleType.PATH);
     }
 
     private static boolean canWork(GalacticRecruitEntity civilian) {

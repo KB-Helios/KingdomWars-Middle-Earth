@@ -727,9 +727,9 @@ public final class KingdomSavedData extends SavedData {
         return true;
     }
 
-    public boolean unregisterRecruit(UUID ownerId, UUID recruitId) {
-        KingdomRecord kingdom = kingdomsByOwner.get(ownerId);
-        if (kingdom == null) {
+    public boolean unregisterRecruit(UUID actorId, UUID recruitId) {
+        KingdomRecord kingdom = kingdomForPlayer(actorId).orElse(null);
+        if (kingdom == null || !kingdom.allows(actorId, KingdomPermission.RECRUIT)) {
             return false;
         }
         SettlementRecord updated = kingdom.settlement().withoutRecruit(recruitId);
@@ -919,9 +919,10 @@ public final class KingdomSavedData extends SavedData {
         return true;
     }
 
-    public boolean addRecruitToArmy(UUID ownerId, UUID recruitId) {
-        KingdomRecord kingdom = kingdomsByOwner.get(ownerId);
+    public boolean addRecruitToArmy(UUID actorId, UUID recruitId) {
+        KingdomRecord kingdom = kingdomForPlayer(actorId).orElse(null);
         if (kingdom == null
+                || !kingdom.allows(actorId, KingdomPermission.COMMAND_ARMY)
                 || !kingdom.id().equals(kingdomIdsByRecruit.get(recruitId))
                 || kingdom.npc(recruitId).map(KingdomNpcRecord::serviceBranch)
                         .filter(NpcServiceBranch.MILITARY::equals).isEmpty()) {
@@ -929,10 +930,10 @@ public final class KingdomSavedData extends SavedData {
         }
         Optional<ArmyGroupRecord> existing = armyGroupForRecruit(recruitId);
         if (existing.isPresent()) {
-            return existing.orElseThrow().ownerId().equals(ownerId);
+            return existing.orElseThrow().kingdomId().equals(kingdom.id());
         }
         ArmyGroupRecord group = armyGroupsById.values().stream()
-                .filter(candidate -> candidate.ownerId().equals(ownerId))
+                .filter(candidate -> candidate.kingdomId().equals(kingdom.id()))
                 .filter(candidate -> candidate.simulation().lifecycleState() == ArmyGroupLifecycleState.LIVE)
                 .min(Comparator.comparingInt((ArmyGroupRecord candidate) -> candidate.memberIds().size())
                         .thenComparing(ArmyGroupRecord::id))

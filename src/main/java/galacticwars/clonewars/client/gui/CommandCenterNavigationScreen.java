@@ -8,6 +8,7 @@ import net.minecraft.client.gui.components.Tooltip;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.gui.screens.inventory.MenuAccess;
 import net.minecraft.network.chat.Component;
+import net.minecraft.util.FormattedCharSequence;
 import net.minecraft.world.entity.player.Inventory;
 
 public final class CommandCenterNavigationScreen extends Screen implements MenuAccess<CommandCenterNavigationMenu> {
@@ -29,8 +30,9 @@ public final class CommandCenterNavigationScreen extends Screen implements MenuA
     @Override
     protected void init() {
         super.init();
-        int x = (this.width - BUTTON_WIDTH) / 2;
-        int firstY = Math.max(42, (this.height - menu.destinations().size()
+        int buttonWidth = Math.min(BUTTON_WIDTH, Math.max(80, this.width - 24));
+        int x = (this.width - buttonWidth) / 2;
+        int firstY = Math.max(54, (this.height - menu.destinations().size()
                 * (BUTTON_HEIGHT + GAP)) / 2);
         for (int index = 0; index < menu.destinations().size(); index++) {
             var destination = menu.destinations().get(index);
@@ -39,7 +41,7 @@ public final class CommandCenterNavigationScreen extends Screen implements MenuA
             Button destinationButton = Button.builder(
                             destinationLabel(destination),
                             button -> this.selectDestination(buttonId))
-                    .bounds(x, firstY + index * (BUTTON_HEIGHT + GAP), BUTTON_WIDTH, BUTTON_HEIGHT)
+                    .bounds(x, firstY + index * (BUTTON_HEIGHT + GAP), buttonWidth, BUTTON_HEIGHT)
                     .build();
             destinationButton.active = destination.available();
             if (!destination.available()) {
@@ -82,12 +84,31 @@ public final class CommandCenterNavigationScreen extends Screen implements MenuA
     @Override
     public void extractRenderState(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float partialTick) {
         super.extractRenderState(graphics, mouseX, mouseY, partialTick);
-        graphics.text(this.font, this.title, (this.width - this.font.width(this.title)) / 2, 16, 0xE5F6FF);
+        drawWrappedCentered(graphics, this.title, 12, 0xE5F6FF, 1);
         Component hint = Component.translatable("screen.galacticwars.navigation.hint");
-        graphics.text(this.font, hint, (this.width - this.font.width(hint)) / 2, 29, 0x9CA3AF);
-        graphics.text(this.font, this.status,
-                (this.width - this.font.width(this.status)) / 2,
-                this.height - 16, 0xFFE6C77A);
+        drawWrappedCentered(graphics, hint, 25, 0x9CA3AF, 2);
+        int statusLines = Math.max(1, Math.min(3,
+                this.font.split(this.status, Math.max(40, this.width - 24)).size()));
+        drawWrappedCentered(graphics, this.status,
+                this.height - 7 - statusLines * 10, 0xFFE6C77A, 3);
+    }
+
+    private void drawWrappedCentered(
+            GuiGraphicsExtractor graphics,
+            Component text,
+            int y,
+            int color,
+            int maximumLines
+    ) {
+        int lineY = y;
+        int rendered = 0;
+        for (FormattedCharSequence line : this.font.split(text, Math.max(40, this.width - 24))) {
+            if (rendered++ >= maximumLines) {
+                break;
+            }
+            graphics.text(this.font, line, (this.width - this.font.width(line)) / 2, lineY, color);
+            lineY += 10;
+        }
     }
 
     @Override

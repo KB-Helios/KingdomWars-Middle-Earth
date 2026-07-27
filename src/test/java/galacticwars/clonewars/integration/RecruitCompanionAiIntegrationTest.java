@@ -15,6 +15,7 @@ public final class RecruitCompanionAiIntegrationTest {
         squadBrainUsesDataDrivenRangedCombat();
         groupCommandsPersistBeforeRuntimeMutation();
         explicitAttackTargetsAreGuarded();
+        smartBrainUsesRegisteredSensorsAndSingleMovementConsumer();
         missingGroupsReleaseStaleRuntimeOwnership();
         groupedNavigationDoesNotDependOnWorksiteState();
         workOrdersStayServerSide();
@@ -131,12 +132,10 @@ public final class RecruitCompanionAiIntegrationTest {
                 "allowsRangedFire(returnFireTarget, commandTarget)", "ranged policy resolution");
         assertContains(combat, "blaster.fireAt(level, recruit, target", "server-authoritative ranged attack");
         assertContains(combat, "BlasterHeatPolicy.canFire", "ranged heat gate");
-        assertContains(combat, "ArmySupplyPolicy::canFireBlaster", "persisted squad supply gate");
-        assertContains(combat, "data.changeArmySupply(", "authoritative shot supply transaction");
-        assertBefore(combat, "trySpendBlasterSupply(data, group)",
-                "blaster.fireAt(level, recruit, target", "supply spend before accepted blaster shot");
-        assertContains(combat, "meleeOrClose(recruit, level, data, group, state, target)",
-                "empty-supply melee fallback");
+        assertNotContains(combat, "changeArmySupply(", "NPC shots do not consume provisioning");
+        assertNotContains(combat, "canFireBlaster", "NPC shots do not require provisioning");
+        assertContains(combat, "holdOrRepositionRanged(recruit, state, target)",
+                "overheated blasters hold or reposition instead of using melee");
         assertContains(combat, "FactionRangedWeaponService.supportsRecruitRangedCombat",
                 "data-driven blaster and Nightsister bow detection");
         assertContains(combat, "FactionRangedWeaponService.fireNightsisterBow",
@@ -175,6 +174,57 @@ public final class RecruitCompanionAiIntegrationTest {
         assertContains(support, "recruit.canAttackFactionPlayer(player)", "retaliatory player diplomacy guard");
     }
 
+    private static void smartBrainUsesRegisteredSensorsAndSingleMovementConsumer() throws IOException {
+        String sensors = read("src/main/java/galacticwars/clonewars/registry/ModSensorTypes.java");
+        String groupSensor = read(
+                "src/main/java/galacticwars/clonewars/entity/ai/ArmyGroupStateSensor.java");
+        String threatSensor = read(
+                "src/main/java/galacticwars/clonewars/entity/ai/ArmyThreatSensor.java");
+        String brain = read("src/main/java/galacticwars/clonewars/entity/ai/RecruitBrain.java");
+        String memories = read(
+                "src/main/java/galacticwars/clonewars/entity/ai/ArmyBrainMemoryTypes.java");
+        assertContains(sensors, "DeferredRegister<SensorType<?>>", "common sensor registry");
+        assertContains(sensors, "\"army_group_state\"", "unique group sensor identity");
+        assertContains(sensors, "\"army_threat\"", "unique threat sensor identity");
+        assertContains(groupSensor, "ModSensorTypes.ARMY_GROUP_STATE.get()",
+                "group sensor registered identity");
+        assertContains(threatSensor, "ModSensorTypes.ARMY_THREAT.get()",
+                "threat sensor registered identity");
+        if (Files.exists(Path.of(
+                "src/main/java/galacticwars/clonewars/entity/ai/ArmyBrainSensorTypes.java"))) {
+            throw new AssertionError("unsafe legacy SmartBrain sensor alias still exists");
+        }
+        assertContains(brain, "new HurtBySensor<GalacticRecruitEntity>()",
+                "SmartBrain hurt sensor");
+        assertContains(brain, "new RecruitWalkTargetBehaviour()", "CORE movement consumer");
+        assertContains(brain, "new WorkerSafetyBehaviour()", "IDLE worker safety priority");
+        assertContains(memories, "NAVIGATION_RESULT", "transient navigation result memory");
+
+        Path aiRoot = Path.of("src/main/java/galacticwars/clonewars/entity/ai");
+        StringBuilder otherAi = new StringBuilder();
+        try (var paths = Files.walk(aiRoot)) {
+            paths.filter(path -> path.toString().endsWith(".java"))
+                    .filter(path -> !path.getFileName().toString()
+                            .equals("RecruitWalkTargetBehaviour.java"))
+                    .forEach(path -> {
+                        try {
+                            otherAi.append(Files.readString(path));
+                        } catch (IOException exception) {
+                            throw new java.io.UncheckedIOException(exception);
+                        }
+                    });
+        } catch (java.io.UncheckedIOException exception) {
+            throw exception.getCause();
+        }
+        String entity = read("src/main/java/galacticwars/clonewars/entity/GalacticRecruitEntity.java");
+        assertNotContains(otherAi.toString(), "getNavigation().moveTo(",
+                "competing AI navigation movement");
+        assertNotContains(otherAi.toString(), "getNavigation().stop()",
+                "competing AI navigation stop");
+        assertNotContains(entity, "getNavigation().moveTo(", "entity-owned navigation movement");
+        assertNotContains(entity, "getNavigation().stop()", "entity-owned navigation stop");
+    }
+
     private static void missingGroupsReleaseStaleRuntimeOwnership() throws IOException {
         String entity = read("src/main/java/galacticwars/clonewars/entity/GalacticRecruitEntity.java");
         String reconciliation = section(
@@ -183,9 +233,9 @@ public final class RecruitCompanionAiIntegrationTest {
                 "private static RecruitmentAction recruitmentAction");
 
         assertContains(reconciliation, "this.armyGroupId = null", "stale group cache release");
-        assertContains(reconciliation, "this.navigation.stop()", "stale grouped navigation release");
-        assertContains(reconciliation, "this.setRecruitCommand(RecruitmentAction.FOLLOW_OWNER)",
-                "safe local fallback command");
+        assertContains(reconciliation, "MemoryModuleType.WALK_TARGET", "stale grouped navigation release");
+        assertContains(reconciliation, "this.setRecruitCommand(RecruitmentAction.HOLD_POSITION)",
+                "ungrouped safe fallback command");
     }
 
     private static void groupedNavigationDoesNotDependOnWorksiteState() throws IOException {
