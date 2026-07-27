@@ -32,10 +32,27 @@ SPAWN_CAPSULE_TEXTURES = ASSETS / "textures/item/spawn_capsule"
 ITEM_DEFINITIONS = ASSETS / "items"
 ITEM_MODELS = ASSETS / "models/item"
 ITEM_TEXTURES = ASSETS / "textures/item"
+CURATED_AUTHORIZED_OVERRIDES = (
+    ENTITY_MODELS / "mandalorian_marksman.geo.json",
+    ITEM_TEXTURES / "republic_plastoid_boots.png",
+    ITEM_TEXTURES / "republic_plastoid_chestplate.png",
+    ITEM_TEXTURES / "republic_plastoid_helmet.png",
+    ITEM_TEXTURES / "republic_plastoid_leggings.png",
+)
 ATLAS_SIZE = 256
 ENTITY_TEXEL_DENSITY = 2
 ARMOR_ATLAS_SIZE = 1024
 ARMOR_TEXEL_DENSITY = 6
+DATHOMIR_RECRUIT_IDS = frozenset({
+    "nightsister_acolyte",
+    "nightsister_archer",
+    "nightsister_civilian",
+    "nightbrother_brute",
+})
+DATHOMIR_CLOTH_LABELS = (
+    "hood", "spire", "robe", "sleeve", "wrap", "mantle", "skirt",
+    "panel", "shawl", "apron", "sash", "tunic", "cloth", "waist",
+)
 
 
 Color = tuple[int, int, int]
@@ -129,14 +146,14 @@ RECRUITS = (
         (194, 132, 83), (92, 59, 36), (48, 35, 27), (151, 117, 77),
         (210, 191, 145), (67, 142, 198), (134, 60, 31))),
     RecruitDesign("nightsister_acolyte", "robe", "acolyte", Palette(
-        (199, 191, 183), (68, 32, 40), (20, 19, 23), (111, 35, 45),
-        (160, 58, 72), (104, 225, 132), (48, 25, 34))),
+        (205, 199, 191), (65, 42, 35), (17, 16, 21), (101, 30, 43),
+        (151, 53, 70), (91, 194, 118), (43, 22, 32))),
     RecruitDesign("nightsister_archer", "robe", "archer", Palette(
-        (199, 191, 183), (61, 29, 38), (18, 19, 22), (92, 33, 43),
-        (143, 53, 67), (110, 227, 151), (43, 26, 34))),
+        (201, 194, 186), (67, 45, 34), (15, 17, 20), (82, 31, 40),
+        (132, 49, 62), (174, 53, 65), (38, 24, 31))),
     RecruitDesign("nightbrother_brute", "brute", "nightbrother", Palette(
-        (165, 40, 36), (92, 29, 28), (29, 23, 22), (96, 48, 40),
-        (164, 82, 59), (228, 91, 42), (51, 33, 30))),
+        (174, 55, 42), (65, 43, 34), (20, 18, 18), (82, 42, 35),
+        (181, 98, 69), (216, 177, 126), (44, 29, 27))),
     RecruitDesign("republic_civilian", "civilian", "republic", Palette(
         (184, 123, 81), (65, 72, 82), (30, 34, 42), (99, 116, 139),
         (173, 188, 201), (52, 105, 186), (72, 80, 94))),
@@ -153,8 +170,8 @@ RECRUITS = (
         (167, 119, 77), (74, 54, 39), (39, 31, 25), (132, 93, 61),
         (190, 149, 99), (205, 126, 45), (92, 68, 51))),
     RecruitDesign("nightsister_civilian", "civilian", "nightsister", Palette(
-        (194, 184, 177), (61, 32, 40), (23, 20, 25), (89, 42, 55),
-        (149, 75, 91), (183, 48, 73), (50, 27, 38))),
+        (196, 188, 180), (73, 50, 38), (21, 19, 24), (87, 43, 60),
+        (139, 77, 96), (191, 151, 112), (47, 27, 39))),
 )
 
 
@@ -312,8 +329,13 @@ class Atlas:
         seed = int(hashlib.sha256(
             f"{self.salt}:{label}:{face_name}:hd".encode("utf-8")).hexdigest()[:8], 16)
         family = self.salt.removeprefix("armor.")
-        cloth_surface = material == "cloth" or family == "nightsister_weave" and (
-            "hood" in label or "skirt" in label or "shell" in label)
+        dathomir_surface = family in DATHOMIR_RECRUIT_IDS
+        cloth_surface = (
+            material == "cloth"
+            or family == "nightsister_weave" and (
+                "hood" in label or "skirt" in label or "shell" in label)
+            or dathomir_surface and any(token in label for token in DATHOMIR_CLOTH_LABELS)
+        )
         directional_light = {
             "up": 22,
             "down": -22,
@@ -386,6 +408,9 @@ class Atlas:
 
         if plate_surface:
             self.paint_wear(rect, seed, family, highlight, shadow)
+        if dathomir_surface:
+            self.paint_dathomir_detail(
+                rect, label, material, face_name, family, seed)
 
     def paint_weave(self, rect: tuple[int, int, int, int], seed: int) -> None:
         left, top, width, height = rect
@@ -560,6 +585,200 @@ class Atlas:
                 x1 = min(left + width - 4, x0 + max(4, width // 3))
                 self.draw.line((x0, y, x1, y), fill=tone)
 
+    def paint_dathomir_detail(
+            self,
+            rect: tuple[int, int, int, int],
+            label: str,
+            material: str,
+            face_name: str,
+            family: str,
+            seed: int,
+    ) -> None:
+        """Layer authored Dathomirian pixel motifs over deterministic material grain."""
+        left, top, width, height = rect
+        right = left + width - 1
+        bottom = top + height - 1
+        scale = self.texel_density
+        line = max(1, scale // 2)
+        cx = left + width // 2
+        palette = self.palette
+        near_black = (*clamp_color(palette.dark, -4), 255)
+        oxblood = (*palette.base, 255)
+        burgundy = (*palette.cloth, 255)
+        rust = (*palette.accent, 255)
+        bone = (*palette.light, 255)
+        leather = (*palette.shadow, 255)
+        pale_shadow = (*clamp_color(palette.skin, -28), 255)
+        pale_light = (*clamp_color(palette.skin, 20), 255)
+
+        if label == "dathomir_face":
+            if face_name == "north":
+                self.draw.rectangle(
+                    (left + scale, top + scale, right - scale, bottom - scale),
+                    outline=pale_shadow,
+                    width=line,
+                )
+                self.draw.line(
+                    (left + scale * 2, top + height // 3,
+                     cx, top + scale, right - scale * 2, top + height // 3),
+                    fill=pale_light,
+                    width=line,
+                )
+                cheek_y = top + round(height * 0.63)
+                self.draw.line(
+                    (left + scale * 2, cheek_y, cx - scale, bottom - scale * 2),
+                    fill=pale_shadow,
+                    width=line,
+                )
+                self.draw.line(
+                    (right - scale * 2, cheek_y, cx + scale, bottom - scale * 2),
+                    fill=pale_shadow,
+                    width=line,
+                )
+            elif face_name in ("east", "west"):
+                self.draw.line(
+                    (left + scale, top + height // 2,
+                     right - scale, top + height // 2),
+                    fill=pale_shadow,
+                    width=line,
+                )
+            return
+
+        nightbrother_skin = (
+            family == "nightbrother_brute"
+            and material == "skin"
+            and any(token in label for token in (
+                "nightbrother_head", "nightbrother_torso", "massive_arm"))
+        )
+        if nightbrother_skin and face_name in ("north", "south", "east", "west"):
+            band = max(scale, min(width, height) // 7)
+            self.draw.line(
+                (left + scale, top + scale,
+                 right - scale, bottom - scale),
+                fill=near_black,
+                width=band,
+            )
+            self.draw.line(
+                (right - scale, top + scale,
+                 left + scale, bottom - scale),
+                fill=near_black,
+                width=max(line, band - scale),
+            )
+            if height >= 8 * scale:
+                y = top + height // 2
+                self.draw.line(
+                    (left + scale, y, right - scale, y),
+                    fill=leather,
+                    width=line,
+                )
+            return
+
+        cloth_piece = any(token in label for token in DATHOMIR_CLOTH_LABELS)
+        if cloth_piece and width >= 4 * scale and height >= 3 * scale:
+            fold_step = max(scale * 3, width // 4)
+            for index, x in enumerate(range(left + scale * 2, right - scale, fold_step)):
+                tone = near_black if index % 2 == 0 else oxblood
+                self.draw.line(
+                    (x, top + scale, x, bottom - scale),
+                    fill=tone,
+                    width=line,
+                )
+                if x + line + 1 < right:
+                    self.draw.line(
+                        (x + line + 1, top + scale, x + line + 1, bottom - scale),
+                        fill=burgundy,
+                    )
+            if face_name in ("north", "south"):
+                hem_y = bottom - scale
+                self.draw.line(
+                    (left + scale, hem_y, right - scale, hem_y),
+                    fill=rust if family == "nightsister_acolyte" else leather,
+                    width=line,
+                )
+                stitch_step = max(3, scale * 2)
+                for x in range(left + scale, right - scale, stitch_step):
+                    self.draw.point((x, hem_y), fill=bone)
+
+        if any(token in label for token in (
+                "hood", "spire", "headwrap", "shawl", "mantle")):
+            if (
+                    face_name in ("north", "south")
+                    and width >= 5 * scale
+                    and height >= 3 * scale
+            ):
+                patch_width = max(scale * 2, width // 4)
+                patch_height = max(scale * 2, height // 4)
+                patch_x = left + scale + seed % max(1, width - patch_width - scale)
+                patch_y = top + scale + (seed // 7) % max(1, height - patch_height - scale)
+                patch_right = min(right - scale, patch_x + patch_width)
+                patch_bottom = min(bottom - scale, patch_y + patch_height)
+                self.draw.rectangle(
+                    (patch_x, patch_y, patch_right, patch_bottom),
+                    outline=near_black,
+                    fill=burgundy,
+                )
+                self.draw.line(
+                    (patch_x, patch_y, patch_right, patch_bottom),
+                    fill=oxblood,
+                )
+
+        if "patterned_apron" in label and face_name == "north":
+            cell = max(2, scale * 2)
+            for y in range(top + scale, bottom - scale, cell):
+                for x in range(left + scale, right - scale, cell):
+                    if ((x - left) // cell + (y - top) // cell) % 2 == 0:
+                        self.draw.rectangle(
+                            (x, y, min(right - scale, x + cell - 1),
+                             min(bottom - scale, y + cell - 1)),
+                            fill=oxblood,
+                        )
+                    else:
+                        self.draw.point((x, y), fill=leather)
+
+        leather_piece = any(token in label for token in (
+            "belt", "quiver", "satchel", "harness", "bracer", "boot", "cuff",
+            "buckle", "strap",
+        ))
+        if leather_piece and width >= 3 * scale and height >= 3 * scale:
+            self.draw.rectangle(
+                (left + scale, top + scale, right - scale, bottom - scale),
+                outline=near_black,
+                width=line,
+            )
+            if face_name in ("north", "south"):
+                stitch_step = max(3, scale * 2)
+                for x in range(left + scale * 2, right - scale, stitch_step):
+                    self.draw.point((x, top + scale), fill=bone)
+                    self.draw.point((x, bottom - scale), fill=bone)
+
+        bone_piece = any(token in label for token in (
+            "bone", "talisman", "horn", "tusk", "tooth", "clasp", "arrow",
+        ))
+        if bone_piece and max(width, height) >= 3 * scale:
+            segment_step = max(scale * 2, (height if height >= width else width) // 4)
+            if height >= width:
+                for y in range(top + scale, bottom - scale, segment_step):
+                    self.draw.line(
+                        (left + line, y, right - line, y),
+                        fill=leather,
+                        width=line,
+                    )
+            else:
+                for x in range(left + scale, right - scale, segment_step):
+                    self.draw.line(
+                        (x, top + line, x, bottom - line),
+                        fill=leather,
+                        width=line,
+                    )
+
+        if any(token in label for token in (
+                "tattoo", "cheek_mark", "forehead_chevron")):
+            self.draw.line(
+                (left, top, right, bottom),
+                fill=near_black,
+                width=max(line, scale),
+            )
+
 
 class ModelBuilder:
     def __init__(
@@ -682,8 +901,13 @@ def recruit_child_bones(builder: ModelBuilder, design: RecruitDesign) -> None:
         builder.bone("robe_skirt", [0, 12, 0], "body")
         builder.bone("utility_gear", [0, 15, 0], "body")
         builder.bone("cloth_panels", [0, 12, 0], "robe_skirt")
+        if design.variant == "acolyte":
+            builder.bone("ritual_spires", [0, 30, 0], "hood")
+            builder.bone("talisman_cords", [0, 19, -2], "robe_mantle")
         if design.variant == "archer":
             builder.bone("quiver", [3, 19, 2], "body")
+            builder.bone("hair_locks", [0, 28, 2], "head")
+            builder.bone("archer_sash", [0, 14, 0], "body")
     elif design.style == "civilian":
         builder.bone("hair", [0, 29, 0], "head")
         builder.bone("outerwear", [0, 20, 0], "body")
@@ -694,6 +918,9 @@ def recruit_child_bones(builder: ModelBuilder, design: RecruitDesign) -> None:
         elif design.variant == "nightsister":
             builder.bone("hood", [0, 29, 0], "head")
             builder.bone("robe_skirt", [0, 12, 0], "body")
+            builder.bone("shawl", [0, 21, 0], "outerwear")
+            builder.bone("woven_apron", [0, 13, -2], "body")
+            builder.bone("satchel", [4, 13, 1], "utility_belt")
         elif design.variant == "clansperson":
             builder.bone("helmet", [0, 29, 0], "head")
             builder.bone("chest_armor", [0, 20, 0], "body")
@@ -708,6 +935,8 @@ def recruit_child_bones(builder: ModelBuilder, design: RecruitDesign) -> None:
         builder.bone("horns", [0, 31, 0], "head")
         if design.variant == "nightbrother":
             builder.bone("face_tattoo_vertical", [0, 28, -4], "head")
+            builder.bone("shoulder_harness", [-3, 21, 0], "chest_armor")
+            builder.bone("waist_cloth", [0, 12, 0], "body")
         if design.variant == "enforcer":
             builder.bone("shoulder_armor", [0, 22, 0], "chest_armor")
             builder.bone("utility_belt", [0, 12, 0], "body")
@@ -841,6 +1070,119 @@ def add_robe_details(builder: ModelBuilder, variant: str) -> None:
             builder.cube("quiver", f"arrow_{index}", [x, 22.2, 2.45], [0.35, 3.5, 0.35], "accent")
 
 
+def add_dathomir_face(builder: ModelBuilder, *, tattoos: bool = True) -> None:
+    """Paint a pale, angular Dathomirian face as layered geometry."""
+    builder.cube("head", "dathomir_face", [-4, 24, -4], [8, 8, 8], "skin")
+    builder.cube("head", "right_eye", [-2.9, 27.9, -4.28], [1.45, 0.75, 0.32], "dark")
+    builder.cube("head", "left_eye", [1.45, 27.9, -4.28], [1.45, 0.75, 0.32], "dark")
+    builder.cube("head", "nose_bridge", [-0.55, 26.2, -4.34], [1.1, 1.8, 0.4], "skin")
+    builder.cube("head", "mouth_mark", [-1.45, 25.15, -4.28], [2.9, 0.5, 0.3], "dark")
+    if tattoos:
+        builder.cube("head", "forehead_chevron", [-0.5, 28.8, -4.36], [1.0, 2.0, 0.34], "base")
+        builder.cube(
+            "head", "right_cheek_mark", [-3.2, 26.2, -4.34], [2.0, 0.48, 0.3],
+            "base", rotation=[0, 0, -18], pivot=[-2.1, 26.4, -4.1])
+        builder.cube(
+            "head", "left_cheek_mark", [1.2, 26.2, -4.34], [2.0, 0.48, 0.3],
+            "base", rotation=[0, 0, 18], pivot=[2.1, 26.4, -4.1])
+
+
+def add_dathomir_sister(builder: ModelBuilder, variant: str) -> None:
+    """Build distinct ritualist and archer silhouettes from the project concept board."""
+    add_dathomir_face(builder)
+    if variant == "acolyte":
+        builder.cube("body", "wrapped_underrobe", [-4.1, 12, -2.15], [8.2, 12, 4.3], "dark")
+        builder.cube("right_arm", "right_layered_sleeve", [-8.15, 12, -2.2], [4.15, 12, 4.4], "cloth")
+        builder.cube("left_arm", "left_layered_sleeve", [4, 12, -2.2], [4.15, 12, 4.4], "cloth", mirror=True)
+        builder.cube("right_leg", "right_wrapped_leg", [-4, 0, -2.1], [4, 12, 4.2], "shadow")
+        builder.cube("left_leg", "left_wrapped_leg", [0, 0, -2.1], [4, 12, 4.2], "shadow", mirror=True)
+
+        builder.cube("hood", "split_hood_back", [-4.7, 23.7, 3.45], [9.4, 7.4, 1.2], "cloth")
+        builder.cube("hood", "split_hood_right", [-4.7, 23.7, -4.5], [1.3, 7.5, 8.0], "cloth")
+        builder.cube("hood", "split_hood_left", [3.4, 23.7, -4.5], [1.3, 7.5, 8.0], "cloth")
+        builder.cube("hood", "hood_brow", [-3.35, 29.65, -4.7], [6.7, 1.0, 0.75], "shadow")
+        for side, x, angle in (("right", -4.55, -5), ("left", 2.0, 5)):
+            builder.cube(
+                "ritual_spires", f"{side}_ritual_spire_lower",
+                [x, 29.4, -3.5], [2.55, 3.0, 6.5],
+                "base", rotation=[0, 0, angle], pivot=[x + 1.25, 29.5, 0])
+            builder.cube(
+                "ritual_spires", f"{side}_ritual_spire_middle",
+                [x + 0.2, 32.2, -3.15], [2.15, 2.7, 5.8],
+                "cloth", rotation=[0, 0, angle], pivot=[x + 1.25, 32.2, 0])
+            builder.cube(
+                "ritual_spires", f"{side}_ritual_spire_tip",
+                [x + 0.45, 34.7, -2.75], [1.65, 2.25, 5.0],
+                "base", rotation=[0, 0, angle], pivot=[x + 1.25, 34.7, 0])
+
+        builder.cube("robe_mantle", "upper_shoulder_mantle", [-5.1, 20.2, -2.75], [10.2, 3.2, 5.5], "base")
+        builder.cube("robe_mantle", "lower_shoulder_mantle", [-4.7, 18.8, -2.62], [9.4, 2.1, 5.24], "cloth")
+        builder.cube(
+            "robe_mantle", "cross_wrap_right", [-4.2, 16.0, -2.7], [5.2, 1.4, 0.78],
+            "cloth", rotation=[0, 0, -29], pivot=[0, 19, -2.4])
+        builder.cube(
+            "robe_mantle", "cross_wrap_left", [-1.0, 16.0, -2.76], [5.2, 1.4, 0.8],
+            "light", rotation=[0, 0, 29], pivot=[0, 19, -2.4])
+        builder.cube("utility_gear", "wide_ritual_sash", [-4.55, 11.6, -2.6], [9.1, 2.2, 5.2], "shadow")
+        builder.cube("utility_gear", "bone_clasp", [-1.1, 11.2, -3.0], [2.2, 2.4, 0.7], "light")
+        builder.cube("robe_skirt", "layered_skirt", [-4.45, 6.0, -2.35], [8.9, 6.0, 4.7], "base")
+        builder.cube("robe_skirt", "ritual_apron", [-2.65, 4.4, -2.82], [5.3, 7.7, 0.72], "base")
+        builder.cube("cloth_panels", "right_long_panel", [-4.1, 0.6, -2.72], [3.5, 10.8, 0.75], "cloth")
+        builder.cube("cloth_panels", "left_long_panel", [0.6, 1.6, -2.74], [3.5, 9.8, 0.75], "light")
+        builder.cube("cloth_panels", "rear_long_panel", [-3.2, 1.2, 2.1], [6.4, 10.0, 0.72], "shadow")
+        for index, x in enumerate((-2.5, 0.0, 2.5)):
+            builder.cube(
+                "talisman_cords", f"ritual_cord_{index}", [x - 0.18, 14.0, -2.96],
+                [0.36, 6.5 - abs(index - 1), 0.36], "accent")
+            builder.cube(
+                "talisman_cords", f"bone_talisman_{index}", [x - 0.42, 13.1, -3.08],
+                [0.84, 1.2, 0.6], "light")
+        for side, bone, x in (("right", "right_arm", -8.35), ("left", "left_arm", 3.85)):
+            builder.cube(bone, f"{side}_forearm_wrap", [x, 12.0, -2.45], [4.5, 4.0, 4.9], "shadow")
+        return
+
+    builder.cube("body", "archer_fitted_tunic", [-3.7, 12, -2.0], [7.4, 12, 4.0], "dark")
+    builder.cube("right_arm", "right_fitted_sleeve", [-7.7, 12, -1.9], [3.7, 12, 3.8], "cloth")
+    builder.cube("left_arm", "left_fitted_sleeve", [4, 12, -1.9], [3.7, 12, 3.8], "cloth", mirror=True)
+    builder.cube("right_leg", "right_archer_leg", [-3.85, 0, -1.95], [3.85, 12, 3.9], "shadow")
+    builder.cube("left_leg", "left_archer_leg", [0, 0, -1.95], [3.85, 12, 3.9], "shadow", mirror=True)
+    builder.cube("hood", "swept_headwrap", [-4.25, 29.1, -4.25], [8.5, 3.0, 8.5], "base")
+    builder.cube(
+        "hood", "angled_brow_wrap", [-4.2, 28.7, -4.45], [8.4, 1.15, 0.7],
+        "accent", rotation=[0, 0, -7], pivot=[0, 29, -4])
+    for index, (x, z, angle) in enumerate((
+            (-3.7, -3.9, -15), (-2.0, -4.15, -8),
+            (-0.2, -4.25, 2), (1.65, -4.05, 12))):
+        builder.cube(
+            "hair_locks", f"swept_crown_lock_{index}",
+            [x, 30.2 + index % 2 * 0.25, z], [2.1, 1.35, 6.5],
+            "dark", rotation=[-7, 0, angle], pivot=[x + 1.0, 30.5, 0])
+    for index, x in enumerate((-3.4, -1.8, -0.2, 1.4, 3.0)):
+        builder.cube(
+            "hair_locks", f"hair_lock_{index}", [x, 23.0 + index % 2, 3.2],
+            [1.0, 7.2 - index % 2, 1.1], "dark",
+            rotation=[-4 - index, 0, -7 + index * 3], pivot=[x + 0.5, 28, 3.5])
+    builder.cube("robe_mantle", "archer_chest_wrap", [-4.0, 16.0, -2.45], [8.0, 7.3, 4.9], "base")
+    builder.cube(
+        "robe_mantle", "diagonal_archer_wrap", [-4.2, 17.5, -2.82], [8.5, 1.35, 0.75],
+        "light", rotation=[0, 0, -23], pivot=[0, 19, -2.5])
+    builder.cube("utility_gear", "archer_belt", [-4.2, 11.7, -2.4], [8.4, 1.8, 4.8], "dark")
+    builder.cube("archer_sash", "long_side_sash", [2.2, 4.0, -2.4], [2.1, 8.5, 4.8], "base")
+    builder.cube("cloth_panels", "front_split_panel", [-3.3, 5.0, -2.58], [2.8, 7.0, 0.72], "cloth")
+    builder.cube("cloth_panels", "rear_split_panel", [0.5, 6.0, 1.9], [2.8, 6.0, 0.72], "shadow")
+    for side, bone, x in (("right", "right_arm", -7.95), ("left", "left_arm", 3.95)):
+        builder.cube(bone, f"{side}_archer_bracer", [x, 11.7, -2.25], [4.0, 4.8, 4.5], "shadow")
+    builder.cube(
+        "quiver", "high_quiver", [2.3, 14.0, 1.6], [3.0, 10.0, 3.0],
+        "shadow", rotation=[0, 0, -10], pivot=[3.5, 19, 2])
+    builder.cube("quiver", "quiver_rim", [2.0, 22.7, 1.3], [3.6, 1.2, 3.6], "light")
+    builder.cube(
+        "quiver", "quiver_binding", [2.05, 18.0, 1.35], [3.5, 1.25, 3.5],
+        "base", rotation=[0, 0, -10], pivot=[3.5, 19, 2])
+    for index, x in enumerate((2.45, 3.25, 4.05, 4.85)):
+        builder.cube("quiver", f"arrow_{index}", [x, 23.2, 2.15], [0.34, 4.3, 0.34], "accent")
+
+
 def add_civilian_details(builder: ModelBuilder, variant: str) -> None:
     add_hair_cap(builder, "hair_or_cap")
     builder.cube("outerwear", "jacket", [-4.2, 14.0, -2.35], [8.4, 9.8, 4.7], "base", inflate=0.12)
@@ -867,6 +1209,40 @@ def add_civilian_details(builder: ModelBuilder, variant: str) -> None:
         builder.cube("robe_skirt", "woven_apron", [-3, 8, -2.65], [6, 6, 1.0], "accent")
     elif variant == "smuggler":
         builder.cube("holster", "smuggler_holster", [3.4, 7.5, -2.55], [2.1, 4.0, 1.6], "shadow")
+
+
+def add_dathomir_civilian(builder: ModelBuilder) -> None:
+    """Build a broad, visibly unarmed matron/weaver silhouette."""
+    add_dathomir_face(builder, tattoos=False)
+    builder.cube("body", "weaver_underrobe", [-4.3, 12, -2.2], [8.6, 12, 4.4], "dark")
+    builder.cube("right_arm", "right_weaver_sleeve", [-8.2, 12, -2.25], [4.2, 12, 4.5], "cloth")
+    builder.cube("left_arm", "left_weaver_sleeve", [4, 12, -2.25], [4.2, 12, 4.5], "cloth", mirror=True)
+    builder.cube("right_leg", "right_weaver_leg", [-4.0, 0, -2.15], [4.0, 12, 4.3], "shadow")
+    builder.cube("left_leg", "left_weaver_leg", [0, 0, -2.15], [4.0, 12, 4.3], "shadow", mirror=True)
+
+    builder.cube("hair", "braided_crown", [-4.4, 29.2, -4.2], [8.8, 3.0, 8.4], "shadow")
+    for index, x in enumerate((-3.25, -1.25, 1.0, 3.0)):
+        builder.cube(
+            "hair", f"crown_braid_{index}", [x, 28.8, -4.55], [1.25, 2.2, 0.75],
+            "light", rotation=[0, 0, -9 + index * 6], pivot=[x + 0.6, 29.3, -4])
+    builder.cube("hood", "lowered_matron_hood", [-4.8, 22.0, 2.8], [9.6, 8.0, 1.6], "base")
+    builder.cube("shawl", "upper_shawl", [-5.5, 20.2, -2.9], [11.0, 3.2, 5.8], "base")
+    builder.cube("shawl", "middle_shawl", [-5.2, 18.2, -2.78], [10.4, 2.5, 5.56], "cloth")
+    builder.cube("shawl", "lower_shawl", [-4.9, 16.5, -2.65], [9.8, 2.1, 5.3], "base")
+    builder.cube("shawl", "shawl_clasp", [-0.8, 17.0, -3.05], [1.6, 2.0, 0.7], "light")
+    builder.cube("outerwear", "draped_outer_robe", [-4.65, 9.0, -2.5], [9.3, 8.5, 5.0], "cloth")
+    builder.cube("robe_skirt", "full_weaver_skirt", [-4.8, 0.3, -2.5], [9.6, 9.2, 5.0], "base")
+    builder.cube("woven_apron", "patterned_apron", [-3.25, 2.0, -2.95], [6.5, 11.2, 1.0], "light")
+    builder.cube("woven_apron", "apron_border", [-3.5, 1.6, -3.02], [7.0, 1.2, 1.1], "accent")
+    builder.cube("utility_belt", "weaver_belt", [-4.65, 11.4, -2.6], [9.3, 1.8, 5.2], "shadow")
+    builder.cube("utility_belt", "herb_pouch", [-4.9, 8.8, -2.8], [2.4, 3.0, 1.4], "shadow")
+    builder.cube("satchel", "loom_satchel", [3.5, 7.0, 1.5], [3.2, 6.0, 2.4], "shadow")
+    builder.cube(
+        "satchel", "satchel_strap", [-3.8, 17.0, -2.8], [8.0, 0.8, 0.6],
+        "light", rotation=[0, 0, -44], pivot=[0, 18, -2.5])
+    builder.cube("satchel", "loom_shuttle", [4.1, 8.8, -1.3], [1.8, 0.8, 4.4], "accent")
+    for side, bone, x in (("right", "right_arm", -8.4), ("left", "left_arm", 3.9)):
+        builder.cube(bone, f"{side}_woven_cuff", [x, 11.8, -2.55], [4.5, 3.2, 5.1], "light")
 
 
 def add_droid(builder: ModelBuilder, style: str, variant: str) -> None:
@@ -959,6 +1335,63 @@ def add_brute(builder: ModelBuilder, variant: str) -> None:
                      rotation=[0, 0, 24], pivot=[0, 18, -2.8])
 
 
+def add_dathomir_nightbrother(builder: ModelBuilder) -> None:
+    """Build the concept-board Nightbrother with a broad tattooed silhouette."""
+    builder.cube("head", "nightbrother_head", [-4.6, 23.5, -4.25], [9.2, 8.8, 8.5], "skin")
+    builder.cube("head", "heavy_brow", [-4.2, 27.9, -4.8], [8.4, 1.5, 0.9], "dark")
+    builder.cube("head", "right_eye", [-3.0, 27.6, -4.72], [1.5, 0.8, 0.45], "light")
+    builder.cube("head", "left_eye", [1.5, 27.6, -4.72], [1.5, 0.8, 0.45], "light")
+    builder.cube("head", "broad_nose", [-0.8, 25.8, -4.65], [1.6, 2.0, 0.6], "shadow")
+    builder.cube("head", "jaw_mark", [-2.2, 24.5, -4.62], [4.4, 0.7, 0.45], "dark")
+    builder.cube("body", "nightbrother_torso", [-5.8, 11.5, -3.0], [11.6, 12.7, 6.0], "skin")
+    builder.cube("right_arm", "right_massive_arm", [-10.1, 10.6, -3.1], [6.3, 13.6, 6.2], "skin")
+    builder.cube("left_arm", "left_massive_arm", [3.8, 10.6, -3.1], [6.3, 13.6, 6.2], "skin", mirror=True)
+    builder.cube("right_leg", "right_powerful_leg", [-4.8, 0, -2.7], [4.8, 12, 5.4], "base")
+    builder.cube("left_leg", "left_powerful_leg", [0, 0, -2.7], [4.8, 12, 5.4], "base", mirror=True)
+    builder.cube("right_leg", "right_grounded_boot", [-5.0, -0.2, -3.35], [5.2, 4.4, 6.7], "dark")
+    builder.cube("left_leg", "left_grounded_boot", [-0.2, -0.2, -3.35], [5.2, 4.4, 6.7], "dark", mirror=True)
+
+    horn_positions = (-4.0, -2.1, 0.45, 2.65)
+    for index, x in enumerate(horn_positions):
+        outward = -13 if x < 0 else 13
+        builder.cube(
+            "horns", f"crown_horn_{index}", [x, 31.0, -1.5], [1.35, 3.4 + index % 2, 1.9],
+            "light", rotation=[-5, 0, outward], pivot=[x + 0.65, 31.0, -0.55])
+        builder.cube(
+            "horns", f"horn_tip_{index}", [x + 0.2, 33.9 + index % 2, -1.25], [0.95, 1.8, 1.4],
+            "light", rotation=[-8, 0, outward], pivot=[x + 0.65, 34.0, -0.55])
+    builder.cube("head", "right_tusk", [-2.5, 24.7, -4.75], [0.7, 1.4, 0.55], "light")
+    builder.cube("head", "left_tusk", [1.8, 24.7, -4.75], [0.7, 1.4, 0.55], "light")
+
+    builder.cube("neck", "bone_necklace", [-4.2, 21.7, -3.35], [8.4, 2.0, 6.7], "shadow")
+    builder.cube(
+        "harness", "diagonal_harness_right", [-5.2, 17.2, -3.35], [10.4, 1.6, 0.8],
+        "dark", rotation=[0, 0, -35], pivot=[0, 19, -3])
+    builder.cube(
+        "harness", "diagonal_harness_left", [-5.2, 17.2, -3.42], [10.4, 1.3, 0.75],
+        "light", rotation=[0, 0, 35], pivot=[0, 19, -3])
+    builder.cube("shoulder_harness", "lower_right_pauldron", [-10.4, 19.0, -3.5], [7.2, 2.0, 7.0], "shadow")
+    builder.cube("shoulder_harness", "middle_right_pauldron", [-9.9, 20.8, -3.25], [6.2, 1.7, 6.5], "dark")
+    builder.cube("shoulder_harness", "upper_right_pauldron", [-9.25, 22.2, -2.9], [5.0, 1.5, 5.8], "shadow")
+    builder.cube(
+        "shoulder_harness", "pauldron_spike", [-8.6, 23.0, -1.2], [1.5, 3.2, 2.2],
+        "light", rotation=[0, 0, -18], pivot=[-7.8, 23, 0])
+    builder.cube("chest_armor", "bone_harness_clasp", [-1.3, 17.0, -3.55], [2.6, 2.8, 0.7], "light")
+    for index, x in enumerate((-2.0, 0.0, 2.0)):
+        builder.cube(
+            "chest_armor", f"chest_bone_trophy_{index}",
+            [x - 0.35, 14.1 - abs(index - 1) * 0.45, -3.55],
+            [0.7, 2.5 + (index == 1) * 0.8, 0.6], "light")
+    for side, bone, x in (("right", "right_bracer", -10.35), ("left", "left_bracer", 3.75)):
+        builder.cube(bone, f"{side}_layered_bracer", [x, 10.8, -3.4], [6.6, 4.8, 6.8], "shadow")
+        builder.cube(bone, f"{side}_bracer_wrap", [x + 0.35, 15.1, -3.25], [5.9, 1.3, 6.5], "light")
+    builder.cube("waist_cloth", "wide_war_belt", [-5.6, 10.8, -3.0], [11.2, 2.0, 6.0], "shadow")
+    builder.cube("waist_cloth", "front_war_panel", [-3.2, 3.2, -3.15], [6.4, 8.5, 1.0], "cloth")
+    builder.cube("waist_cloth", "rear_war_panel", [-3.5, 4.0, 2.35], [7.0, 7.5, 0.9], "base")
+    for index, x in enumerate((-2.2, 0.0, 2.2)):
+        builder.cube("waist_cloth", f"belt_talisman_{index}", [x - 0.4, 9.7, -3.5], [0.8, 1.8, 0.7], "light")
+
+
 def build_recruit(design: RecruitDesign) -> None:
     builder = ModelBuilder(design.id, design.palette, texel_density=ENTITY_TEXEL_DENSITY)
     humanoid_bones(builder)
@@ -967,17 +1400,26 @@ def build_recruit(design: RecruitDesign) -> None:
         basic_humanoid(builder, "dark", "dark")
         add_plate_details(builder, design.variant)
     elif design.style == "robe":
-        basic_humanoid(builder)
-        add_human_face(builder)
-        add_robe_details(builder, design.variant)
+        if design.variant in ("acolyte", "archer"):
+            add_dathomir_sister(builder, design.variant)
+        else:
+            basic_humanoid(builder)
+            add_human_face(builder)
+            add_robe_details(builder, design.variant)
     elif design.style == "civilian":
-        basic_humanoid(builder)
-        add_human_face(builder)
-        add_civilian_details(builder, design.variant)
+        if design.variant == "nightsister":
+            add_dathomir_civilian(builder)
+        else:
+            basic_humanoid(builder)
+            add_human_face(builder)
+            add_civilian_details(builder, design.variant)
     elif design.style.startswith("droid"):
         add_droid(builder, design.style, design.variant)
     elif design.style == "brute":
-        add_brute(builder, design.variant)
+        if design.variant == "nightbrother":
+            add_dathomir_nightbrother(builder)
+        else:
+            add_brute(builder, design.variant)
     else:
         raise ValueError(f"Unknown recruit style: {design.style}")
     builder.write(
@@ -1000,6 +1442,14 @@ def write_recruit_animation(design: RecruitDesign, builder: ModelBuilder) -> Non
         idle_length = 2.8
     else:
         idle_length = 2.0
+    if design.variant == "acolyte":
+        idle_length = 3.2
+    elif design.variant == "archer":
+        idle_length = 2.0
+    elif design.variant == "nightsister":
+        idle_length = 3.4
+    elif design.variant == "nightbrother":
+        idle_length = 1.8
     idle_midpoint = idle_length / 2
     stride = 22 + seed % 9
     attack = 82 + seed % 15
@@ -1053,6 +1503,68 @@ def write_recruit_animation(design: RecruitDesign, builder: ModelBuilder) -> Non
         child_idle = {"neck": {"rotation": {"0.0": [0, -2, 0], "1.0": [0, 2, 0], "2.0": [0, -2, 0]}}}
         child_walk = {"harness": {"rotation": {"0.0": [1, 0, -1], "0.5": [-1, 0, 1], "1.0": [1, 0, -1]}}}
         child_attack = {"chest_armor": {"rotation": {"0.0": [0, 0, 0], "0.18": [0, 14, 0], "0.45": [0, 0, 0]}}}
+
+    if design.variant == "acolyte":
+        child_idle = {
+            "hood": {"rotation": {"0.0": [0, -2, 0], "1.6": [0, 2, 0], "3.2": [0, -2, 0]}},
+            "ritual_spires": {"rotation": {"0.0": [0, 0, -1], "1.6": [0, 0, 1], "3.2": [0, 0, -1]}},
+            "talisman_cords": {"rotation": {"0.0": [-1, 0, -2], "1.6": [2, 0, 2], "3.2": [-1, 0, -2]}},
+        }
+        child_walk = {
+            "robe_skirt": {"rotation": {"0.0": [5, 0, 0], "0.5": [-5, 0, 0], "1.0": [5, 0, 0]}},
+            "cloth_panels": {"rotation": {"0.0": [-7, 0, 2], "0.5": [7, 0, -2], "1.0": [-7, 0, 2]}},
+            "talisman_cords": {"rotation": {"0.0": [-8, 0, 3], "0.5": [10, 0, -3], "1.0": [-8, 0, 3]}},
+        }
+        child_attack = {
+            "robe_mantle": {"rotation": {"0.0": [0, 0, 0], "0.18": [-5, 15, 0], "0.45": [0, 0, 0]}},
+            "left_arm": {"rotation": {"0.0": [-8, 0, 0], "0.18": [-72, -24, -18], "0.45": [-8, 0, 0]}},
+            "talisman_cords": {"rotation": {"0.0": [0, 0, 0], "0.18": [-18, 0, 12], "0.45": [0, 0, 0]}},
+        }
+    elif design.variant == "archer":
+        child_idle = {
+            "hair_locks": {"rotation": {"0.0": [0, -2, -1], "1.0": [0, 2, 1], "2.0": [0, -2, -1]}},
+            "quiver": {"rotation": {"0.0": [0, 0, -1], "1.0": [0, 0, 1], "2.0": [0, 0, -1]}},
+        }
+        child_walk = {
+            "hair_locks": {"rotation": {"0.0": [-7, 0, 2], "0.5": [8, 0, -2], "1.0": [-7, 0, 2]}},
+            "archer_sash": {"rotation": {"0.0": [-8, 0, 3], "0.5": [8, 0, -3], "1.0": [-8, 0, 3]}},
+            "cloth_panels": {"rotation": {"0.0": [-5, 0, 0], "0.5": [6, 0, 0], "1.0": [-5, 0, 0]}},
+        }
+        child_attack = {
+            "left_arm": {"rotation": {"0.0": [-8, 0, 0], "0.18": [-88, 0, -4], "0.45": [-8, 0, 0]}},
+            "right_arm": {"rotation": {"0.0": [-8, 0, 0], "0.18": [-64, -46, 12], "0.45": [-8, 0, 0]}},
+            "quiver": {"rotation": {"0.0": [0, 0, 0], "0.18": [5, 0, -4], "0.45": [0, 0, 0]}},
+        }
+    elif design.variant == "nightsister":
+        child_idle = {
+            "hair": {"rotation": {"0.0": [0, -1, 0], "1.7": [0, 2, 0], "3.4": [0, -1, 0]}},
+            "shawl": {"rotation": {"0.0": [0, 0, -1], "1.7": [1.5, 0, 1], "3.4": [0, 0, -1]}},
+            "satchel": {"rotation": {"0.0": [0, 0, -1], "1.7": [0, 0, 1], "3.4": [0, 0, -1]}},
+        }
+        child_walk = {
+            "shawl": {"rotation": {"0.0": [2, 0, -2], "0.5": [-2, 0, 2], "1.0": [2, 0, -2]}},
+            "woven_apron": {"rotation": {"0.0": [-4, 0, 0], "0.5": [5, 0, 0], "1.0": [-4, 0, 0]}},
+            "satchel": {"rotation": {"0.0": [-7, 0, 4], "0.5": [8, 0, -4], "1.0": [-7, 0, 4]}},
+        }
+        child_attack = {
+            "right_arm": {"rotation": {"0.0": [-8, 0, 0], "0.18": [-48, 12, 25], "0.45": [-8, 0, 0]}},
+            "left_arm": {"rotation": {"0.0": [-8, 0, 0], "0.18": [-48, -12, -25], "0.45": [-8, 0, 0]}},
+            "shawl": {"rotation": {"0.0": [0, 0, 0], "0.18": [5, 0, 0], "0.45": [0, 0, 0]}},
+        }
+    elif design.variant == "nightbrother":
+        child_idle = {
+            "neck": {"rotation": {"0.0": [0, -3, 0], "0.9": [0, 3, 0], "1.8": [0, -3, 0]}},
+            "shoulder_harness": {"rotation": {"0.0": [0, 0, -1], "0.9": [1.5, 0, 1], "1.8": [0, 0, -1]}},
+        }
+        child_walk = {
+            "harness": {"rotation": {"0.0": [3, 0, -2], "0.5": [-3, 0, 2], "1.0": [3, 0, -2]}},
+            "waist_cloth": {"rotation": {"0.0": [-6, 0, 0], "0.5": [7, 0, 0], "1.0": [-6, 0, 0]}},
+        }
+        child_attack = {
+            "chest_armor": {"rotation": {"0.0": [0, 0, 0], "0.18": [-8, 22, 0], "0.45": [0, 0, 0]}},
+            "shoulder_harness": {"rotation": {"0.0": [0, 0, 0], "0.18": [0, 0, -10], "0.45": [0, 0, 0]}},
+            "waist_cloth": {"rotation": {"0.0": [0, 0, 0], "0.18": [-12, 0, 0], "0.45": [0, 0, 0]}},
+        }
 
     walk_bones = {
         "right_arm": {"rotation": {"0.0": [stride, 0, 0], "0.5": [-stride, 0, 0], "1.0": [stride, 0, 0]}},
@@ -1542,19 +2054,31 @@ def write_spawn_capsule_item_files(visual_id: str) -> None:
 
 
 def main() -> None:
-    for directory in (
-            ENTITY_MODELS, ENTITY_ANIMATIONS, ENTITY_TEXTURES,
-            ARMOR_MODELS, ARMOR_ANIMATIONS, ARMOR_TEXTURES,
-            ITEM_GEO_MODELS, ITEM_GEO_ANIMATIONS, SPAWN_CAPSULE_TEXTURES,
-            ITEM_DEFINITIONS, ITEM_MODELS, ITEM_TEXTURES):
-        directory.mkdir(parents=True, exist_ok=True)
-    for design in RECRUITS:
-        build_recruit(design)
-    for family, palette in ARMOR_PALETTES.items():
-        build_armor(family, palette)
-    write_phase_i_clone_inventory_assets()
-    from import_authorized_character_assets import main as import_authorized_assets
-    import_authorized_assets()
+    # These five checked-in assets contain final hand-authored adjustments made
+    # after their licensed source conversion. Keep those curated bytes while the
+    # importer refreshes every other authorized asset.
+    curated_overrides = {
+        path: path.read_bytes()
+        for path in CURATED_AUTHORIZED_OVERRIDES
+        if path.is_file()
+    }
+    try:
+        for directory in (
+                ENTITY_MODELS, ENTITY_ANIMATIONS, ENTITY_TEXTURES,
+                ARMOR_MODELS, ARMOR_ANIMATIONS, ARMOR_TEXTURES,
+                ITEM_GEO_MODELS, ITEM_GEO_ANIMATIONS, SPAWN_CAPSULE_TEXTURES,
+                ITEM_DEFINITIONS, ITEM_MODELS, ITEM_TEXTURES):
+            directory.mkdir(parents=True, exist_ok=True)
+        for design in RECRUITS:
+            build_recruit(design)
+        for family, palette in ARMOR_PALETTES.items():
+            build_armor(family, palette)
+        write_phase_i_clone_inventory_assets()
+        from import_authorized_character_assets import main as import_authorized_assets
+        import_authorized_assets()
+    finally:
+        for path, content in curated_overrides.items():
+            path.write_bytes(content)
     print(
         f"Generated {len(RECRUITS)} recruit sets and {len(ARMOR_PALETTES)} armor sets; "
         "authorized upstream conversions applied last"

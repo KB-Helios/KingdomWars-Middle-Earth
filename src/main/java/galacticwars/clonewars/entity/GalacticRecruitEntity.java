@@ -394,7 +394,7 @@ public class GalacticRecruitEntity extends TamableAnimal
         output.putBoolean("PendingNaturalSpawnRemoval", this.pendingNaturalSpawnRemoval);
         output.putBoolean("PendingNaturalSpawnInitialization", this.pendingNaturalSpawnInitialization);
         this.getWorkerProfession().ifPresent(profession -> output.putString("WorkerProfession", profession.id()));
-        output.putInt("RecruitDataVersion", 13);
+        output.putInt("RecruitDataVersion", 14);
         output.putBoolean("DefaultLoadoutInitialized", this.defaultLoadoutInitialized);
         output.store("InactiveDutyMainHand", ItemStack.OPTIONAL_CODEC, this.inactiveDutyMainHand);
         output.storeNullable("KingdomId", UUIDUtil.CODEC, this.kingdomId);
@@ -497,6 +497,9 @@ public class GalacticRecruitEntity extends TamableAnimal
             this.inactiveDutyMainHand = this.serviceBranch == NpcServiceBranch.CIVILIAN
                     ? this.defaultMilitaryMainHand()
                     : ItemStack.EMPTY;
+        }
+        if (dataVersion < 14) {
+            this.migrateLegacyIronSwordLoadout();
         }
         if (dataVersion < 3 && (!input.getStringOr("WorkerCarriedResources", "").isBlank()
                 || !input.getStringOr("WorkerStorageResources", "").isBlank())) {
@@ -5429,6 +5432,20 @@ public class GalacticRecruitEntity extends TamableAnimal
                 .map(ArmyEquipmentLoadout::mainHandItemId)
                 .map(this::equipmentStackFromData)
                 .orElse(ItemStack.EMPTY);
+    }
+
+    private void migrateLegacyIronSwordLoadout() {
+        ItemStack configuredWeapon = this.defaultMilitaryMainHand();
+        if (this.getMainHandItem().is(Items.IRON_SWORD)) {
+            this.setItemSlot(EquipmentSlot.MAINHAND, configuredWeapon.copy());
+            if (!configuredWeapon.isEmpty()) {
+                this.setDropChance(EquipmentSlot.MAINHAND, 0.0F);
+            }
+        }
+        if (this.serviceBranch == NpcServiceBranch.CIVILIAN
+                && this.inactiveDutyMainHand.is(Items.IRON_SWORD)) {
+            this.inactiveDutyMainHand = configuredWeapon.copy();
+        }
     }
 
     private ItemStack equipmentStackFromData(String itemId) {

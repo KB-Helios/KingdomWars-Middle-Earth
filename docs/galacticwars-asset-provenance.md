@@ -1,5 +1,71 @@
 # Galactic Wars Asset Provenance
 
+## 2026-07-27 project-owned Dathomir character direction
+
+The Nightsister Acolyte, Nightsister Archer, Nightsister Civilian, and Nightbrother Brute were
+rebuilt as four distinct deterministic GeckoLib sets. The project-owned concept board is retained
+at `tools/source_art/generated_dathomir_faction_orthographic_concept_2026-07-27.png` with SHA-256
+`6323e502cdeca8748202c2f78009e4996ed7517e2401d7fbd74a0dc7a5990412`. It was created in one call
+with the built-in ImageGen workflow and no input/reference images. It is design direction only:
+`tools/generate_character_models.py` authors the shipped cuboids, exact UV allocations, pixel
+materials, animations, spawn-capsule atlases/glowmasks, and fallback icons deterministically.
+
+Exact prompt:
+
+```text
+Use case: stylized-concept
+Asset type: project-owned orthographic character concept board for a Minecraft GeckoLib NPC model and texture production pipeline
+Primary request: create one cohesive design board showing four original Dathomir-inspired dark-side faction roles: a ritual Acolyte, a bow-wielding Archer, a noncombatant Weaver/Civilian, and a powerful horned Nightbrother Brute. The board will guide distinct block-model silhouettes, UV-safe pixel-art materials, and role-specific animation.
+Scene/backdrop: clean warm-gray studio concept-sheet background with four evenly spaced character columns; no environment or props beyond each role's equipment.
+Subject: each role shown as a full-body front, side, and back orthographic turnaround. Acolyte has a tall split hood, layered asymmetrical wine-red and charcoal wraps, bone talismans, pale face with restrained angular markings, and subtle spectral-green ritual cords. Archer is leaner, with a swept headwrap and hair silhouette, fitted layered wraps, high back quiver, recurved energy-bow grip cues, and red/black materials with very sparse green accents. Civilian is clearly noncombatant: matron/weaver silhouette, broad draped shawl, braided or wrapped hair, woven apron, satchel and loom-tool details, muted burgundy/plum/charcoal palette, no weapon. Nightbrother is tall and broad with a distinct crown of short horns, red-orange skin, bold dark geometric tattoos, heavy asymmetric shoulder harness, layered waist cloth, forearm wraps, and grounded boots.
+Style/medium: premium stylized voxel-game character concept art; block-model-aware but much more refined than default Minecraft humanoids; readable stepped silhouettes, layered cloth thickness, crisp material separation, hand-painted pixel-art surface cues; original project-owned interpretation, not copied from any existing game/mod asset.
+Composition/framing: landscape board, all twelve turnaround views fully visible at matching scale, neutral A-pose, strict orthographic front/side/back, generous spacing.
+Lighting/mood: soft neutral studio lighting, ominous ceremonial elegance, strong readable values.
+Color palette: charcoal, oxblood, burgundy, plum, ash gray, bone, restrained spectral green; Nightbrother adds red-orange skin and near-black tattoos.
+Materials/textures: layered woven cloth, leather wraps, bone/metal talismans, subtle embroidery, matte painted skin, no glossy plastic.
+Constraints: four roles must be unmistakably different in silhouette; designs must translate into cuboid GeckoLib geometry and 256x256 texture atlases; preserve humanoid hands for held-item anchors; no capes obscuring the back view; no photorealism; no text, labels, logos, watermark, UI, scenery, extra characters, or cropped limbs.
+Avoid: generic Steve proportions, identical robes, neon overload, modern clothing, firearms, iron swords, sexualized clothing, smooth high-poly anatomy, copyrighted character likenesses.
+```
+
+The Acolyte uses a split ritual hood, layered mantle, long asymmetrical panels, talismans, and
+animated ritual cords. The Archer uses a lean fitted silhouette, swept headwrap, independently
+animated hair, high quiver, split panels, and a bow-draw attack pose. The unarmed Civilian uses a
+broad shawl, braided crown, woven apron, satchel, and restrained defensive motion. The Nightbrother
+uses a wider body, two-part horn crown, facial/chest tattoos, asymmetric spiked shoulder harness,
+waist cloth, and a heavy attack motion. Registry IDs, canonical humanoid bones, held-item anchors,
+and the `misc.idle`, `move.walk`, `move.run`, and `attack.swing` animation names remain stable.
+
+### Runtime orthographic revision
+
+The implementation-focused follow-up is retained at
+`tools/source_art/dathomir_runtime_orthographic_concept_2026-07-27.png` with SHA-256
+`adad81527f8d7ada2f941eb925065ee57d7af0595eaadea7e5563ce26238be84`. It was generated with the
+built-in ImageGen workflow using the user-approved Dathomir quartet render as a visual reference.
+It is a direction sheet only; no concept pixels are copied into a runtime atlas.
+
+The companion face-and-material study is retained at
+`tools/source_art/dathomir_materials_face_cloth_leather_bone_markings_2026-07-27.png`
+with SHA-256 `a44a533dec7f3414707c7304f42f803191f51cc86ab195859d284fc9ec4a798e`.
+It was generated with the built-in ImageGen workflow from the same user-approved visual
+reference and is also direction-only. Its exact prompt is stored beside it as
+`dathomir_materials_face_cloth_leather_bone_markings_2026-07-27.prompt.md`.
+
+Exact prompt:
+
+```text
+Use case: stylized-concept
+Asset type: implementation-focused orthographic model sheet for a Minecraft/GeckoLib voxel NPC asset pipeline
+Primary request: Translate the approved Dathomir character reference into a clean production model sheet for exactly four separate block-model characters: Nightsister Acolyte, Nightsister Archer, Nightsister Civilian, and Nightbrother Brute. Preserve the approved reference's quality, palette, costume logic, faces, and layered silhouette, but simplify every form into geometry that can actually be built from axis-aligned cuboids and thin voxel planes.
+Input image: Image 1 is the approved visual-quality and character-design reference; use it for all four roles, materials, colors, and silhouette identity.
+Scene/backdrop: neutral light-gray studio background with no scenery, floor clutter, labels, text, UI, watermark, or weapons floating separately.
+Subject: show each of the four roles as a distinct full-body orthographic turnaround with front, exact side, and back views aligned at consistent scale. Acolyte has a tall split ritual hood, deep layered mantle and robe, pale painted face, bone talismans, belts and restrained green ichor cords. Archer is lean, has tied swept black hair with red wrap, asymmetric skirt, bracers, quiver with visible arrows, and carries a compact Dathomir bow. Civilian is older and practical with gray segmented hair, lowered hood, layered burgundy shawl, woven apron, hand wraps, utility belt and pouches. Nightbrother is substantially broader and taller, red-and-black geometric skin markings, crown horns, tusks, heavy wraps, asymmetric spiked mantle, crossed bandolier, bone trophies, waist cloth, and armored boots.
+Style/medium: high-end Minecraft-compatible voxel concept render, crisp authored pixel textures at believable 256x256-atlas density, visible face painting, cloth weave, stitched seams, worn leather, carved bone, chipped horn, and controlled color variation; no smooth sculpting, rounded anatomy, photoreal skin, or non-voxel fabric.
+Composition/framing: landscape sheet, four clearly separated role columns, each role's front/side/back views grouped together and fully visible, consistent camera and lighting; prioritize readable silhouette and buildable layer breakdown.
+Lighting/mood: soft neutral studio lighting, restrained shadows, clear material readability.
+Color palette: charcoal, near-black, oxblood, burgundy, rust red, muted brown leather, aged ivory bone, gray-white skin paint, tiny restrained green ichor accents only on the Acolyte.
+Constraints: exactly four roles; keep designs culturally cohesive but instantly distinguishable; all accessories must be attached to characters and feasible as child bones; hands and forearms remain clear enough for runtime item anchors; no clone troopers, droids, blasters, lightsabers, extra people, logos, typography, captions, watermark, cinematic background, or painterly blur.
+```
+
 ## 2026-07-22 subtitle-backed runtime sound identities
 
 The `galacticwars` blaster, lightsaber, Force, vehicle, travel, construction, mission, and planet
@@ -36,8 +102,9 @@ license links/copies, pinned revisions, and transformation ledger.
 The Galaxies Jedi Commander overlay was evaluated but is not a shipped replacement. Its partial
 clothing texture is tied to the upstream legacy humanoid UV layout; applying it to the current Jedi
 would mis-map pixels and repeat the quality problem this pass is correcting. Unmatched Jedi, Republic
-and Nightsister civilians, Nightsister combatants, brute, bounty hunter, B2, and BX assets remain
-deterministic project-authored sets until a UV-compatible permissioned source is identified.
+civilian, bounty hunter, B2, and BX assets remain deterministic project-authored sets until a
+UV-compatible permissioned source is identified. The Nightsister family was subsequently rebuilt
+from the project-owned 2026-07-27 concept direction recorded above.
 
 This section supersedes the older generated-only provenance claims below for the seventeen imported
 NPC sets, three duty textures, and two clone wearable armor sets. Generated orthographic sheets remain references only for the
@@ -516,3 +583,31 @@ translates only that palette and silhouette direction into the repo's determinis
 six-face UV contract. The resulting `sith_acolyte` geometry, animation, entity atlas, recruitment
 capsule, glowmask, and icon are project-owned outputs; the entity atlas SHA-256 is
 `7498409e7ff5c331ac47849c7ec3d164ac0d4903995806b40fecf0c434144972`.
+
+## Blaster Family Rebuild (2026-07-27)
+
+`tools/source_art/generated_blaster_families_orthographic_concept_2026-07-27.png` is
+project-bound concept art generated with the built-in image workflow
+(`call_RjJMFX5mPsF5eEaYMuD48zVY.png`, SHA-256
+`d46ac23e51e34e44842522898ba5207092bef5fe07bf6c0f0737864e91c455ba`).
+It is visual direction only. The invented names and marks in the concept are deliberately not copied.
+`tools/generate_blaster_models.py` independently expresses the registered DC-15, E-5, WESTAR, and
+scatter-blaster identities as original deterministic GeckoLib geometry, explicit 256x256 UV atlases,
+glowmasks, and display transforms. No third-party mod asset was used.
+
+Successful built-in prompt:
+
+```text
+Use case: stylized-concept
+Asset type: original orthographic art-direction sheet for fictional Minecraft-compatible collectible miniatures
+Primary request: Create a polished concept sheet for four clearly fictional, nonfunctional retro-space-opera game props: a long clone-trooper-style energy prop, a skeletal battle-droid-style energy prop, a compact armored sidearm prop, and a heavy twin-front scatter prop. These are decorative voxel game miniatures, not real-world weapons.
+Scene/backdrop: neutral warm light-gray studio background, no scenery
+Subject: four props only, each shown separately in side, top, and front orthographic views; emphasize distinctive model-ready outer silhouettes, decorative plating, and color blocking rather than function
+Style/medium: premium high-detail voxel concept render, block-built forms, crisp pixel materials, collectible game-prop presentation
+Composition/framing: landscape reference sheet with all props fully visible and generous spacing
+Lighting/mood: soft neutral studio lighting for shape and surface readability
+Color palette: charcoal gunmetal and blue-gray for the long clone-style prop; graphite and dark bronze for the skeletal droid-style prop; silver-charcoal and restrained amber for the compact prop; weathered steel, black, and muted rust-red for the heavy prop
+Materials/textures: layered fictional alloy panels, decorative ribbing, wrapped grips, optics-like ornaments, subtle edge wear, and tiny colored status lights
+Constraints: original project-owned art direction; decorative and visibly fictional; no real-world weapon instructions, no firing scene, no internal cutaway, no functional mechanical details, no characters, hands, copied franchise logos, third-party mod assets, watermark, or scenery
+Avoid: photorealism, modern Earth firearm silhouettes, instructional diagrams, measurements, ammunition, realistic mechanisms, flat sprites, excessive neon, or clutter
+```

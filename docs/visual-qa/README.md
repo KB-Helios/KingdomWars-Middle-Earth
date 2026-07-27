@@ -98,7 +98,7 @@ mod textures or geometry are included.
 Use daylight, a plain stone floor, hitboxes off, and the same camera distance.
 Capture idle, walk, attack/held-item, and seated views where applicable.
 
-1. NPCs: all 22 egg variants; verify body scale, seams, surfaces, held items,
+1. NPCs: all 27 egg variants; verify body scale, seams, surfaces, held items,
    armor, idle/walk/attack clips, and neutral ownership.
 2. Vehicles: BARC speeder, AT-RT, STAP, AAT, and LAAT gunship; verify kit icon,
    deployed model, collision box, rider seat, and animation.
@@ -112,10 +112,10 @@ failure, even if Minecraft substitutes a fallback model.
 ## Automated turnaround command
 
 Run `python tools/render_asset_turnarounds.py` with a Pillow-enabled Python. Seven QA sheets are
-written under `build/previews/turnarounds` for 26 NPCs, commanders, armor, vehicles, lightsabers,
+written under `build/previews/turnarounds` for 27 NPCs, commanders, armor, vehicles, lightsabers,
 blasters, and capsules. Each cell contains front/side/back orthographic views after local and bone
 hierarchy rotations. These sheets are diagnostic evidence; NeoForge and Fabric client passes remain
 the authority for hand anchors, riding, GUI lighting, and animation.
 
-The active checklist is 26 NPCs, all three commander variants, six armor families, five vehicles,
+The active checklist is 27 NPCs, all three commander variants, six armor families, five vehicles,
 six saber colors, and four blasters in GUI, first person, third person, dropped, and item-frame views.
