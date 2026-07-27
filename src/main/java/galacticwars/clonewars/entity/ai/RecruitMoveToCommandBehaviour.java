@@ -82,8 +82,8 @@ public final class RecruitMoveToCommandBehaviour
             stalledTicks++;
         }
         if (stalledTicks >= STALL_TIMEOUT) {
-            BrainUtil.clearMemory(recruit, MemoryModuleType.WALK_TARGET);
-            recruit.getNavigation().stop();
+            BrainUtil.clearMemories(
+                    recruit, MemoryModuleType.WALK_TARGET, MemoryModuleType.PATH);
             retryTicks = RETRY_BACKOFF;
             waitingToRetry = true;
             return;
@@ -96,8 +96,8 @@ public final class RecruitMoveToCommandBehaviour
 
     @Override
     protected void stop(GalacticRecruitEntity recruit) {
-        BrainUtil.clearMemory(recruit, MemoryModuleType.WALK_TARGET);
-        recruit.getNavigation().stop();
+        BrainUtil.clearMemories(
+                recruit, MemoryModuleType.WALK_TARGET, MemoryModuleType.PATH);
         if (retryTicks == 0) {
             trackedTarget = null;
         }

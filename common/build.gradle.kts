@@ -15,6 +15,10 @@ architectury {
     common("fabric", "neoforge")
 }
 
+loom {
+    accessWidenerPath.set(rootProject.file("src/main/resources/galacticwars.accesswidener"))
+}
+
 val neoForgeOnlySources = listOf(
     "galacticwars/clonewars/client/gui/GalacticWarsConfigScreen.java",
     "galacticwars/clonewars/client/render/BlasterClientExtensions.java",

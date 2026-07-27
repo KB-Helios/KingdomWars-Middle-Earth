@@ -16,11 +16,14 @@ public final class RecruitLoadoutStructureTest {
         String screen = read(
                 "src/main/java/galacticwars/clonewars/client/gui/RecruitLoadoutScreen.java");
 
-        assertContains(menu, "public static final int EQUIPMENT_SLOT_COUNT = 6", "equipment slots");
+        assertContains(menu, "public static final int EQUIPMENT_SLOT_COUNT = 7", "equipment slots");
         assertContains(menu, "public static final int CARGO_SLOT_COUNT = 9", "cargo slots");
         assertContains(menu, "recruit.createCargoContainer()", "shared physical cargo");
         assertContains(menu, "DataComponents.EQUIPPABLE", "component equipment policy");
-        assertContains(menu, "equippable.slot() == this.equipmentSlot", "slot validation");
+        assertContains(menu, "RecruitEquipmentTarget.MILITARY_WEAPON", "military weapon slot");
+        assertContains(menu, "RecruitEquipmentTarget.WORKER_TOOL", "worker tool slot");
+        assertContains(menu, "WorkerDutyLoadoutPolicy.isRecognizedTool", "worker tool routing");
+        assertContains(menu, "stack.get(DataComponents.WEAPON) != null", "military weapon routing");
         assertContains(menu, "recruit.canPlayerManageLogistics(player)", "permission guard");
         assertContains(provider, "buffer.writeVarInt(this.recruit.getId())", "entity id payload");
         assertContains(screen,

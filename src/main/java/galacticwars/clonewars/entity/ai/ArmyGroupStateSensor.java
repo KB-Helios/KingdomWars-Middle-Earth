@@ -1,6 +1,7 @@
 package galacticwars.clonewars.entity.ai;
 
 import galacticwars.clonewars.entity.GalacticRecruitEntity;
+import galacticwars.clonewars.registry.ModSensorTypes;
 import java.util.List;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.ai.memory.MemoryModuleType;
@@ -18,7 +19,7 @@ public final class ArmyGroupStateSensor extends ExtendedSensor<GalacticRecruitEn
 
     @Override
     public SensorType<? extends ExtendedSensor<?>> type() {
-        return ArmyBrainSensorTypes.GROUP_STATE;
+        return ModSensorTypes.ARMY_GROUP_STATE.get();
     }
 
     @Override
@@ -26,7 +27,8 @@ public final class ArmyGroupStateSensor extends ExtendedSensor<GalacticRecruitEn
         return List.of(
                 ArmyBrainMemoryTypes.ARMY_STATE,
                 ArmyBrainMemoryTypes.PATH_STATUS,
-                ArmyBrainMemoryTypes.MARCH_STATE);
+                ArmyBrainMemoryTypes.MARCH_STATE,
+                ArmyBrainMemoryTypes.NAVIGATION_RESULT);
     }
 
     @Override
@@ -42,6 +44,8 @@ public final class ArmyGroupStateSensor extends ExtendedSensor<GalacticRecruitEn
         }
 
         boolean changedGroup = previous == null || !previous.group().id().equals(next.group().id());
+        boolean changedOrder = previous == null
+                || !previous.group().order().equals(next.group().order());
         if (changedGroup) {
             ArmyBrainSupport.clearGroupExecution(recruit);
         }
@@ -61,5 +65,8 @@ public final class ArmyGroupStateSensor extends ExtendedSensor<GalacticRecruitEn
                 march.cohesionPercent(),
                 next.group().order().targetPosition().map(location -> location.blockPosition()).orElse(null),
                 next.group().order().targetEntityId().orElse(null)));
+        if (changedGroup || changedOrder) {
+            ArmyThreatSensor.refreshAuthorizedThreat(level, recruit, next);
+        }
     }
 }

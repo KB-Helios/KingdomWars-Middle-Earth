@@ -99,7 +99,6 @@ final class ArmyBrainSupport {
                 net.minecraft.world.entity.ai.memory.MemoryModuleType.PATH);
         recruit.setTarget(null);
         recruit.setAggressive(false);
-        recruit.getNavigation().stop();
     }
 
     static @Nullable LivingEntity selectTarget(

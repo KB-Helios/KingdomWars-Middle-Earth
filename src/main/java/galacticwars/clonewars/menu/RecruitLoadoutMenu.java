@@ -1,7 +1,9 @@
 package galacticwars.clonewars.menu;
 
+import galacticwars.clonewars.combat.FactionRangedWeaponService;
 import galacticwars.clonewars.entity.GalacticRecruitEntity;
 import galacticwars.clonewars.registry.ModMenuTypes;
+import galacticwars.clonewars.workforce.WorkerDutyLoadoutPolicy;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.resources.Identifier;
 import net.minecraft.world.Container;
@@ -14,6 +16,7 @@ import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.inventory.InventoryMenu;
 import net.minecraft.world.inventory.Slot;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
 import net.minecraft.world.item.enchantment.EnchantmentEffectComponents;
 import net.minecraft.world.item.enchantment.EnchantmentHelper;
 import net.minecraft.world.item.equipment.Equippable;
@@ -22,7 +25,7 @@ import net.minecraft.network.FriendlyByteBuf;
 
 /** Server-authoritative recruit equipment and shared physical cargo inventory. */
 public final class RecruitLoadoutMenu extends AbstractContainerMenu {
-    public static final int EQUIPMENT_SLOT_COUNT = 6;
+    public static final int EQUIPMENT_SLOT_COUNT = 7;
     public static final int CARGO_SLOT_COUNT = 9;
     public static final int RECRUIT_SLOT_COUNT = EQUIPMENT_SLOT_COUNT + CARGO_SLOT_COUNT;
     public static final int PLAYER_SLOT_COUNT = 36;
@@ -32,13 +35,14 @@ public final class RecruitLoadoutMenu extends AbstractContainerMenu {
     private static final int CARGO_SLOT_START = EQUIPMENT_SLOT_COUNT;
     private static final int CARGO_SLOT_END = RECRUIT_SLOT_COUNT;
     private static final int PLAYER_EXTENDED_END = PLAYER_INVENTORY_START + 27;
-    private static final EquipmentSlot[] EQUIPMENT_SLOTS = {
-            EquipmentSlot.MAINHAND,
-            EquipmentSlot.OFFHAND,
-            EquipmentSlot.HEAD,
-            EquipmentSlot.CHEST,
-            EquipmentSlot.LEGS,
-            EquipmentSlot.FEET
+    private static final RecruitEquipmentTarget[] EQUIPMENT_TARGETS = {
+            RecruitEquipmentTarget.MILITARY_WEAPON,
+            RecruitEquipmentTarget.WORKER_TOOL,
+            RecruitEquipmentTarget.OFFHAND,
+            RecruitEquipmentTarget.HEAD,
+            RecruitEquipmentTarget.CHEST,
+            RecruitEquipmentTarget.LEGS,
+            RecruitEquipmentTarget.FEET
     };
 
     private final Level level;
@@ -100,7 +104,7 @@ public final class RecruitLoadoutMenu extends AbstractContainerMenu {
                     slot,
                     8 + slot * 18,
                     20,
-                    EQUIPMENT_SLOTS[slot],
+                    EQUIPMENT_TARGETS[slot],
                     serverRecruit));
         }
         for (int slot = 0; slot < CARGO_SLOT_COUNT; slot++) {
@@ -194,20 +198,29 @@ public final class RecruitLoadoutMenu extends AbstractContainerMenu {
 
     private int equipmentTarget(ItemStack stack) {
         Equippable equippable = stack.get(DataComponents.EQUIPPABLE);
-        if (equippable == null) {
-            return -1;
-        }
-        for (int slot = 0; slot < EQUIPMENT_SLOT_COUNT; slot++) {
-            if (EQUIPMENT_SLOTS[slot] == equippable.slot()
-                    && this.slots.get(slot).mayPlace(stack)) {
-                return slot;
+        if (equippable != null) {
+            for (int slot = 0; slot < EQUIPMENT_SLOT_COUNT; slot++) {
+                if (EQUIPMENT_TARGETS[slot].equipmentSlot == equippable.slot()
+                        && this.slots.get(slot).mayPlace(stack)) {
+                    return slot;
+                }
             }
+        }
+        if (WorkerDutyLoadoutPolicy.isRecognizedTool(stack)
+                && this.slots.get(RecruitEquipmentTarget.WORKER_TOOL.ordinal()).mayPlace(stack)) {
+            return RecruitEquipmentTarget.WORKER_TOOL.ordinal();
+        }
+        if (FactionRangedWeaponService.supportsRecruitRangedCombat(stack)
+                || stack.is(Items.BOW)
+                || stack.is(Items.CROSSBOW)
+                || stack.get(DataComponents.WEAPON) != null) {
+            return RecruitEquipmentTarget.MILITARY_WEAPON.ordinal();
         }
         return -1;
     }
 
     private static final class RecruitEquipmentSlot extends Slot {
-        private final EquipmentSlot equipmentSlot;
+        private final RecruitEquipmentTarget target;
         private final GalacticRecruitEntity owner;
 
         private RecruitEquipmentSlot(
@@ -215,30 +228,43 @@ public final class RecruitLoadoutMenu extends AbstractContainerMenu {
                 int containerSlot,
                 int x,
                 int y,
-                EquipmentSlot equipmentSlot,
+                RecruitEquipmentTarget target,
                 GalacticRecruitEntity owner
         ) {
             super(container, containerSlot, x, y);
-            this.equipmentSlot = equipmentSlot;
+            this.target = target;
             this.owner = owner;
         }
 
         @Override
         public void setByPlayer(ItemStack stack, ItemStack previous) {
-            if (this.owner != null) {
-                this.owner.onEquipItem(this.equipmentSlot, previous, stack);
+            EquipmentSlot activeSlot = this.target.activeEquipmentSlot(this.owner);
+            if (this.owner != null && activeSlot != null) {
+                this.owner.onEquipItem(activeSlot, previous, stack);
             }
             super.setByPlayer(stack, previous);
         }
 
         @Override
         public boolean mayPlace(ItemStack stack) {
-            if (this.equipmentSlot.getType() == EquipmentSlot.Type.HAND) {
+            if (this.target == RecruitEquipmentTarget.MILITARY_WEAPON) {
+                return !WorkerDutyLoadoutPolicy.isRecognizedTool(stack)
+                        || FactionRangedWeaponService.supportsRecruitRangedCombat(stack)
+                        || stack.get(DataComponents.WEAPON) != null;
+            }
+            if (this.target == RecruitEquipmentTarget.WORKER_TOOL) {
+                return WorkerDutyLoadoutPolicy.isRecognizedTool(stack)
+                        && (this.owner == null
+                        || this.owner.getWorkerProfession()
+                                .map(profession -> WorkerDutyLoadoutPolicy.isCompatible(profession, stack))
+                                .orElse(true));
+            }
+            if (this.target == RecruitEquipmentTarget.OFFHAND) {
                 return true;
             }
             Equippable equippable = stack.get(DataComponents.EQUIPPABLE);
             return equippable != null
-                    && equippable.slot() == this.equipmentSlot
+                    && equippable.slot() == this.target.equipmentSlot
                     && (this.owner == null
                     || equippable.canBeEquippedBy(this.owner.typeHolder()));
         }
@@ -246,7 +272,8 @@ public final class RecruitLoadoutMenu extends AbstractContainerMenu {
         @Override
         public boolean mayPickup(Player player) {
             ItemStack stack = this.getItem();
-            if (this.equipmentSlot.isArmor()
+            if (this.target.equipmentSlot != null
+                    && this.target.equipmentSlot.isArmor()
                     && !stack.isEmpty()
                     && !player.isCreative()
                     && EnchantmentHelper.has(
@@ -258,19 +285,17 @@ public final class RecruitLoadoutMenu extends AbstractContainerMenu {
 
         @Override
         public int getMaxStackSize() {
-            return this.equipmentSlot.getType() == EquipmentSlot.Type.HUMANOID_ARMOR
-                    ? 1 : super.getMaxStackSize();
+            return 1;
         }
 
         @Override
         public int getMaxStackSize(ItemStack stack) {
-            return this.equipmentSlot.getType() == EquipmentSlot.Type.HUMANOID_ARMOR
-                    ? 1 : super.getMaxStackSize(stack);
+            return 1;
         }
 
         @Override
         public Identifier getNoItemIcon() {
-            return switch (this.equipmentSlot) {
+            return switch (this.target) {
                 case OFFHAND -> InventoryMenu.EMPTY_ARMOR_SLOT_SHIELD;
                 case HEAD -> InventoryMenu.EMPTY_ARMOR_SLOT_HELMET;
                 case CHEST -> InventoryMenu.EMPTY_ARMOR_SLOT_CHESTPLATE;
@@ -295,8 +320,8 @@ public final class RecruitLoadoutMenu extends AbstractContainerMenu {
 
         @Override
         public boolean isEmpty() {
-            for (EquipmentSlot slot : EQUIPMENT_SLOTS) {
-                if (!this.recruit.getItemBySlot(slot).isEmpty()) {
+            for (int slot = 0; slot < EQUIPMENT_SLOT_COUNT; slot++) {
+                if (!this.getItem(slot).isEmpty()) {
                     return false;
                 }
             }
@@ -306,7 +331,7 @@ public final class RecruitLoadoutMenu extends AbstractContainerMenu {
         @Override
         public ItemStack getItem(int slot) {
             return validSlot(slot)
-                    ? this.recruit.getItemBySlot(EQUIPMENT_SLOTS[slot])
+                    ? EQUIPMENT_TARGETS[slot].get(this.recruit)
                     : ItemStack.EMPTY;
         }
 
@@ -328,7 +353,7 @@ public final class RecruitLoadoutMenu extends AbstractContainerMenu {
         public ItemStack removeItemNoUpdate(int slot) {
             ItemStack existing = this.getItem(slot);
             if (!existing.isEmpty()) {
-                this.recruit.setItemSlot(EQUIPMENT_SLOTS[slot], ItemStack.EMPTY);
+                EQUIPMENT_TARGETS[slot].set(this.recruit, ItemStack.EMPTY);
             }
             return existing;
         }
@@ -338,13 +363,10 @@ public final class RecruitLoadoutMenu extends AbstractContainerMenu {
             if (!validSlot(slot)) {
                 throw new IndexOutOfBoundsException("equipment slot " + slot);
             }
-            EquipmentSlot equipmentSlot = EQUIPMENT_SLOTS[slot];
-            int maxCount = equipmentSlot.getType() == EquipmentSlot.Type.HUMANOID_ARMOR
-                    ? 1 : stack.getMaxStackSize();
             ItemStack stored = stack.isEmpty()
                     ? ItemStack.EMPTY
-                    : stack.copyWithCount(Math.min(stack.getCount(), maxCount));
-            this.recruit.setItemSlot(equipmentSlot, stored);
+                    : stack.copyWithCount(1);
+            EQUIPMENT_TARGETS[slot].set(this.recruit, stored);
         }
 
         @Override
@@ -362,13 +384,57 @@ public final class RecruitLoadoutMenu extends AbstractContainerMenu {
 
         @Override
         public void clearContent() {
-            for (EquipmentSlot slot : EQUIPMENT_SLOTS) {
-                this.recruit.setItemSlot(slot, ItemStack.EMPTY);
+            for (RecruitEquipmentTarget target : EQUIPMENT_TARGETS) {
+                target.set(this.recruit, ItemStack.EMPTY);
             }
         }
 
         private static boolean validSlot(int slot) {
             return slot >= 0 && slot < EQUIPMENT_SLOT_COUNT;
+        }
+    }
+
+    private enum RecruitEquipmentTarget {
+        MILITARY_WEAPON(null),
+        WORKER_TOOL(null),
+        OFFHAND(EquipmentSlot.OFFHAND),
+        HEAD(EquipmentSlot.HEAD),
+        CHEST(EquipmentSlot.CHEST),
+        LEGS(EquipmentSlot.LEGS),
+        FEET(EquipmentSlot.FEET);
+
+        private final EquipmentSlot equipmentSlot;
+
+        RecruitEquipmentTarget(EquipmentSlot equipmentSlot) {
+            this.equipmentSlot = equipmentSlot;
+        }
+
+        private ItemStack get(GalacticRecruitEntity recruit) {
+            return switch (this) {
+                case MILITARY_WEAPON -> recruit.getMilitaryMainHandItem();
+                case WORKER_TOOL -> recruit.getWorkerMainHandItem();
+                default -> recruit.getItemBySlot(this.equipmentSlot);
+            };
+        }
+
+        private void set(GalacticRecruitEntity recruit, ItemStack stack) {
+            switch (this) {
+                case MILITARY_WEAPON -> recruit.setMilitaryMainHandItem(stack);
+                case WORKER_TOOL -> recruit.setWorkerMainHandItem(stack);
+                default -> recruit.setItemSlot(this.equipmentSlot, stack);
+            }
+        }
+
+        private EquipmentSlot activeEquipmentSlot(GalacticRecruitEntity recruit) {
+            if (this == MILITARY_WEAPON) {
+                return recruit != null && recruit.isMilitaryDutyActive()
+                        ? EquipmentSlot.MAINHAND : null;
+            }
+            if (this == WORKER_TOOL) {
+                return recruit != null && !recruit.isMilitaryDutyActive()
+                        ? EquipmentSlot.MAINHAND : null;
+            }
+            return this.equipmentSlot;
         }
     }
 }

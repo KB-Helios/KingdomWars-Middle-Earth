@@ -19,6 +19,8 @@ public final class ArmyBrainMemoryTypes {
             new MemoryModuleType<>(Optional.empty());
     public static final MemoryModuleType<ArmyMarchMemory> MARCH_STATE =
             new MemoryModuleType<>(Optional.empty());
+    public static final MemoryModuleType<RecruitNavigationResult> NAVIGATION_RESULT =
+            new MemoryModuleType<>(Optional.empty());
 
     private ArmyBrainMemoryTypes() {
     }

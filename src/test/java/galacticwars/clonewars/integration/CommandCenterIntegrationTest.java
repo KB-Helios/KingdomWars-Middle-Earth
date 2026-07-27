@@ -81,6 +81,14 @@ public final class CommandCenterIntegrationTest {
         assertContains(screen, "fabrication.availability()",
                 "server-authored fabrication button availability");
         assertContains(screen, "Tooltip.create", "localized disabled action feedback");
+        assertContains(screen, "font.split", "bounded wrapped tab text");
+        assertContains(screen, "enableScissor", "tab content scissor");
+        assertContains(screen, "mouseScrolled", "per-tab content scrolling");
+        assertContains(screen, "font.plainSubstrByWidth", "single-line selector truncation");
+        String navigationScreen = read(
+                "src/main/java/galacticwars/clonewars/client/gui/CommandCenterNavigationScreen.java");
+        assertContains(navigationScreen, "font.split", "bounded navigation hints");
+        assertContains(navigationScreen, "Math.min(BUTTON_WIDTH", "responsive navigation controls");
         assertContains(fabrication, "hall.canUse(player, KingdomPermission.USE_STORAGE)",
                 "server-enforced fabrication permission");
         assertContains(fabrication, "hall.upkeepPaid()",

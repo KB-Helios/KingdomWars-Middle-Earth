@@ -57,8 +57,8 @@ public final class CivilianShelterBehaviour
     protected void stop(GalacticRecruitEntity civilian) {
         BrainUtil.clearMemories(civilian,
                 MemoryModuleType.WALK_TARGET,
-                MemoryModuleType.LOOK_TARGET);
-        civilian.getNavigation().stop();
+                MemoryModuleType.LOOK_TARGET,
+                MemoryModuleType.PATH);
     }
 
     private static boolean shouldShelter(GalacticRecruitEntity civilian) {

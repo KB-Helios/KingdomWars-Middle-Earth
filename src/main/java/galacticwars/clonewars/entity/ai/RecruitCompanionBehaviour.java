@@ -68,8 +68,8 @@ public final class RecruitCompanionBehaviour
                 new EntityTracker(owner, true));
         if (distanceToSqr > TELEPORT_DISTANCE_SQUARED && !recruit.level().isClientSide()) {
             recruit.teleportTo(anchor.x(), anchor.y(), anchor.z());
-            BrainUtil.clearMemory(recruit, MemoryModuleType.WALK_TARGET);
-            recruit.getNavigation().stop();
+            BrainUtil.clearMemories(
+                    recruit, MemoryModuleType.WALK_TARGET, MemoryModuleType.PATH);
             return;
         }
         if (recruit.tickCount % 10 == 0) {
@@ -81,8 +81,8 @@ public final class RecruitCompanionBehaviour
     protected void stop(GalacticRecruitEntity recruit) {
         BrainUtil.clearMemories(recruit,
                 MemoryModuleType.WALK_TARGET,
-                MemoryModuleType.LOOK_TARGET);
-        recruit.getNavigation().stop();
+                MemoryModuleType.LOOK_TARGET,
+                MemoryModuleType.PATH);
         owner = null;
     }
 

@@ -17,6 +17,7 @@ import net.tslat.smartbrainlib.api.core.sensor.ExtendedSensor;
 import net.tslat.smartbrainlib.api.core.sensor.custom.GenericAttackTargetSensor;
 import net.tslat.smartbrainlib.api.core.sensor.vanilla.NearbyLivingEntitySensor;
 import net.tslat.smartbrainlib.api.core.sensor.vanilla.NearbyPlayersSensor;
+import net.tslat.smartbrainlib.api.core.sensor.vanilla.HurtBySensor;
 import net.tslat.smartbrainlib.library.object.SquareRadius;
 
 /** Stateless SmartBrainLib declaration for every Galactic recruit instance. */
@@ -31,6 +32,8 @@ public final class RecruitBrain implements SmartBrainBuilder<GalacticRecruitEnti
         return List.of(
                 new ArmyGroupStateSensor(),
                 new ArmyThreatSensor(),
+                new HurtBySensor<GalacticRecruitEntity>()
+                        .setPredicate((recruit, source) -> recruit.hurtTime > 0),
                 new NearbyPlayersSensor<GalacticRecruitEntity>()
                         .setPredicate((recruit, player) -> !player.isSpectator())
                         .setRadius(recruit -> new SquareRadius(
@@ -67,6 +70,7 @@ public final class RecruitBrain implements SmartBrainBuilder<GalacticRecruitEnti
                 new RecruitAcquireAttackTargetBehaviour(),
                 new FirstApplicableBehaviour<GalacticRecruitEntity>(
                         new RecruitSitBehaviour(),
+                        new WorkerSafetyBehaviour(),
                         new CivilianShelterBehaviour(),
                         new NaturalCivilianWorkBehaviour(),
                         new RecruitWorkerBehaviour(),

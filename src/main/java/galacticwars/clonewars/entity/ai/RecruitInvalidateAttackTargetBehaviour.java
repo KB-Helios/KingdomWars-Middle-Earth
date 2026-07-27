@@ -28,10 +28,10 @@ public final class RecruitInvalidateAttackTargetBehaviour
             BrainUtil.clearMemories(recruit,
                     MemoryModuleType.ATTACK_TARGET,
                     MemoryModuleType.LOOK_TARGET,
-                    MemoryModuleType.WALK_TARGET);
+                    MemoryModuleType.WALK_TARGET,
+                    MemoryModuleType.PATH);
             recruit.setTarget(null);
             recruit.setAggressive(false);
-            recruit.getNavigation().stop();
             return;
         }
         recruit.setTarget(target);

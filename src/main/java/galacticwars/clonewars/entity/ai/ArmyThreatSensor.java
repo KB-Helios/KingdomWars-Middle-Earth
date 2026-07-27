@@ -1,6 +1,7 @@
 package galacticwars.clonewars.entity.ai;
 
 import galacticwars.clonewars.entity.GalacticRecruitEntity;
+import galacticwars.clonewars.registry.ModSensorTypes;
 import galacticwars.clonewars.army.ArmyCommandType;
 import galacticwars.clonewars.army.ArmyPatrolEnemyPolicy;
 import java.util.List;
@@ -19,7 +20,7 @@ public final class ArmyThreatSensor extends ExtendedSensor<GalacticRecruitEntity
 
     @Override
     public SensorType<? extends ExtendedSensor<?>> type() {
-        return ArmyBrainSensorTypes.THREAT;
+        return ModSensorTypes.ARMY_THREAT.get();
     }
 
     @Override
@@ -35,6 +36,21 @@ public final class ArmyThreatSensor extends ExtendedSensor<GalacticRecruitEntity
         if (state == null) {
             return;
         }
+        refreshAuthorizedThreat(level, recruit, state);
+    }
+
+    /**
+     * Installs combat memory at the same authority boundary that projects a new group/order.
+     *
+     * <p>The sensor continues to call this on its normal scan cadence for retargeting. The
+     * group-state sensor also calls it once when authority changes so a freshly authorized
+     * attack cannot spend a sensor interval with only the legacy command state installed.</p>
+     */
+    static void refreshAuthorizedThreat(
+            ServerLevel level,
+            GalacticRecruitEntity recruit,
+            ArmyBrainState state
+    ) {
         if (state.group().order().type() == ArmyCommandType.PATROL_ROUTE
                 && state.group().effectivePatrolPlan()
                         .map(plan -> plan.enemyPolicy() == ArmyPatrolEnemyPolicy.RETREAT_FROM_HOSTILES)

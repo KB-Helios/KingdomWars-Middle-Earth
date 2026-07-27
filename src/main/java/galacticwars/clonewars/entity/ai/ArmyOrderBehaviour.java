@@ -174,8 +174,7 @@ public final class ArmyOrderBehaviour extends ExtendedBehaviour<GalacticRecruitE
             return ArmyTacticalPlanner.plan(
                     ArmyBehaviorDecision.attack(selectedTarget.getUUID(), "selected_group_target"),
                     recruit.getRecruitVitals(),
-                    state.fallbackPosition(),
-                    state.group().effectiveTactics());
+                    state.fallbackPosition());
         }
         if (command.type() == ArmyCommandType.PROTECT_ENTITY) {
             LivingEntity protectedEntity = command.targetEntityId() == null

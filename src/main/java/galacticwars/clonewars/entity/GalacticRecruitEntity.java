@@ -34,6 +34,8 @@ import galacticwars.clonewars.client.ClientGameplayCatalog;
 import galacticwars.clonewars.data.GameplayDataManager;
 import galacticwars.clonewars.data.GameplayDataSnapshot;
 import galacticwars.clonewars.entity.ai.RecruitBrain;
+import galacticwars.clonewars.entity.ai.ArmyBrainMemoryTypes;
+import galacticwars.clonewars.entity.ai.RecruitNavigationResult;
 import galacticwars.clonewars.combat.FactionRangedWeaponService;
 import galacticwars.clonewars.faction.FactionAlignment;
 import galacticwars.clonewars.faction.FactionAlignmentSavedData;
@@ -110,6 +112,7 @@ import galacticwars.clonewars.workforce.WorkerProfessionCatalog;
 import galacticwars.clonewars.workforce.WorkerProfessionDefinition;
 import galacticwars.clonewars.workforce.WorkerAssignment;
 import galacticwars.clonewars.workforce.WorkerContractService;
+import galacticwars.clonewars.workforce.WorkerDutyLoadoutPolicy;
 import galacticwars.clonewars.workforce.WorkerPhase;
 import galacticwars.clonewars.workforce.WorkerResourceAction;
 import galacticwars.clonewars.workforce.WorkerResourceDecision;
@@ -160,6 +163,8 @@ import net.minecraft.world.entity.SpawnGroupData;
 import net.minecraft.world.entity.TamableAnimal;
 import net.minecraft.world.entity.ai.attributes.AttributeSupplier;
 import net.minecraft.world.entity.ai.attributes.Attributes;
+import net.minecraft.world.entity.ai.memory.MemoryModuleType;
+import net.minecraft.world.entity.ai.memory.WalkTarget;
 import net.minecraft.world.entity.animal.Animal;
 import net.minecraft.world.entity.monster.Monster;
 import net.minecraft.world.entity.player.Player;
@@ -261,6 +266,8 @@ public class GalacticRecruitEntity extends TamableAnimal
     private @Nullable UUID armyGroupId;
     private @Nullable UUID workOrderId;
     private NonNullList<ItemStack> workerInventory = NonNullList.withSize(9, ItemStack.EMPTY);
+    private ItemStack inactiveDutyMainHand = ItemStack.EMPTY;
+    private boolean defaultLoadoutInitialized;
     private CourierRouteExecutionState courierRouteState = CourierRouteExecutionState.start(0L);
     private WorkerPhase workerPhase = WorkerPhase.ACQUIRE_ORDER;
     private String workerReason = "ready";
@@ -293,7 +300,6 @@ public class GalacticRecruitEntity extends TamableAnimal
 
     public GalacticRecruitEntity(EntityType<? extends TamableAnimal> entityType, Level level) {
         super(entityType, level);
-        this.setItemSlot(EquipmentSlot.MAINHAND, new ItemStack(Items.IRON_SWORD));
     }
 
     public static AttributeSupplier.Builder createAttributes() {
@@ -388,7 +394,9 @@ public class GalacticRecruitEntity extends TamableAnimal
         output.putBoolean("PendingNaturalSpawnRemoval", this.pendingNaturalSpawnRemoval);
         output.putBoolean("PendingNaturalSpawnInitialization", this.pendingNaturalSpawnInitialization);
         this.getWorkerProfession().ifPresent(profession -> output.putString("WorkerProfession", profession.id()));
-        output.putInt("RecruitDataVersion", 12);
+        output.putInt("RecruitDataVersion", 13);
+        output.putBoolean("DefaultLoadoutInitialized", this.defaultLoadoutInitialized);
+        output.store("InactiveDutyMainHand", ItemStack.OPTIONAL_CODEC, this.inactiveDutyMainHand);
         output.storeNullable("KingdomId", UUIDUtil.CODEC, this.kingdomId);
         output.storeNullable("SettlementId", UUIDUtil.CODEC, this.settlementId);
         output.storeNullable("FactionOutpostId", UUIDUtil.CODEC, this.factionOutpostId);
@@ -471,8 +479,25 @@ public class GalacticRecruitEntity extends TamableAnimal
         this.pendingNaturalSpawnInitialization = input.getBooleanOr(
                 "PendingNaturalSpawnInitialization", false);
         WorkerProfession.byId(input.getStringOr("WorkerProfession", ""))
-                .ifPresentOrElse(this::setWorkerProfession, () -> this.entityData.set(DATA_WORKER_PROFESSION, -1));
+                .ifPresentOrElse(
+                        profession -> this.entityData.set(DATA_WORKER_PROFESSION, profession.ordinal()),
+                        () -> this.entityData.set(DATA_WORKER_PROFESSION, -1));
         int dataVersion = input.getIntOr("RecruitDataVersion", 0);
+        if (dataVersion >= 13) {
+            this.defaultLoadoutInitialized = input.getBooleanOr(
+                    "DefaultLoadoutInitialized", true);
+            this.inactiveDutyMainHand = input.read(
+                            "InactiveDutyMainHand", ItemStack.OPTIONAL_CODEC)
+                    .orElse(ItemStack.EMPTY);
+        } else {
+            // The active main hand was already restored by the vanilla entity loader.
+            // Older worker saves did not preserve their military weapon, so seed only
+            // the newly introduced inactive slot from the unit definition.
+            this.defaultLoadoutInitialized = true;
+            this.inactiveDutyMainHand = this.serviceBranch == NpcServiceBranch.CIVILIAN
+                    ? this.defaultMilitaryMainHand()
+                    : ItemStack.EMPTY;
+        }
         if (dataVersion < 3 && (!input.getStringOr("WorkerCarriedResources", "").isBlank()
                 || !input.getStringOr("WorkerStorageResources", "").isBlank())) {
             GalacticWars.LOGGER.warn(
@@ -700,7 +725,7 @@ public class GalacticRecruitEntity extends TamableAnimal
         this.spawnEggInitialized = true;
         this.setPersistenceRequired();
         this.applyUnitDefinition();
-        this.getNavigation().stop();
+        BrainUtil.clearMemories(this, MemoryModuleType.WALK_TARGET, MemoryModuleType.PATH);
         this.setTarget(null);
     }
 
@@ -987,7 +1012,7 @@ public class GalacticRecruitEntity extends TamableAnimal
         this.initializeNaturalFactionNpc(
                 outpost.id(), branch, role,
                 FactionOutpostMarkerService.shelterCenter(outpost), outpost.radius());
-        this.getNavigation().stop();
+        BrainUtil.clearMemories(this, MemoryModuleType.WALK_TARGET, MemoryModuleType.PATH);
         this.setTarget(null);
         this.naturalPlanetNpcInitialized = true;
         return true;
@@ -1003,22 +1028,31 @@ public class GalacticRecruitEntity extends TamableAnimal
 
     public boolean canPlayerCommandArmy(Player player) {
         Objects.requireNonNull(player, "player");
-        if (this.isOwnedBy(player)) {
-            return true;
-        }
-        if (this.armyGroupId == null || !(this.level() instanceof ServerLevel serverLevel)) {
+        if (!(this.level() instanceof ServerLevel serverLevel)) {
             return false;
         }
         KingdomSavedData data = KingdomSavedData.get(serverLevel);
-        ArmyGroupRecord group = data.armyGroup(this.armyGroupId).orElse(null);
+        KingdomRecord recruitKingdom = data.kingdomForRecruit(this.getUUID()).orElse(null);
+        if (recruitKingdom == null) {
+            return this.isOwnedBy(player);
+        }
         KingdomRecord actorKingdom = data.kingdomForPlayer(player.getUUID()).orElse(null);
+        if (actorKingdom == null
+                || !recruitKingdom.id().equals(actorKingdom.id())
+                || recruitKingdom.npc(this.getUUID()).isEmpty()
+                || !actorKingdom.allows(
+                        player.getUUID(), galacticwars.clonewars.kingdom.KingdomPermission.COMMAND_ARMY)) {
+            return false;
+        }
+        if (this.armyGroupId == null) {
+            return true;
+        }
+        ArmyGroupRecord group = data.armyGroup(this.armyGroupId).orElse(null);
         return group != null
-                && actorKingdom != null
                 && group.contains(this.getUUID())
                 && group.kingdomId().equals(actorKingdom.id())
                 && group.simulation().lifecycleState()
-                        == galacticwars.clonewars.army.ArmyGroupLifecycleState.LIVE
-                && actorKingdom.allows(player.getUUID(), galacticwars.clonewars.kingdom.KingdomPermission.COMMAND_ARMY);
+                        == galacticwars.clonewars.army.ArmyGroupLifecycleState.LIVE;
     }
 
     public String getRecruitFactionId() {
@@ -1546,14 +1580,20 @@ public class GalacticRecruitEntity extends TamableAnimal
         if (action == RecruitCommandAction.HIRE) {
             return this.tryHire(player);
         }
-        if (!this.isOwnedBy(player)
-                && !(this.canPlayerCommandArmy(player) && isArmyCommandAction(action))
-                && !(action == RecruitCommandAction.OPEN_LOADOUT
-                        && this.canPlayerManageLogistics(player))) {
+        Optional<WorkerProfession> profession = RecruitCommandAction.workerProfession(buttonId);
+        boolean authorized = isArmyCommandAction(action)
+                ? this.canPlayerCommandArmy(player)
+                : isWorkerManagementAction(action)
+                        ? this.canPlayerManageWorksites(player)
+                        : action == RecruitCommandAction.OPEN_LOADOUT
+                                ? this.canPlayerManageLogistics(player)
+                                : isRecruitManagementAction(action)
+                                        ? this.canPlayerRecruit(player)
+                                        : this.isOwnedBy(player) && !this.hasKingdomAuthority();
+        if (!authorized) {
             sendFeedback(player, Component.translatable("message.galacticwars.recruit.not_owner"));
             return false;
         }
-        Optional<WorkerProfession> profession = RecruitCommandAction.workerProfession(buttonId);
         if (profession.isPresent()) {
             return this.tryAssignWorkerProfession(player, profession.get());
         }
@@ -1873,8 +1913,54 @@ public class GalacticRecruitEntity extends TamableAnimal
                 && this.getWorkerProfession().filter(profession -> profession == WorkerProfession.MERCHANT).isPresent();
     }
 
+    public ItemStack getMilitaryMainHandItem() {
+        return this.serviceBranch == NpcServiceBranch.MILITARY
+                ? this.getMainHandItem()
+                : this.inactiveDutyMainHand;
+    }
+
+    public ItemStack getWorkerMainHandItem() {
+        return this.serviceBranch == NpcServiceBranch.CIVILIAN
+                ? this.getMainHandItem()
+                : this.inactiveDutyMainHand;
+    }
+
+    public boolean isMilitaryDutyActive() {
+        return this.serviceBranch == NpcServiceBranch.MILITARY;
+    }
+
+    public void setMilitaryMainHandItem(ItemStack stack) {
+        this.setDutyMainHand(NpcServiceBranch.MILITARY, stack);
+    }
+
+    public void setWorkerMainHandItem(ItemStack stack) {
+        this.setDutyMainHand(NpcServiceBranch.CIVILIAN, stack);
+    }
+
+    private void setDutyMainHand(NpcServiceBranch branch, ItemStack stack) {
+        ItemStack normalized = stack == null ? ItemStack.EMPTY : stack;
+        if (this.serviceBranch == branch) {
+            this.setItemSlot(EquipmentSlot.MAINHAND, normalized);
+        } else {
+            this.inactiveDutyMainHand = normalized;
+        }
+    }
+
+    private void switchDutyBranch(NpcServiceBranch nextBranch) {
+        if (this.serviceBranch == nextBranch) {
+            return;
+        }
+        ItemStack previouslyActive = this.getMainHandItem();
+        this.setItemSlot(EquipmentSlot.MAINHAND, this.inactiveDutyMainHand);
+        this.inactiveDutyMainHand = previouslyActive;
+        this.serviceBranch = nextBranch;
+    }
+
     public void setWorkerProfession(WorkerProfession profession) {
-        this.serviceBranch = NpcServiceBranch.CIVILIAN;
+        if (this.getWorkerMainHandItem().isEmpty()) {
+            this.setWorkerMainHandItem(WorkerDutyLoadoutPolicy.defaultTool(profession));
+        }
+        this.switchDutyBranch(NpcServiceBranch.CIVILIAN);
         this.entityData.set(DATA_WORKER_PROFESSION, profession.ordinal());
         if (this.getRecruitDuty() != RecruitDuty.COMMANDER) {
             this.setRecruitDuty(RecruitDuty.WORKER);
@@ -1885,19 +1971,23 @@ public class GalacticRecruitEntity extends TamableAnimal
                     group.ownerId(), this.getUUID(), false, this.armyLocation()));
             this.armyGroupId = null;
         }
-        this.applyWorkerEquipment(profession);
         this.syncRecruitStatusState();
     }
 
     private void clearWorkerProfession() {
-        if (this.level() instanceof ServerLevel serverLevel && this.getOwnerReference() != null) {
+        UUID actorId = this.getOwnerReference() == null
+                ? null : this.getOwnerReference().getUUID();
+        this.clearWorkerProfession(actorId);
+    }
+
+    private void clearWorkerProfession(@Nullable UUID actorId) {
+        if (this.level() instanceof ServerLevel serverLevel && actorId != null) {
             KingdomSavedData data = KingdomSavedData.get(serverLevel);
-            UUID actorId = this.getOwnerReference().getUUID();
             data.releaseWorkerAssignments(actorId, this.getUUID());
             data.setNpcServiceBranch(actorId, this.getUUID(), NpcServiceBranch.MILITARY);
         }
         this.entityData.set(DATA_WORKER_PROFESSION, -1);
-        this.serviceBranch = NpcServiceBranch.MILITARY;
+        this.switchDutyBranch(NpcServiceBranch.MILITARY);
         this.setRecruitDuty(RecruitDuty.SOLDIER);
         this.workerPhase = WorkerPhase.ACQUIRE_ORDER;
         this.workerReason = "soldier_duty";
@@ -1910,11 +2000,16 @@ public class GalacticRecruitEntity extends TamableAnimal
         this.setStorageTarget(null);
         this.setBaseTarget(null);
         this.starterBaseCompletedBlocks = 0;
-        this.setItemSlot(EquipmentSlot.MAINHAND, new ItemStack(Items.IRON_SWORD));
-        this.setRecruitCommand(RecruitmentAction.FOLLOW_OWNER);
-        if (this.level() instanceof ServerLevel serverLevel && this.getOwnerReference() != null) {
-            KingdomSavedData.get(serverLevel).addRecruitToArmy(this.getOwnerReference().getUUID(), this.getUUID());
+        boolean joinedArmy = false;
+        if (this.level() instanceof ServerLevel serverLevel && actorId != null) {
+            KingdomSavedData data = KingdomSavedData.get(serverLevel);
+            joinedArmy = data.addRecruitToArmy(actorId, this.getUUID());
+            this.armyGroupId = data.armyGroupForRecruit(this.getUUID())
+                    .map(ArmyGroupRecord::id)
+                    .orElse(null);
         }
+        this.setRecruitCommand(joinedArmy
+                ? RecruitmentAction.FOLLOW_OWNER : RecruitmentAction.HOLD_POSITION);
         this.syncRecruitStatusState();
     }
 
@@ -2050,6 +2145,22 @@ public class GalacticRecruitEntity extends TamableAnimal
                 .filter(WorkerProfessionCatalog::isEnabled)
                 .orElse(null);
         if (profession == null) {
+            return;
+        }
+        if (!this.hasPaidSettlementUpkeep()) {
+            this.pauseWorkerNavigation();
+            if (this.workerPhase != WorkerPhase.PAUSED
+                    || !this.workerReason.equals("upkeep_unpaid")) {
+                this.transitionWorker(WorkerPhase.PAUSED, "upkeep_unpaid", null);
+            }
+            return;
+        }
+        if (this.workerPhase == WorkerPhase.PAUSED
+                && this.workerReason.equals("upkeep_unpaid")) {
+            this.workerCooldownTicks = 0;
+            this.transitionWorker(WorkerPhase.ACQUIRE_ORDER, "upkeep_restored", null);
+        }
+        if (this.workerReason.equals("threat_retreat")) {
             return;
         }
         UUID ownerId = this.getOwnerReference().getUUID();
@@ -2329,7 +2440,114 @@ public class GalacticRecruitEntity extends TamableAnimal
     }
 
     public void pauseWorkerNavigation() {
-        this.getNavigation().stop();
+        BrainUtil.clearMemories(this, MemoryModuleType.WALK_TARGET, MemoryModuleType.PATH);
+    }
+
+    public boolean shouldUseWorkerSafety(@Nullable LivingEntity threat) {
+        return this.isTame()
+                && this.getRecruitDuty() == RecruitDuty.WORKER
+                && this.getRecruitCommand() == RecruitmentAction.WORK_AT_SITE
+                && this.getWorkerProfession().filter(WorkerProfessionCatalog::isEnabled).isPresent()
+                && (this.isWorkerSafetyRetreating()
+                || threat != null && threat.isAlive() && threat.level() == this.level());
+    }
+
+    public boolean isWorkerSafetyRetreating() {
+        return this.workerPhase == WorkerPhase.PAUSED && this.workerReason.equals("threat_retreat");
+    }
+
+    public void beginWorkerSafetyRetreat(@Nullable LivingEntity threat) {
+        this.clearAuthorityMemories();
+        this.pauseWorkerNavigation();
+        if (!this.isWorkerSafetyRetreating()
+                || this.activeWorkTarget == null
+                || !this.level().isLoaded(this.activeWorkTarget)) {
+            this.transitionWorker(
+                    WorkerPhase.PAUSED, "threat_retreat", this.workerSafetyRetreatTarget(threat));
+        }
+        this.maintainWorkerSafetyRetreat();
+    }
+
+    public void maintainWorkerSafetyRetreat() {
+        if (!this.isWorkerSafetyRetreating() || this.activeWorkTarget == null) {
+            return;
+        }
+        if (!this.level().isLoaded(this.activeWorkTarget)) {
+            this.transitionWorker(
+                    WorkerPhase.PAUSED, "threat_retreat", this.workerSafetyRetreatTarget(null));
+        }
+        if (this.activeWorkTarget == null) {
+            return;
+        }
+        if (this.distanceToSqr(
+                this.activeWorkTarget.getX() + 0.5D,
+                this.activeWorkTarget.getY(),
+                this.activeWorkTarget.getZ() + 0.5D) <= 4.0D) {
+            this.pauseWorkerNavigation();
+            return;
+        }
+        BrainUtil.setMemory(this, MemoryModuleType.WALK_TARGET,
+                new WalkTarget(this.activeWorkTarget, 1.15F, 2));
+    }
+
+    public void resumeWorkerAfterSafety() {
+        if (!this.isWorkerSafetyRetreating()) {
+            return;
+        }
+        BrainUtil.clearMemories(
+                this,
+                MemoryModuleType.HURT_BY,
+                MemoryModuleType.HURT_BY_ENTITY,
+                MemoryModuleType.ATTACK_TARGET,
+                MemoryModuleType.LOOK_TARGET,
+                MemoryModuleType.WALK_TARGET,
+                MemoryModuleType.PATH);
+        this.setTarget(null);
+        this.setAggressive(false);
+        this.workerNavigationFailures = 0;
+        this.workerCooldownTicks = 0;
+        this.transitionWorker(WorkerPhase.ACQUIRE_ORDER, "threat_cleared", null);
+    }
+
+    private BlockPos workerSafetyRetreatTarget(@Nullable LivingEntity threat) {
+        if (!(this.level() instanceof ServerLevel serverLevel)) {
+            return this.blockPosition();
+        }
+        KingdomSavedData data = KingdomSavedData.get(serverLevel);
+        KingdomRecord kingdom = data.kingdomForRecruit(this.getUUID()).orElse(null);
+        if (kingdom != null) {
+            CommandCenterBlockEntity hall = this.findCommandCenter(serverLevel, kingdom).orElse(null);
+            if (hall != null) {
+                return hall.getBlockPos().immutable();
+            }
+            String dimensionId = serverLevel.dimension().identifier().toString();
+            BlockPos storage = data.registeredStorageEndpoints(kingdom.ownerId()).stream()
+                    .filter(endpoint -> endpoint.dimensionId().equals(dimensionId))
+                    .map(endpoint -> new BlockPos(endpoint.x(), endpoint.y(), endpoint.z()))
+                    .filter(serverLevel::isLoaded)
+                    .filter(pos -> this.findContainer(pos).isPresent())
+                    .min(java.util.Comparator.comparingDouble(pos -> this.distanceToSqr(
+                            pos.getX() + 0.5D, pos.getY(), pos.getZ() + 0.5D)))
+                    .orElse(null);
+            if (storage != null) {
+                return storage;
+            }
+        }
+        Vec3 away = threat == null
+                ? new Vec3((this.getUUID().hashCode() & 1) == 0 ? 1.0D : -1.0D, 0.0D, 1.0D)
+                : this.position().subtract(threat.position());
+        away = new Vec3(away.x(), 0.0D, away.z());
+        if (away.lengthSqr() < 1.0E-4D) {
+            away = new Vec3(1.0D, 0.0D, 0.0D);
+        }
+        away = away.normalize();
+        for (int distance : new int[] {12, 8, 4}) {
+            BlockPos candidate = BlockPos.containing(this.position().add(away.scale(distance)));
+            if (serverLevel.isLoaded(candidate)) {
+                return candidate;
+            }
+        }
+        return this.blockPosition();
     }
 
     private void tickTechnologyResearch(ServerLevel serverLevel) {
@@ -2367,23 +2585,11 @@ public class GalacticRecruitEntity extends TamableAnimal
             this.transitionWorker(
                     WorkerPhase.NAVIGATE_SOURCE, "travel_to_command_center", commandCenterPos);
         }
-        if (this.tickCount % 10 == 0) {
-            boolean pathStarted = this.getNavigation().moveTo(
-                    commandCenterPos.getX() + 0.5D,
-                    commandCenterPos.getY(),
-                    commandCenterPos.getZ() + 0.5D,
-                    1.0D);
-            if (!pathStarted) {
-                this.workerNavigationFailures++;
-                if (this.workerNavigationFailures >= 3) {
-                    this.workerCooldownTicks = 100;
-                    this.pauseWorkerNavigation();
-                    this.transitionWorker(
-                            WorkerPhase.BLOCKED, "command_center_unreachable", commandCenterPos);
-                }
-            } else {
-                this.workerNavigationFailures = 0;
-            }
+        if (!this.publishWorkerWalkTarget(commandCenterPos, 1.0F, 2)) {
+            this.workerCooldownTicks = 100;
+            this.pauseWorkerNavigation();
+            this.transitionWorker(
+                    WorkerPhase.BLOCKED, "command_center_unreachable", commandCenterPos);
         }
     }
 
@@ -2750,21 +2956,29 @@ public class GalacticRecruitEntity extends TamableAnimal
             this.transitionWorker(arrivalPhase, this.workerReason, this.activeWorkTarget);
             return;
         }
-        if (this.tickCount % 10 == 0) {
-            boolean pathStarted = this.getNavigation().moveTo(
-                    this.activeWorkTarget.getX() + 0.5,
-                    this.activeWorkTarget.getY(),
-                    this.activeWorkTarget.getZ() + 0.5,
-                    1.0);
-            if (!pathStarted) {
+        if (!this.publishWorkerWalkTarget(this.activeWorkTarget, 1.0F, 1)) {
+            this.blockWorker("target_unreachable");
+        }
+    }
+
+    private boolean publishWorkerWalkTarget(BlockPos target, float speed, int closeEnoughDistance) {
+        RecruitNavigationResult result =
+                BrainUtil.getMemory(this, ArmyBrainMemoryTypes.NAVIGATION_RESULT);
+        if (result != null && result.target().equals(target)) {
+            if (result.state() == RecruitNavigationResult.State.UNREACHABLE) {
                 this.workerNavigationFailures++;
+                BrainUtil.clearMemory(this, ArmyBrainMemoryTypes.NAVIGATION_RESULT);
                 if (this.workerNavigationFailures >= 3) {
-                    this.blockWorker("target_unreachable");
+                    return false;
                 }
-            } else {
+            } else if (result.state() == RecruitNavigationResult.State.MOVING
+                    || result.state() == RecruitNavigationResult.State.ARRIVED) {
                 this.workerNavigationFailures = 0;
             }
         }
+        BrainUtil.setMemory(this, MemoryModuleType.WALK_TARGET,
+                new WalkTarget(target, speed, closeEnoughDistance));
+        return true;
     }
 
     private void tickWorkerInteraction(ServerLevel level) {
@@ -3936,9 +4150,42 @@ public class GalacticRecruitEntity extends TamableAnimal
 
     public boolean canPlayerManageLogistics(Player player) {
         Objects.requireNonNull(player, "player");
-        if (this.isOwnedBy(player)) {
-            return true;
+        if (!(this.level() instanceof ServerLevel serverLevel)) {
+            return false;
         }
+        KingdomSavedData data = KingdomSavedData.get(serverLevel);
+        KingdomRecord recruitKingdom = data.kingdomForRecruit(this.getUUID()).orElse(null);
+        if (recruitKingdom == null) {
+            return this.isOwnedBy(player);
+        }
+        KingdomRecord actorKingdom = data.kingdomForPlayer(player.getUUID()).orElse(null);
+        return recruitKingdom != null
+                && actorKingdom != null
+                && recruitKingdom.id().equals(actorKingdom.id())
+                && recruitKingdom.npc(this.getUUID()).isPresent()
+                && actorKingdom.allows(
+                        player.getUUID(), galacticwars.clonewars.kingdom.KingdomPermission.MANAGE_LOGISTICS);
+    }
+
+    public boolean canPlayerManageWorksites(Player player) {
+        Objects.requireNonNull(player, "player");
+        if (!(this.level() instanceof ServerLevel serverLevel)) {
+            return false;
+        }
+        KingdomSavedData data = KingdomSavedData.get(serverLevel);
+        KingdomRecord recruitKingdom = data.kingdomForRecruit(this.getUUID()).orElse(null);
+        if (recruitKingdom == null) {
+            return this.isOwnedBy(player);
+        }
+        KingdomRecord actorKingdom = data.kingdomForPlayer(player.getUUID()).orElse(null);
+        return actorKingdom != null
+                && recruitKingdom.id().equals(actorKingdom.id())
+                && recruitKingdom.npc(this.getUUID()).isPresent()
+                && actorKingdom.allows(
+                        player.getUUID(), galacticwars.clonewars.kingdom.KingdomPermission.MANAGE_WORKSITES);
+    }
+
+    private boolean canPlayerRecruit(Player player) {
         if (!(this.level() instanceof ServerLevel serverLevel)) {
             return false;
         }
@@ -3948,9 +4195,13 @@ public class GalacticRecruitEntity extends TamableAnimal
         return recruitKingdom != null
                 && actorKingdom != null
                 && recruitKingdom.id().equals(actorKingdom.id())
-                && recruitKingdom.npc(this.getUUID()).isPresent()
                 && actorKingdom.allows(
-                        player.getUUID(), galacticwars.clonewars.kingdom.KingdomPermission.MANAGE_LOGISTICS);
+                        player.getUUID(), galacticwars.clonewars.kingdom.KingdomPermission.RECRUIT);
+    }
+
+    private boolean hasKingdomAuthority() {
+        return this.level() instanceof ServerLevel serverLevel
+                && KingdomSavedData.get(serverLevel).kingdomForRecruit(this.getUUID()).isPresent();
     }
 
     /**
@@ -4118,9 +4369,14 @@ public class GalacticRecruitEntity extends TamableAnimal
             return false;
         }
         KingdomSavedData kingdomData = KingdomSavedData.get(serverLevel);
-        Optional<KingdomRecord> kingdom = kingdomData.kingdomForOwner(player.getUUID());
+        Optional<KingdomRecord> kingdom = kingdomData.kingdomForPlayer(player.getUUID());
         if (kingdom.isEmpty()) {
             sendFeedback(player, Component.translatable("message.galacticwars.recruit.command_center_required"));
+            return false;
+        }
+        if (!kingdom.orElseThrow().allows(
+                player.getUUID(), galacticwars.clonewars.kingdom.KingdomPermission.RECRUIT)) {
+            sendFeedback(player, Component.translatable("message.galacticwars.recruit.permission_denied"));
             return false;
         }
         Optional<ArmyUnitDefinition> unitOptional = this.currentUnitDefinition();
@@ -4182,7 +4438,7 @@ public class GalacticRecruitEntity extends TamableAnimal
         if (!kingdomData.registerRecruit(
                 player.getUUID(), this.getUUID(),
                 civilianContract ? NpcServiceBranch.CIVILIAN : NpcServiceBranch.MILITARY)) {
-            KingdomRecord currentKingdom = kingdomData.kingdomForOwner(player.getUUID())
+            KingdomRecord currentKingdom = kingdomData.kingdomForPlayer(player.getUUID())
                     .orElse(kingdom.orElseThrow());
             String rejectionKey = currentKingdom.settlement().recruitIds().size()
                     >= FactionBalanceService.effectiveRecruitLimit(currentKingdom.factionId())
@@ -4207,32 +4463,37 @@ public class GalacticRecruitEntity extends TamableAnimal
             return false;
         }
 
-        this.tameForContract(player);
+        KingdomRecord registeredKingdom = kingdomData.kingdomForPlayer(player.getUUID()).orElseThrow();
+        this.tameForContract(registeredKingdom.ownerId());
         if (this.factionOutpostId != null) {
             FactionOutpostSavedData.get(serverLevel).removeNpc(this.getUUID(), serverLevel.getGameTime());
             this.factionOutpostId = null;
             this.naturalPlanetNpcInitialized = false;
             this.clearHome();
         }
-        KingdomRecord registeredKingdom = kingdomData.kingdomForOwner(player.getUUID()).orElseThrow();
         this.kingdomId = registeredKingdom.id();
         this.settlementId = registeredKingdom.settlement().id();
+        this.clearAuthorityMemories();
         if (civilianContract) {
             this.armyGroupId = null;
+            this.switchDutyBranch(NpcServiceBranch.CIVILIAN);
             this.setRecruitDuty(RecruitDuty.WORKER);
-            this.serviceBranch = NpcServiceBranch.CIVILIAN;
             this.setRecruitCommand(RecruitmentAction.HOLD_POSITION);
         } else {
-            kingdomData.addRecruitToArmy(player.getUUID(), this.getUUID());
-            this.armyGroupId = kingdomData.armyGroupForRecruit(this.getUUID())
-                    .map(ArmyGroupRecord::id)
-                    .orElse(null);
+            this.switchDutyBranch(NpcServiceBranch.MILITARY);
             this.setRecruitDuty(RecruitDuty.SOLDIER);
-            this.serviceBranch = NpcServiceBranch.MILITARY;
-            this.setRecruitCommand(RecruitmentAction.FOLLOW_OWNER);
+            if (registeredKingdom.allows(
+                    player.getUUID(), galacticwars.clonewars.kingdom.KingdomPermission.COMMAND_ARMY)
+                    && kingdomData.addRecruitToArmy(player.getUUID(), this.getUUID())) {
+                this.armyGroupId = kingdomData.armyGroupForRecruit(this.getUUID())
+                        .map(ArmyGroupRecord::id)
+                        .orElse(null);
+                this.setRecruitCommand(RecruitmentAction.FOLLOW_OWNER);
+            } else {
+                this.armyGroupId = null;
+                this.setRecruitCommand(RecruitmentAction.HOLD_POSITION);
+            }
         }
-        this.setTarget(null);
-        this.navigation.stop();
         this.level().broadcastEntityEvent(this, (byte) 7);
         sendFeedback(player, Component.translatable("message.galacticwars.recruit.hired"));
         return true;
@@ -4245,6 +4506,12 @@ public class GalacticRecruitEntity extends TamableAnimal
         }
         if (this.getRecruitDuty() == RecruitDuty.COMMANDER) {
             sendFeedback(player, Component.translatable("message.galacticwars.recruit.commander.worker"));
+            return false;
+        }
+        if (!WorkerDutyLoadoutPolicy.isCompatible(profession, this.getWorkerMainHandItem())) {
+            sendFeedback(player, Component.translatable(
+                    "message.galacticwars.recruit.profession.tool_incompatible",
+                    Component.translatable(profession.translationKey())));
             return false;
         }
         WorkerProfessionDefinition definition = WorkerProfessionCatalog.definition(profession).orElseThrow();
@@ -4536,7 +4803,7 @@ public class GalacticRecruitEntity extends TamableAnimal
             return false;
         }
         this.pauseWorkerNavigation();
-        this.clearWorkerProfession();
+        this.clearWorkerProfession(player.getUUID());
         sendFeedback(player, Component.translatable(
                 "message.galacticwars.recruit.soldier.returned"));
         return true;
@@ -5097,8 +5364,9 @@ public class GalacticRecruitEntity extends TamableAnimal
         this.getAttribute(Attributes.FOLLOW_RANGE).setBaseValue(unit.followRange());
         this.getAttribute(Attributes.ARMOR).setBaseValue(unit.armor());
         this.setHealth(Math.max(1.0F, Math.min(this.getMaxHealth(), this.getMaxHealth() * healthRatio)));
-        if (this.getRecruitDuty() != RecruitDuty.WORKER) {
+        if (!this.defaultLoadoutInitialized) {
             this.applyUnitEquipment(unit.equipment());
+            this.defaultLoadoutInitialized = true;
         }
     }
 
@@ -5121,18 +5389,21 @@ public class GalacticRecruitEntity extends TamableAnimal
         if (firstDefinition) {
             this.morale = civilian.baseMorale();
         }
-        if (!this.isTame()) {
-            this.serviceBranch = NpcServiceBranch.CIVILIAN;
-        }
-        for (EquipmentSlot slot : List.of(
-                EquipmentSlot.MAINHAND, EquipmentSlot.HEAD, EquipmentSlot.CHEST,
-                EquipmentSlot.LEGS, EquipmentSlot.FEET)) {
-            this.setItemSlot(slot, ItemStack.EMPTY);
-        }
-        if (this.isNaturalFactionCivilian()) {
-            assignNaturalCivilianProfession();
-        } else {
-            this.getWorkerProfession().ifPresent(this::applyWorkerEquipment);
+        if (!this.defaultLoadoutInitialized) {
+            if (!this.isTame()) {
+                this.serviceBranch = NpcServiceBranch.CIVILIAN;
+            }
+            for (EquipmentSlot slot : List.of(
+                    EquipmentSlot.MAINHAND, EquipmentSlot.OFFHAND, EquipmentSlot.HEAD,
+                    EquipmentSlot.CHEST, EquipmentSlot.LEGS, EquipmentSlot.FEET)) {
+                this.setItemSlot(slot, ItemStack.EMPTY);
+            }
+            this.defaultLoadoutInitialized = true;
+            if (this.isNaturalFactionCivilian()) {
+                assignNaturalCivilianProfession();
+            } else {
+                this.getWorkerProfession().ifPresent(this::applyWorkerEquipment);
+            }
         }
     }
 
@@ -5145,17 +5416,32 @@ public class GalacticRecruitEntity extends TamableAnimal
     }
 
     private void setEquipmentFromData(EquipmentSlot slot, String itemId) {
-        if (itemId.isBlank()) {
-            if (slot != EquipmentSlot.MAINHAND) {
-                this.setItemSlot(slot, ItemStack.EMPTY);
-            }
-            return;
-        }
-        net.minecraft.world.item.Item item = BuiltInRegistries.ITEM.getValue(Identifier.parse(itemId));
-        if (item != Items.AIR) {
-            this.setItemSlot(slot, new ItemStack(item));
+        ItemStack stack = equipmentStackFromData(itemId);
+        this.setItemSlot(slot, stack);
+        if (!stack.isEmpty()) {
             this.setDropChance(slot, 0.0F);
         }
+    }
+
+    private ItemStack defaultMilitaryMainHand() {
+        return this.currentUnitDefinition()
+                .map(ArmyUnitDefinition::equipment)
+                .map(ArmyEquipmentLoadout::mainHandItemId)
+                .map(this::equipmentStackFromData)
+                .orElse(ItemStack.EMPTY);
+    }
+
+    private ItemStack equipmentStackFromData(String itemId) {
+        if (itemId == null || itemId.isBlank()) {
+            return ItemStack.EMPTY;
+        }
+        Identifier id = Identifier.parse(itemId);
+        if (!BuiltInRegistries.ITEM.containsKey(id)) {
+            GalacticWars.LOGGER.error("Validated unit equipment item disappeared from registry: {}", itemId);
+            return ItemStack.EMPTY;
+        }
+        net.minecraft.world.item.Item item = BuiltInRegistries.ITEM.getValue(id);
+        return item == Items.AIR ? ItemStack.EMPTY : new ItemStack(item);
     }
 
     public Optional<ArmyMemberSnapshot> createArmySnapshot(long generation) {
@@ -5358,13 +5644,9 @@ public class GalacticRecruitEntity extends TamableAnimal
                 1, this.factionMoraleStabilityPercent()));
     }
 
-    private void tameForContract(ServerPlayer player) {
-        if (player.connection == null) {
-            this.setOwnerReference(EntityReference.of(player));
-            this.setTame(true, true);
-            return;
-        }
-        this.tame(player);
+    private void tameForContract(UUID kingdomOwnerId) {
+        this.setOwnerReference(EntityReference.of(kingdomOwnerId));
+        this.setTame(true, true);
     }
 
     private static void sendFeedback(ServerPlayer player, Component message) {
@@ -5383,11 +5665,6 @@ public class GalacticRecruitEntity extends TamableAnimal
 
     private void setRecruitDuty(RecruitDuty duty) {
         this.entityData.set(DATA_RECRUIT_DUTY, duty.ordinal());
-        if (duty == RecruitDuty.WORKER) {
-            this.serviceBranch = NpcServiceBranch.CIVILIAN;
-        } else if (duty == RecruitDuty.SOLDIER || duty == RecruitDuty.COMMANDER) {
-            this.serviceBranch = NpcServiceBranch.MILITARY;
-        }
     }
 
     private static boolean isArmyCommandAction(RecruitCommandAction action) {
@@ -5395,6 +5672,40 @@ public class GalacticRecruitEntity extends TamableAnimal
             case FOLLOW, HOLD, MOVE, PROTECT, ATTACK, CLEAR, CYCLE_FORMATION, PATROL -> true;
             default -> false;
         };
+    }
+
+    private static boolean isWorkerManagementAction(RecruitCommandAction action) {
+        return switch (action) {
+            case SET_WORKSITE, RETURN_WORKSITE, CLEAR_WORKSITE, SET_STORAGE,
+                    BUILD_STARTER_KEEP, WORK_RADIUS_DECREASE, WORK_RADIUS_INCREASE,
+                    NEXT_BLUEPRINT, RETURN_TO_SOLDIER, CANCEL_BUILD,
+                    ASSIGN_WORKER_PROFESSION, ROTATE_BLUEPRINT -> true;
+            default -> false;
+        };
+    }
+
+    private static boolean isRecruitManagementAction(RecruitCommandAction action) {
+        return switch (action) {
+            case PROMOTE_COMMANDER, TOGGLE_AUTO_RECRUITMENT, START_RECRUITMENT -> true;
+            default -> false;
+        };
+    }
+
+    private void clearAuthorityMemories() {
+        this.setTarget(null);
+        this.setAggressive(false);
+        BrainUtil.clearMemories(
+                this,
+                ArmyBrainMemoryTypes.ARMY_STATE,
+                ArmyBrainMemoryTypes.PATH_STATUS,
+                ArmyBrainMemoryTypes.MARCH_STATE,
+                ArmyBrainMemoryTypes.NAVIGATION_RESULT,
+                MemoryModuleType.ATTACK_TARGET,
+                MemoryModuleType.LOOK_TARGET,
+                MemoryModuleType.WALK_TARGET,
+                MemoryModuleType.PATH,
+                MemoryModuleType.HURT_BY,
+                MemoryModuleType.HURT_BY_ENTITY);
     }
 
     private boolean applyMenuArmyOrder(
@@ -5405,7 +5716,7 @@ public class GalacticRecruitEntity extends TamableAnimal
         if (this.hasAuthoritativeArmyGroup()) {
             return this.persistArmyGroupOrder(actor.getUUID(), action, target);
         }
-        if (!this.isOwnedBy(actor)) {
+        if (!this.canPlayerCommandArmy(actor)) {
             return false;
         }
         switch (action) {
@@ -5429,10 +5740,10 @@ public class GalacticRecruitEntity extends TamableAnimal
         if (this.hasAuthoritativeArmyGroup()) {
             return this.persistArmyGroupAttack(actor.getUUID(), target);
         }
-        if (!this.isOwnedBy(actor)) {
+        if (!this.canPlayerCommandArmy(actor)) {
             return false;
         }
-        this.setTarget(target);
+        this.installAuthorizedAttackTarget(target);
         this.setRecruitCommand(RecruitmentAction.ATTACK_TARGET);
         return true;
     }
@@ -5653,20 +5964,15 @@ public class GalacticRecruitEntity extends TamableAnimal
             return;
         }
         if (groupOptional.isEmpty()) {
-            if (this.getRecruitDuty() == RecruitDuty.SOLDIER) {
-                data.addRecruitToArmy(this.getOwnerReference().getUUID(), this.getUUID());
-                groupOptional = data.armyGroupForRecruit(this.getUUID());
+            if (this.armyGroupId != null) {
+                this.armyGroupId = null;
+                this.setTarget(null);
+                this.setAggressive(false);
+                BrainUtil.clearMemories(
+                        this, MemoryModuleType.WALK_TARGET, MemoryModuleType.PATH);
+                this.setRecruitCommand(RecruitmentAction.HOLD_POSITION);
             }
-            if (groupOptional.isEmpty()) {
-                if (this.armyGroupId != null) {
-                    this.armyGroupId = null;
-                    this.setTarget(null);
-                    this.setAggressive(false);
-                    this.navigation.stop();
-                    this.setRecruitCommand(RecruitmentAction.FOLLOW_OWNER);
-                }
-                return;
-            }
+            return;
         }
         ArmyGroupRecord group = groupOptional.orElseThrow();
         this.armyGroupId = group.id();
@@ -5688,7 +5994,7 @@ public class GalacticRecruitEntity extends TamableAnimal
                     executionPosition.x(), executionPosition.y(), executionPosition.z());
             this.setRecruitCommand(action);
             if (action == RecruitmentAction.ATTACK_TARGET) {
-                this.setTarget(persistedTarget);
+                this.installAuthorizedAttackTarget(persistedTarget);
             }
             return;
         }
@@ -5710,7 +6016,7 @@ public class GalacticRecruitEntity extends TamableAnimal
                     }
                     this.setRecruitCommand(action);
                     if (action == RecruitmentAction.ATTACK_TARGET) {
-                        this.setTarget(persistedTarget);
+                        this.installAuthorizedAttackTarget(persistedTarget);
                     }
                 });
     }
@@ -5766,9 +6072,22 @@ public class GalacticRecruitEntity extends TamableAnimal
             this.moveTarget = null;
         }
         if (command != RecruitmentAction.ATTACK_TARGET) {
+            BrainUtil.clearMemory(this, MemoryModuleType.ATTACK_TARGET);
             this.setTarget(null);
         }
         this.syncRecruitStatusState();
+    }
+
+    private void installAuthorizedAttackTarget(@Nullable LivingEntity target) {
+        if (target == null) {
+            BrainUtil.clearMemory(this, MemoryModuleType.ATTACK_TARGET);
+            this.setTarget(null);
+            this.setAggressive(false);
+            return;
+        }
+        BrainUtil.setTargetOfEntity(this, target);
+        this.setTarget(target);
+        this.setAggressive(true);
     }
 
     private void resumeWorkAfterProfessionAssignment() {
@@ -6013,19 +6332,9 @@ public class GalacticRecruitEntity extends TamableAnimal
     }
 
     private void applyWorkerEquipment(WorkerProfession profession) {
-        ItemStack heldItem = switch (profession) {
-            case FARMER -> new ItemStack(Items.IRON_HOE);
-            case LUMBERJACK -> new ItemStack(Items.IRON_AXE);
-            case FISHERMAN -> new ItemStack(Items.FISHING_ROD);
-            case ANIMAL_FARMER -> new ItemStack(Items.WHEAT);
-            case MINER -> new ItemStack(Items.IRON_PICKAXE);
-            case BUILDER -> new ItemStack(Items.BRICKS);
-            case COOK -> new ItemStack(Items.BREAD);
-            case MERCHANT -> new ItemStack(galacticwars.clonewars.registry.ModItems.CREDIT_CHIP.get());
-            case COURIER -> new ItemStack(Items.CHEST);
-            case TECHNICIAN -> new ItemStack(Items.REDSTONE);
-        };
-        this.setItemSlot(EquipmentSlot.MAINHAND, heldItem);
+        if (this.getWorkerMainHandItem().isEmpty()) {
+            this.setWorkerMainHandItem(WorkerDutyLoadoutPolicy.defaultTool(profession));
+        }
     }
 
     private static RecruitmentAction parseCommand(String value) {

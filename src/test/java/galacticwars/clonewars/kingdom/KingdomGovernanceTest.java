@@ -22,6 +22,7 @@ public final class KingdomGovernanceTest {
         npcRosterMigratesWorkersAndSoldiers();
         malformedMemberRolesUseSafeFallback();
         permissionSetsArePrecomputedAndImmutable();
+        recruitmentAuthorityMatchesOperationalRoles();
         logisticsAuthorityBelongsToOperationalLeaders();
         technologyAuthorityBelongsToOwnerAndOfficers();
         courierRouteUpdatesAreRevisionedOnAssignedWorksites();
@@ -122,6 +123,25 @@ public final class KingdomGovernanceTest {
                 KingdomPermission.MANAGE_LOGISTICS), "builder logistics denial");
         assertTrue(!KingdomPermissionPolicy.allows(KingdomMemberRole.MEMBER,
                 KingdomPermission.MANAGE_LOGISTICS), "member logistics denial");
+    }
+
+    private static void recruitmentAuthorityMatchesOperationalRoles() {
+        assertTrue(KingdomPermissionPolicy.allows(
+                KingdomMemberRole.OWNER, KingdomPermission.RECRUIT), "owner recruitment");
+        assertTrue(KingdomPermissionPolicy.allows(
+                KingdomMemberRole.OFFICER, KingdomPermission.RECRUIT), "officer recruitment");
+        assertTrue(KingdomPermissionPolicy.allows(
+                KingdomMemberRole.QUARTERMASTER, KingdomPermission.RECRUIT),
+                "quartermaster recruitment");
+        assertTrue(!KingdomPermissionPolicy.allows(
+                KingdomMemberRole.BUILDER, KingdomPermission.RECRUIT), "builder recruitment denial");
+        assertTrue(!KingdomPermissionPolicy.allows(
+                KingdomMemberRole.MEMBER, KingdomPermission.RECRUIT), "member recruitment denial");
+        assertTrue(KingdomPermissionPolicy.allows(
+                KingdomMemberRole.OFFICER, KingdomPermission.COMMAND_ARMY), "officer army command");
+        assertTrue(!KingdomPermissionPolicy.allows(
+                KingdomMemberRole.QUARTERMASTER, KingdomPermission.COMMAND_ARMY),
+                "quartermaster army command denial");
     }
 
     private static void technologyAuthorityBelongsToOwnerAndOfficers() {

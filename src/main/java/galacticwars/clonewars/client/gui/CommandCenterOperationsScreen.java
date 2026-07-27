@@ -35,6 +35,7 @@ import net.minecraft.client.gui.components.Tooltip;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.gui.screens.inventory.MenuAccess;
 import net.minecraft.network.chat.Component;
+import net.minecraft.util.FormattedCharSequence;
 import net.minecraft.world.entity.player.Inventory;
 
 import java.util.ArrayList;
@@ -59,6 +60,7 @@ public final class CommandCenterOperationsScreen extends Screen
     private static final int WARNING = 0xFFFFB86B;
     private static final int PANEL = 0xD018202B;
     private static final int PANEL_BORDER = 0xFF46566A;
+    private static final int TEXT_LINE_HEIGHT = 10;
 
     private final CommandCenterOperationsMenu menu;
     private int selectedTab;
@@ -86,6 +88,14 @@ public final class CommandCenterOperationsScreen extends Screen
     private int panelLeft;
     private int panelWidth;
     private int bodyTop;
+    private final int[] tabScrollOffsets = new int[TABS.length];
+    private int scrollContentHeight;
+    private int scrollViewportHeight;
+    private int flowLogicalY;
+    private int flowTop;
+    private int flowBottom;
+    private int renderMouseX;
+    private int renderMouseY;
 
     public CommandCenterOperationsScreen(
             CommandCenterOperationsMenu menu, Inventory inventory, Component title
@@ -195,7 +205,7 @@ public final class CommandCenterOperationsScreen extends Screen
         int buttonWidth = (panelWidth - 16 - gap * (columns - 1)) / columns;
         Button button = Button.builder(Component.translatable(translationKey), pressed -> action.run())
                 .bounds(panelLeft + 8 + (index % columns) * (buttonWidth + gap),
-                        afterSelectors(2) + (index / columns) * controlStride(),
+                        afterSelectors(2) + 56 + (index / columns) * controlStride(),
                         buttonWidth, controlHeight())
                 .build();
         button.active = enabled;
@@ -372,7 +382,7 @@ public final class CommandCenterOperationsScreen extends Screen
                 () -> workOrderIndex = cycle(workOrderIndex, -1, state.workOrders().size()),
                 () -> workOrderIndex = cycle(workOrderIndex, 1, state.workOrders().size()));
         Optional<UUID> worker = selected(state.workers(), workerIndex).map(WorkerSummary::entityId);
-        addActionGrid(afterSelectors(2), List.of(
+        addActionGrid(afterSelectors(2) + 34, List.of(
                 action("screen.galacticwars.operations.resume_worker",
                         CommandCenterOperationsMenu.RESUME_WORKER,
                         worker, Optional.empty(), worker.isPresent()),
@@ -407,7 +417,7 @@ public final class CommandCenterOperationsScreen extends Screen
         Optional<UUID> inviteTarget = selected(nearbyPlayers, nearbyPlayerIndex)
                 .map(NearbyPlayerSummary::playerId);
         Optional<UUID> invite = selected(invites, inviteIndex).map(InviteSummary::inviteId);
-        addActionGrid(afterSelectors(4), List.of(
+        addActionGrid(afterSelectors(4) + 34, List.of(
                 action("screen.galacticwars.operations.outpost",
                         CommandCenterOperationsMenu.REGISTER_OUTPOST,
                         selectedCompletedOutpost(), Optional.empty(), selectedCompletedOutpost().isPresent()),
@@ -612,6 +622,8 @@ public final class CommandCenterOperationsScreen extends Screen
     public void extractRenderState(
             GuiGraphicsExtractor graphics, int mouseX, int mouseY, float partialTick
     ) {
+        renderMouseX = mouseX;
+        renderMouseY = mouseY;
         graphics.fill(0, 0, width, height, 0xC0080C12);
         graphics.fill(panelLeft, bodyTop - 4, panelLeft + panelWidth,
                 Math.max(bodyTop, height - 8), PANEL);
@@ -647,80 +659,77 @@ public final class CommandCenterOperationsScreen extends Screen
 
     private void renderOverview(GuiGraphicsExtractor graphics, CommandCenterDashboardState state) {
         drawHeading(graphics, Component.translatable("screen.galacticwars.operations.overview.title"));
-        drawLine(graphics, 1, Component.translatable("screen.galacticwars.operations.overview.identity",
+        beginFlow(graphics, bodyTop + 82);
+        drawFlowLine(graphics, Component.translatable("screen.galacticwars.operations.overview.identity",
                 factionName(state.factionId()), humanize(state.actorRole())), TEXT);
-        drawLine(graphics, 2, Component.translatable("screen.galacticwars.operations.overview.treasury",
+        drawFlowLine(graphics, Component.translatable("screen.galacticwars.operations.overview.treasury",
                 state.treasuryCredits(), state.pendingRewardCredits()), TEXT);
-        drawLine(graphics, 3, Component.translatable("screen.galacticwars.operations.overview.population",
+        drawFlowLine(graphics, Component.translatable("screen.galacticwars.operations.overview.population",
                 state.recruitCount(), state.housingCapacity()), TEXT);
-        drawLine(graphics, 4, Component.translatable("screen.galacticwars.operations.overview.domain",
+        drawFlowLine(graphics, Component.translatable("screen.galacticwars.operations.overview.domain",
                 state.settlementCount(), state.claimCount(), state.squads().size()), MUTED);
-        drawLine(graphics, 5, Component.translatable("screen.galacticwars.operations.overview.upkeep",
+        drawFlowLine(graphics, Component.translatable("screen.galacticwars.operations.overview.upkeep",
                 state.upkeepPaid()
                         ? Component.translatable("screen.galacticwars.operations.status.ready")
                         : Component.translatable("screen.galacticwars.operations.status.unpaid")),
                 state.upkeepPaid() ? GOOD : WARNING);
-        state.nextObjective().ifPresent(objective -> drawLine(
-                graphics, 6, Component.translatable(
+        state.nextObjective().ifPresent(objective -> drawFlowLine(
+                graphics, Component.translatable(
                         "screen.galacticwars.operations.overview.next_objective",
                         objectiveInstruction(objective.objectiveId())), ACCENT));
+        endFlow(graphics);
     }
 
     private void renderCampaign(GuiGraphicsExtractor graphics, CommandCenterDashboardState state) {
         drawHeading(graphics, Component.translatable("screen.galacticwars.operations.campaign.title"));
+        beginFlow(graphics, Math.max(bodyTop + 96, height - 40));
         Optional<QuestSummary> active = state.activeQuest();
         if (active.isEmpty()) {
-            drawLine(graphics, 1,
+            drawFlowLine(graphics,
                     Component.translatable(state.campaignVictory()
                             ? "screen.galacticwars.operations.campaign.victory"
                             : "screen.galacticwars.operations.campaign.complete"), GOOD);
             if (state.campaignVictory()) {
-                drawLine(graphics, 2, Component.translatable(
+                drawFlowLine(graphics, Component.translatable(
                         "screen.galacticwars.operations.campaign.veteran_counts",
                         state.veteranVehicleDeployments(), state.veteranTrades(),
                         state.veteranRegionCaptures()), TEXT);
-                drawCentered(graphics, clipped(Component.translatable(
-                        "screen.galacticwars.operations.campaign.veteran_guidance"),
-                        panelWidth - 20), bodyTop + 49, ACCENT);
+                drawFlowLine(graphics, Component.translatable(
+                        "screen.galacticwars.operations.campaign.veteran_guidance"), ACCENT);
             }
-            state.activeForceTrainingQuest().ifPresent(training -> drawCentered(
-                    graphics, clipped(Component.translatable(
+            state.activeForceTrainingQuest().ifPresent(training -> drawFlowLine(
+                    graphics, Component.translatable(
                             "screen.galacticwars.operations.campaign.force_training",
                             questTitle(training.questId()), completedObjectives(training),
-                            training.objectives().size()), panelWidth - 20),
-                    bodyTop + 60, MUTED));
+                            training.objectives().size()), MUTED));
+            endFlow(graphics);
             return;
         }
         QuestSummary quest = active.orElseThrow();
-        drawLine(graphics, 1, Component.translatable("screen.galacticwars.operations.campaign.active",
+        drawFlowLine(graphics, Component.translatable("screen.galacticwars.operations.campaign.active",
                 questTitle(quest.questId()), quest.rewardCredits()), TEXT);
-        drawCentered(graphics, clipped(Component.translatable(
-                "quest.galacticwars." + path(quest.questId()) + ".briefing"), panelWidth - 20),
-                bodyTop + 29, MUTED);
-        int line = 3;
+        drawFlowLine(graphics, Component.translatable(
+                "quest.galacticwars." + path(quest.questId()) + ".briefing"), MUTED);
         for (var objective : quest.objectives()) {
-            if (line > 5) break;
-            drawLine(graphics, line++, Component.literal(
+            drawFlowLine(graphics, Component.literal(
                     (objective.complete() ? "[x] " : "[ ] ") + humanize(objective.objectiveId())
                             + " " + objective.currentCount() + "/" + objective.requiredCount()),
                     objective.complete() ? GOOD : MUTED);
         }
-        state.nextObjective().ifPresent(objective -> drawCentered(
-                graphics, clipped(objectiveInstruction(objective.objectiveId()), panelWidth - 20),
-                bodyTop + 73, ACCENT));
+        state.nextObjective().ifPresent(objective -> drawFlowLine(
+                graphics, objectiveInstruction(objective.objectiveId()), ACCENT));
         if (!quest.unlocks().isEmpty()) {
-            drawCentered(graphics, clipped(Component.translatable(
+            drawFlowLine(graphics, Component.translatable(
                     "screen.galacticwars.operations.campaign.unlocks",
                     quest.unlocks().stream().map(CommandCenterOperationsScreen::humanize)
-                            .reduce((left, right) -> left + ", " + right).orElse("")), panelWidth - 20),
-                    bodyTop + 84, MUTED);
+                            .reduce((left, right) -> left + ", " + right).orElse("")), MUTED);
         }
-        state.activeForceTrainingQuest().ifPresent(training -> drawCentered(
-                graphics, clipped(Component.translatable(
+        state.activeForceTrainingQuest().ifPresent(training -> drawFlowLine(
+                graphics, Component.translatable(
                         "screen.galacticwars.operations.campaign.force_training",
                         questTitle(training.questId()), completedObjectives(training),
-                        training.objectives().size()), panelWidth - 20),
-                bodyTop + 95, MUTED));
+                        training.objectives().size()), MUTED));
+        endFlow(graphics);
     }
 
     private void renderConstruction(GuiGraphicsExtractor graphics, CommandCenterDashboardState state) {
@@ -787,10 +796,11 @@ public final class CommandCenterOperationsScreen extends Screen
                 Component.translatable("screen.galacticwars.operations.selector.work_order",
                         selected(state.workOrders(), workOrderIndex).map(this::workOrderLabel)
                                 .orElse(Component.translatable("screen.galacticwars.operations.none"))));
-        selected(state.workers(), workerIndex).ifPresent(worker -> drawCentered(
-                graphics, clipped(workerDetails(worker), panelWidth - 20),
-                afterSelectors(2) - 9,
+        beginFlow(graphics, afterSelectors(2) - 9, afterSelectors(2) + 30);
+        selected(state.workers(), workerIndex).ifPresent(worker -> drawFlowLine(
+                graphics, workerDetails(worker),
                 worker.phase().equals("blocked") ? WARNING : MUTED));
+        endFlow(graphics);
     }
 
     private void renderKingdom(GuiGraphicsExtractor graphics, CommandCenterDashboardState state) {
@@ -815,12 +825,13 @@ public final class CommandCenterOperationsScreen extends Screen
                 Component.translatable("screen.galacticwars.operations.selector.claim",
                         selected(state.claims(), claimIndex).map(this::claimLabel)
                                 .orElse(Component.translatable("screen.galacticwars.operations.none"))));
+        beginFlow(graphics, afterSelectors(4) - 9, afterSelectors(4) + 30);
         state.conflicts().stream().filter(conflict -> conflict.state().equals("active"))
                 .findFirst().or(() -> state.conflicts().stream().findFirst())
-                .ifPresent(conflict -> drawCentered(graphics,
-                        clipped(conflictLabel(conflict), panelWidth - 20),
-                        afterSelectors(4) - 9,
+                .ifPresent(conflict -> drawFlowLine(
+                        graphics, conflictLabel(conflict),
                         conflict.state().equals("active") ? WARNING : MUTED));
+        endFlow(graphics);
     }
 
     private void renderDiplomacy(GuiGraphicsExtractor graphics, CommandCenterDashboardState state) {
@@ -839,12 +850,14 @@ public final class CommandCenterOperationsScreen extends Screen
 
     private void renderStorage(GuiGraphicsExtractor graphics, CommandCenterDashboardState state) {
         drawHeading(graphics, Component.translatable("screen.galacticwars.operations.storage.title"));
-        drawLine(graphics, 1, Component.translatable("screen.galacticwars.operations.storage.summary",
+        beginFlow(graphics, Math.max(bodyTop + 56, height - 40));
+        drawFlowLine(graphics, Component.translatable("screen.galacticwars.operations.storage.summary",
                 state.treasuryCredits(), state.upkeepPaid()
                         ? Component.translatable("screen.galacticwars.operations.status.ready")
                         : Component.translatable("screen.galacticwars.operations.status.unpaid")), TEXT);
-        drawLine(graphics, 2,
+        drawFlowLine(graphics,
                 Component.translatable("screen.galacticwars.operations.storage.hint"), MUTED);
+        endFlow(graphics);
     }
 
     private void renderTechnology(GuiGraphicsExtractor graphics) {
@@ -864,11 +877,11 @@ public final class CommandCenterOperationsScreen extends Screen
             return;
         }
         String lock = technologyLockReason(node, projection);
-        drawCentered(graphics, clipped(Component.translatable(
+        beginFlow(graphics, afterSelectors(2) - 9, afterSelectors(2) + 52);
+        drawFlowLine(graphics, Component.translatable(
                         "screen.galacticwars.operations.technology.status",
-                        humanize(lock)), panelWidth - 20),
-                afterSelectors(2) - 9, lock.equals("completed") ? GOOD
-                        : lock.equals("available") ? ACCENT : WARNING);
+                        humanize(lock)),
+                lock.equals("completed") ? GOOD : lock.equals("available") ? ACCENT : WARNING);
         String costs = node.costs().stream()
                 .map(cost -> {
                     int delivered = projection.getActiveResearchNode().equals(node.nodeId())
@@ -877,27 +890,22 @@ public final class CommandCenterOperationsScreen extends Screen
                     return humanize(path(cost.itemId())) + " " + delivered + "/" + cost.count();
                 })
                 .reduce((left, right) -> left + ", " + right).orElse("");
-        drawCentered(graphics, clipped(Component.translatable(
-                        "screen.galacticwars.operations.technology.costs", costs),
-                        panelWidth - 20),
-                afterSelectors(2) + 2, MUTED);
+        drawFlowLine(graphics, Component.translatable(
+                "screen.galacticwars.operations.technology.costs", costs), MUTED);
         String recipes = node.recipeIds().stream().map(id -> humanize(path(id)))
                 .reduce((left, right) -> left + ", " + right).orElse("-");
-        drawCentered(graphics, clipped(Component.translatable(
-                        "screen.galacticwars.operations.technology.recipes", recipes),
-                        panelWidth - 20),
-                afterSelectors(2) + 13, MUTED);
+        drawFlowLine(graphics, Component.translatable(
+                "screen.galacticwars.operations.technology.recipes", recipes), MUTED);
         if (projection.getActiveResearchNode().equals(node.nodeId())) {
-            drawCentered(graphics, clipped(Component.translatable(
+            drawFlowLine(graphics, Component.translatable(
                             "screen.galacticwars.operations.technology.progress",
                             projection.getResearchProgress(),
                             projection.getResearchRequired(),
                             projection.getTechnicianId().isEmpty()
                                     ? Component.translatable("screen.galacticwars.operations.none")
-                                    : Component.literal(projection.getTechnicianId())),
-                            panelWidth - 20),
-                    afterSelectors(2) + 24, TEXT);
+                                    : Component.literal(projection.getTechnicianId())), TEXT);
         }
+        endFlow(graphics);
     }
 
     private void renderRelations(GuiGraphicsExtractor graphics) {
@@ -907,7 +915,7 @@ public final class CommandCenterOperationsScreen extends Screen
         if (projection == null) {
             return;
         }
-        int row = 1;
+        beginFlow(graphics, height - 12);
         for (var policy : ClientGameplayCatalog.snapshot().relationPolicies().values()) {
             int score = projection.getReputation().getOrDefault(policy.factionId(), 0);
             String tier = relationTier(score, policy);
@@ -919,7 +927,7 @@ public final class CommandCenterOperationsScreen extends Screen
                     .filter(recipe -> ClientGameplayCatalog.snapshot().fabrication(recipe)
                             .filter(entry -> entry.factionId().equals(policy.factionId())).isPresent())
                     .count();
-            drawLine(graphics, row++, Component.translatable(
+            drawFlowLine(graphics, Component.translatable(
                     "screen.galacticwars.operations.relations.row",
                     factionName(policy.factionId()), score, humanize(tier), next,
                     tier.equals("friendly") ? policy.friendlyTradePricePercent() : 100,
@@ -928,6 +936,7 @@ public final class CommandCenterOperationsScreen extends Screen
                     licenses), tier.equals("hostile") ? WARNING
                             : tier.equals("friendly") ? GOOD : TEXT);
         }
+        endFlow(graphics);
     }
 
     private String technologyLockReason(
@@ -1005,15 +1014,77 @@ public final class CommandCenterOperationsScreen extends Screen
         drawCentered(graphics, heading, bodyTop + 7, ACCENT);
     }
 
-    private void drawLine(GuiGraphicsExtractor graphics, int row, Component line, int color) {
-        graphics.text(font, line, panelLeft + 10, bodyTop + 7 + row * 11, color);
-    }
-
     private void drawSelectorLabel(GuiGraphicsExtractor graphics, int y, Component label) {
         int availableWidth = panelWidth - Math.min(96, Math.max(68, panelWidth * 2 / 7)) - 24;
-        Component display = font.width(label) <= availableWidth
+        boolean truncated = font.width(label) > availableWidth;
+        Component display = !truncated
                 ? label : Component.literal(font.plainSubstrByWidth(label.getString(), availableWidth - 8) + "...");
         drawCentered(graphics, display, y + 6, TEXT);
+        int left = (width - availableWidth) / 2;
+        if (truncated && renderMouseX >= left && renderMouseX < left + availableWidth
+                && renderMouseY >= y && renderMouseY < y + controlHeight()) {
+            graphics.setTooltipForNextFrame(font, label, renderMouseX, renderMouseY);
+        }
+    }
+
+    private void beginFlow(GuiGraphicsExtractor graphics, int requestedBottom) {
+        beginFlow(graphics, bodyTop + 20, requestedBottom);
+    }
+
+    private void beginFlow(GuiGraphicsExtractor graphics, int requestedTop, int requestedBottom) {
+        flowTop = Math.max(bodyTop + 20, requestedTop);
+        flowBottom = Math.max(flowTop + TEXT_LINE_HEIGHT,
+                Math.min(height - 10, requestedBottom));
+        flowLogicalY = 0;
+        scrollViewportHeight = Math.max(TEXT_LINE_HEIGHT, flowBottom - flowTop);
+        graphics.enableScissor(panelLeft + 2, flowTop, panelLeft + panelWidth - 2, flowBottom);
+    }
+
+    private void drawFlowLine(GuiGraphicsExtractor graphics, Component line, int color) {
+        int availableWidth = Math.max(24, panelWidth - 20);
+        List<FormattedCharSequence> wrapped = font.split(line, availableWidth);
+        if (wrapped.isEmpty()) {
+            flowLogicalY += TEXT_LINE_HEIGHT;
+            return;
+        }
+        int scroll = tabScrollOffsets[selectedTab];
+        for (FormattedCharSequence sequence : wrapped) {
+            graphics.text(font, sequence, panelLeft + 10,
+                    flowTop + flowLogicalY - scroll, color);
+            flowLogicalY += TEXT_LINE_HEIGHT;
+        }
+        flowLogicalY += 2;
+    }
+
+    private void endFlow(GuiGraphicsExtractor graphics) {
+        graphics.disableScissor();
+        scrollContentHeight = Math.max(0, flowLogicalY - 2);
+        tabScrollOffsets[selectedTab] = Math.min(
+                tabScrollOffsets[selectedTab], maxScroll());
+    }
+
+    private int maxScroll() {
+        return Math.max(0, scrollContentHeight - scrollViewportHeight);
+    }
+
+    @Override
+    public boolean mouseScrolled(double mouseX, double mouseY, double scrollX, double scrollY) {
+        if (isFlowTab() && mouseX >= panelLeft && mouseX < panelLeft + panelWidth
+                && mouseY >= flowTop && mouseY < flowBottom) {
+            int previous = tabScrollOffsets[selectedTab];
+            int delta = (int)Math.round(-scrollY * TEXT_LINE_HEIGHT * 3);
+            tabScrollOffsets[selectedTab] = Math.max(0, Math.min(maxScroll(), previous + delta));
+            if (previous != tabScrollOffsets[selectedTab]) {
+                return true;
+            }
+        }
+        return super.mouseScrolled(mouseX, mouseY, scrollX, scrollY);
+    }
+
+    private boolean isFlowTab() {
+        return selectedTab == 0 || selectedTab == 1 || selectedTab == 4
+                || selectedTab == 5 || selectedTab == 7 || selectedTab == 8
+                || selectedTab == 9;
     }
 
     private void drawCentered(GuiGraphicsExtractor graphics, Component text, int y, int color) {

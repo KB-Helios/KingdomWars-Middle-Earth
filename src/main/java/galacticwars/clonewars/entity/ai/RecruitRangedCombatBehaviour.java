@@ -72,8 +72,8 @@ public final class RecruitRangedCombatBehaviour
             return;
         }
 
-        BrainUtil.clearMemory(recruit, MemoryModuleType.WALK_TARGET);
-        recruit.getNavigation().stop();
+        BrainUtil.clearMemories(
+                recruit, MemoryModuleType.WALK_TARGET, MemoryModuleType.PATH);
         ItemStack weapon = recruit.getMainHandItem();
         if (weapon.getItem() instanceof BlasterItem blaster && BlasterHeatPolicy.canFire(heat)) {
             blaster.fireAt(level, recruit, target, weapon);
@@ -88,8 +88,8 @@ public final class RecruitRangedCombatBehaviour
     protected void stop(GalacticRecruitEntity recruit) {
         BrainUtil.clearMemories(recruit,
                 MemoryModuleType.WALK_TARGET,
-                MemoryModuleType.LOOK_TARGET);
-        recruit.getNavigation().stop();
+                MemoryModuleType.LOOK_TARGET,
+                MemoryModuleType.PATH);
         recruit.setAggressive(false);
         heat = BlasterHeatPolicy.BlasterHeatState.ready();
         bowCooldownTicks = 0;

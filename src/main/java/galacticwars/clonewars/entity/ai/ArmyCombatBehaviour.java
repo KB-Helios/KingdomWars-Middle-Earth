@@ -2,7 +2,6 @@ package galacticwars.clonewars.entity.ai;
 
 import galacticwars.clonewars.army.ArmyBehaviorDecision;
 import galacticwars.clonewars.army.ArmyGroupRecord;
-import galacticwars.clonewars.army.ArmySupplyPolicy;
 import galacticwars.clonewars.army.ArmyTacticalDecision;
 import galacticwars.clonewars.army.ArmyTacticalIntent;
 import galacticwars.clonewars.army.ArmyTacticalPlanner;
@@ -10,12 +9,10 @@ import galacticwars.clonewars.combat.BlasterHeatPolicy;
 import galacticwars.clonewars.combat.BlasterItem;
 import galacticwars.clonewars.combat.FactionRangedWeaponService;
 import galacticwars.clonewars.entity.GalacticRecruitEntity;
-import galacticwars.clonewars.kingdom.KingdomRecord;
 import galacticwars.clonewars.kingdom.KingdomSavedData;
 import galacticwars.clonewars.recruitment.RecruitDuty;
 import galacticwars.clonewars.registry.ModItems;
 import java.util.Set;
-import java.util.UUID;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.InteractionHand;
@@ -82,8 +79,7 @@ public final class ArmyCombatBehaviour extends ExtendedBehaviour<GalacticRecruit
         ArmyTacticalDecision tactical = ArmyTacticalPlanner.plan(
                 ArmyBehaviorDecision.attack(target.getUUID(), "active_group_target"),
                 recruit.getRecruitVitals(),
-                state.fallbackPosition(),
-                state.group().effectiveTactics());
+                state.fallbackPosition());
         if (tactical.intent() != ArmyTacticalIntent.EXECUTE_ORDER) {
             BrainUtil.setMemory(recruit, ArmyBrainMemoryTypes.ARMY_STATE, state.withSelectedTarget(null));
             clearCombatTarget(recruit);
@@ -104,18 +100,23 @@ public final class ArmyCombatBehaviour extends ExtendedBehaviour<GalacticRecruit
 
         ItemStack weapon = recruit.getMainHandItem();
         double range = Math.max(4.0D, recruit.getAttributeValue(Attributes.FOLLOW_RANGE));
-        if (FactionRangedWeaponService.supportsRecruitRangedCombat(weapon)
-                && recruit.distanceToSqr(target) <= range * range
-                && recruit.getSensing().hasLineOfSight(target)
-                && ArmyBrainSupport.canUseRangedFire(recruit, level, group, target)) {
+        if (FactionRangedWeaponService.supportsRecruitRangedCombat(weapon)) {
+            boolean hasShot = recruit.distanceToSqr(target) <= range * range
+                    && recruit.getSensing().hasLineOfSight(target)
+                    && ArmyBrainSupport.canUseRangedFire(recruit, level, group, target);
+            if (!hasShot) {
+                holdOrRepositionRanged(recruit, state, target);
+                return;
+            }
             BrainUtil.clearMemory(recruit, MemoryModuleType.WALK_TARGET);
             if (weapon.getItem() instanceof BlasterItem blaster) {
-                if (hasBlasterSupply(data, group) && BlasterHeatPolicy.canFire(blasterHeat)
-                        && trySpendBlasterSupply(data, group)) {
+                if (attackCooldownTicks == 0 && BlasterHeatPolicy.canFire(blasterHeat)) {
                     blaster.fireAt(level, recruit, target, weapon);
                     blasterHeat = BlasterHeatPolicy.afterShot(blasterHeat);
+                    attackCooldownTicks = ArmyBrainSupport.coordinatedCooldownTicks(
+                            recruit, level, data, group, BlasterHeatPolicy.SHOT_COOLDOWN_TICKS);
                 } else {
-                    meleeOrClose(recruit, level, data, group, state, target);
+                    holdOrRepositionRanged(recruit, state, target);
                 }
                 return;
             }
@@ -127,6 +128,24 @@ public final class ArmyCombatBehaviour extends ExtendedBehaviour<GalacticRecruit
             return;
         }
         meleeOrClose(recruit, level, data, group, state, target);
+    }
+
+    private static void holdOrRepositionRanged(
+            GalacticRecruitEntity recruit,
+            ArmyBrainState state,
+            LivingEntity target
+    ) {
+        if (ArmyBrainSupport.shouldMaintainFormation(state, target)) {
+            var anchor = ArmyBrainSupport.formationAnchor(state);
+            BrainUtil.setMemory(recruit, MemoryModuleType.WALK_TARGET,
+                    new WalkTarget(new BlockPos(anchor.x(), anchor.y(), anchor.z()), 1.0F,
+                            state.group().effectiveTactics().tightFormation() ? 1 : 2));
+            return;
+        }
+        int preferredRange = Math.max(4,
+                (int) Math.floor(recruit.getAttributeValue(Attributes.FOLLOW_RANGE) * 0.7D));
+        BrainUtil.setMemory(recruit, MemoryModuleType.WALK_TARGET,
+                new WalkTarget(target, 0.95F, preferredRange));
     }
 
     @Override
@@ -177,25 +196,6 @@ public final class ArmyCombatBehaviour extends ExtendedBehaviour<GalacticRecruit
         return state != null
                 && recruit.getRecruitDuty() != RecruitDuty.WORKER
                 && ArmyBrainSupport.canEngageGroupTarget(recruit, state, target);
-    }
-
-    private static boolean hasBlasterSupply(KingdomSavedData data, ArmyGroupRecord group) {
-        return data.armyGroup(group.id())
-                .map(ArmyGroupRecord::supplyUnits)
-                .filter(ArmySupplyPolicy::canFireBlaster)
-                .isPresent();
-    }
-
-    private static boolean trySpendBlasterSupply(KingdomSavedData data, ArmyGroupRecord group) {
-        ArmyGroupRecord current = data.armyGroup(group.id()).orElse(null);
-        if (current == null || !ArmySupplyPolicy.canFireBlaster(current.supplyUnits())) {
-            return false;
-        }
-        UUID authority = data.kingdom(current.kingdomId())
-                .map(KingdomRecord::ownerId)
-                .orElse(null);
-        return authority != null && data.changeArmySupply(
-                authority, current.id(), -ArmySupplyPolicy.BLASTER_SHOT_COST);
     }
 
     private static void clearCombatTarget(GalacticRecruitEntity recruit) {
