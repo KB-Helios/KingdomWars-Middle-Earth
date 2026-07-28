@@ -95,8 +95,19 @@ def face_texture(texture: Image.Image, cube: dict, face: str) -> Image.Image | N
     elif isinstance(uv, dict) and face in uv:
         face_uv = uv[face]
         u, v = (round(value) for value in face_uv["uv"])
+        # Default uv_size to cube dimensions appropriate for the face
+        width_dim, height_dim, depth_dim = (max(1, math.ceil(float(value))) for value in cube["size"])
+        face_defaults = {
+            "west": (depth_dim, height_dim),
+            "north": (width_dim, height_dim),
+            "east": (depth_dim, height_dim),
+            "south": (width_dim, height_dim),
+            "up": (width_dim, depth_dim),
+            "down": (width_dim, depth_dim),
+        }
+        default_size = face_defaults.get(face, (1, 1))
         signed_width, signed_height = (
-            round(value) for value in face_uv.get("uv_size", (1, 1))
+            round(value) for value in face_uv.get("uv_size", default_size)
         )
         mirror_x = signed_width < 0
         mirror_y = signed_height < 0

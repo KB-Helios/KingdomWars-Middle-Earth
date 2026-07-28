@@ -4,7 +4,8 @@ Built-in ImageGen output:
 `dathomir_materials_face_cloth_leather_bone_markings_2026-07-27.png`
 
 Reference image:
-`C:/Users/kevin/AppData/Local/Temp/codex-clipboard-13bd5298-8849-4219-8fdc-c738c4fcf893.png`
+`generated_dathomir_faction_orthographic_concept_2026-07-27.png`
+SHA-256: `6323e502cdeca8748202c2f78009e4996ed7517e2401d7fbd74a0dc7a5990412`
 
 Exact prompt:
 

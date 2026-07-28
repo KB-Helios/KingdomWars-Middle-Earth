@@ -773,10 +773,11 @@ class Atlas:
 
         if any(token in label for token in (
                 "tattoo", "cheek_mark", "forehead_chevron")):
+            inset = max(line, scale)
             self.draw.line(
-                (left, top, right, bottom),
+                (left + inset, top + inset, right - inset, bottom - inset),
                 fill=near_black,
-                width=max(line, scale),
+                width=inset,
             )
 
 
