@@ -6124,24 +6124,80 @@ public final class ModGameTests {
         assertRecruitStack(helper, chest, recruit.getItemBySlot(EquipmentSlot.CHEST),
                 "Gameplay-data refresh replaced custom armor");
 
-        CompoundTag v13Tag = saveRecruit(recruit, level);
-        GalacticRecruitEntity v13Loaded = loadRecruit(v13Tag, level);
-        assertRecruitStack(helper, militaryWeapon, v13Loaded.getMilitaryMainHandItem(),
-                "v13 reload lost military weapon components");
-        assertRecruitStack(helper, workerTool, v13Loaded.getWorkerMainHandItem(),
-                "v13 reload lost worker-tool durability");
-        assertRecruitStack(helper, offhand, v13Loaded.getItemBySlot(EquipmentSlot.OFFHAND),
-                "v13 reload lost offhand components");
-        assertRecruitStack(helper, helmet, v13Loaded.getItemBySlot(EquipmentSlot.HEAD),
-                "v13 reload lost helmet components");
-        assertRecruitStack(helper, chest, v13Loaded.getItemBySlot(EquipmentSlot.CHEST),
-                "v13 reload lost chest components");
-        assertRecruitStack(helper, legs, v13Loaded.getItemBySlot(EquipmentSlot.LEGS),
-                "v13 reload lost leg components");
-        assertRecruitStack(helper, feet, v13Loaded.getItemBySlot(EquipmentSlot.FEET),
-                "v13 reload lost feet components");
+        CompoundTag v14Tag = saveRecruit(recruit, level);
+        GalacticRecruitEntity v14Loaded = loadRecruit(v14Tag, level);
+        assertRecruitStack(helper, militaryWeapon, v14Loaded.getMilitaryMainHandItem(),
+                "v14 reload lost military weapon components");
+        assertRecruitStack(helper, workerTool, v14Loaded.getWorkerMainHandItem(),
+                "v14 reload lost worker-tool durability");
+        assertRecruitStack(helper, offhand, v14Loaded.getItemBySlot(EquipmentSlot.OFFHAND),
+                "v14 reload lost offhand components");
+        assertRecruitStack(helper, helmet, v14Loaded.getItemBySlot(EquipmentSlot.HEAD),
+                "v14 reload lost helmet components");
+        assertRecruitStack(helper, chest, v14Loaded.getItemBySlot(EquipmentSlot.CHEST),
+                "v14 reload lost chest components");
+        assertRecruitStack(helper, legs, v14Loaded.getItemBySlot(EquipmentSlot.LEGS),
+                "v14 reload lost leg components");
+        assertRecruitStack(helper, feet, v14Loaded.getItemBySlot(EquipmentSlot.FEET),
+                "v14 reload lost feet components");
 
-        CompoundTag v12SoldierTag = v13Tag.copy();
+        CompoundTag v13CustomTag = v14Tag.copy();
+        v13CustomTag.putInt("RecruitDataVersion", 13);
+        GalacticRecruitEntity v13Custom = loadRecruit(v13CustomTag, level);
+        assertRecruitStack(helper, militaryWeapon, v13Custom.getMilitaryMainHandItem(),
+                "v13 migration replaced a non-iron custom military weapon");
+        assertRecruitStack(helper, workerTool, v13Custom.getWorkerMainHandItem(),
+                "v13 migration replaced a non-iron inactive worker tool");
+
+        ItemStack configuredMilitaryWeapon = new ItemStack(ModItems.DC15_BLASTER.get());
+        ItemStack legacyIronSword = new ItemStack(Items.IRON_SWORD);
+        legacyIronSword.set(DataComponents.CUSTOM_NAME, Component.literal("Legacy Iron Sword"));
+        GalacticRecruitEntity activeIronFixture = helper.spawn(
+                ModEntityTypes.CLONE_TROOPER.get(), new BlockPos(4, 1, 2));
+        activeIronFixture.initializeFromSpawnEgg();
+        activeIronFixture.setMilitaryMainHandItem(legacyIronSword.copy());
+        CompoundTag activeIronTag = saveRecruit(activeIronFixture, level);
+        activeIronTag.putInt("RecruitDataVersion", 13);
+        GalacticRecruitEntity migratedActiveIron = loadRecruit(activeIronTag, level);
+        assertRecruitStack(helper, configuredMilitaryWeapon, migratedActiveIron.getMilitaryMainHandItem(),
+                "v13 migration did not replace an active legacy iron sword");
+
+        GalacticRecruitEntity missingWeaponFixture = helper.spawn(
+                ModEntityTypes.NIGHTSISTER_CIVILIAN.get(), new BlockPos(5, 1, 2));
+        missingWeaponFixture.initializeFromSpawnEgg();
+        missingWeaponFixture.setItemSlot(EquipmentSlot.MAINHAND, legacyIronSword.copy());
+        CompoundTag missingWeaponTag = saveRecruit(missingWeaponFixture, level);
+        missingWeaponTag.putInt("RecruitDataVersion", 13);
+        missingWeaponTag.putString("ServiceBranch", NpcServiceBranch.MILITARY.id());
+        GalacticRecruitEntity migratedMissingWeapon = loadRecruit(missingWeaponTag, level);
+        helper.assertTrue(
+                migratedMissingWeapon.getMilitaryMainHandItem().isEmpty(),
+                "v13 migration did not clear a legacy iron sword without a configured replacement");
+
+        GalacticRecruitEntity inactiveIronFixture = helper.spawn(
+                ModEntityTypes.CLONE_TROOPER.get(), new BlockPos(6, 1, 2));
+        inactiveIronFixture.initializeFromSpawnEgg();
+        inactiveIronFixture.setWorkerProfession(WorkerProfession.MINER);
+        ItemStack activeWorkerTool = inactiveIronFixture.getWorkerMainHandItem().copy();
+        inactiveIronFixture.setMilitaryMainHandItem(legacyIronSword.copy());
+        CompoundTag inactiveIronTag = saveRecruit(inactiveIronFixture, level);
+        inactiveIronTag.putInt("RecruitDataVersion", 13);
+        GalacticRecruitEntity migratedInactiveIron = loadRecruit(inactiveIronTag, level);
+        assertRecruitStack(helper, activeWorkerTool, migratedInactiveIron.getWorkerMainHandItem(),
+                "v13 migration replaced a civilian-duty worker tool");
+        assertRecruitStack(helper, configuredMilitaryWeapon, migratedInactiveIron.getMilitaryMainHandItem(),
+                "v13 migration did not replace the inactive legacy military iron sword");
+
+        GalacticRecruitEntity modernIronFixture = helper.spawn(
+                ModEntityTypes.CLONE_TROOPER.get(), new BlockPos(7, 1, 2));
+        modernIronFixture.initializeFromSpawnEgg();
+        modernIronFixture.setMilitaryMainHandItem(legacyIronSword.copy());
+        GalacticRecruitEntity modernIronLoaded = loadRecruit(
+                saveRecruit(modernIronFixture, level), level);
+        assertRecruitStack(helper, legacyIronSword, modernIronLoaded.getMilitaryMainHandItem(),
+                "v14 reload replaced a post-migration iron sword");
+
+        CompoundTag v12SoldierTag = v14Tag.copy();
         v12SoldierTag.putInt("RecruitDataVersion", 12);
         v12SoldierTag.remove("DefaultLoadoutInitialized");
         v12SoldierTag.remove("InactiveDutyMainHand");
@@ -6162,12 +6218,16 @@ public final class ModGameTests {
         assertRecruitStack(helper, workerTool, v12Worker.getWorkerMainHandItem(),
                 "v12 worker migration did not retain its active tool");
         GalacticRecruitEntity defaultFixture = helper.spawn(
-                ModEntityTypes.CLONE_TROOPER.get(), new BlockPos(4, 1, 2));
+                ModEntityTypes.CLONE_TROOPER.get(), new BlockPos(8, 1, 2));
         defaultFixture.initializeFromSpawnEgg();
         assertRecruitStack(helper, defaultFixture.getMilitaryMainHandItem(),
                 v12Worker.getMilitaryMainHandItem(),
                 "v12 worker migration did not seed the unit-definition military weapon");
         defaultFixture.discard();
+        activeIronFixture.discard();
+        missingWeaponFixture.discard();
+        inactiveIronFixture.discard();
+        modernIronFixture.discard();
         recruit.discard();
         helper.succeed();
     }

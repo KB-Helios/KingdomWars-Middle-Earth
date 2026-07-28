@@ -34,7 +34,7 @@ public final class RecruitTextureAtlasTest {
     private static final Path ASSET_ROOT = Path.of("src/main/resources/assets/galacticwars");
     private static final List<String> RECRUITS = List.of(
             "clone_trooper", "arc_trooper", "phase_i_clone_trooper", "phase_i_arc_trooper",
-            "senate_commando", "republic_honor_guard", "jedi_knight",
+            "senate_commando", "republic_honor_guard", "jedi_knight", "sith_acolyte",
             "b1_battle_droid", "b1_security_droid", "b2_super_battle_droid", "commando_droid",
             "mandalorian_warrior", "mandalorian_marksman", "mandalorian_heavy",
             "hutt_enforcer", "bounty_hunter", "smuggler",
@@ -44,6 +44,9 @@ public final class RecruitTextureAtlasTest {
     private static final List<String> ARMOR_FAMILIES = List.of(
             "mandalorian_alloy", "nightsister_weave", "republic_plastoid", "phase_i_clone",
             "separatist_alloy", "beskar");
+    private static final List<String> DATHOMIR_RECRUITS = List.of(
+            "nightsister_acolyte", "nightsister_archer",
+            "nightsister_civilian", "nightbrother_brute");
     private static final Set<String> LICENSED_128_RECRUITS = Set.of(
             "clone_trooper", "arc_trooper", "phase_i_clone_trooper", "phase_i_arc_trooper",
             "senate_commando", "republic_honor_guard");
@@ -77,6 +80,21 @@ public final class RecruitTextureAtlasTest {
         validatesDistinctAssetCount(RECRUITS, "textures/entity/", ".png", 24, "recruit textures");
         validatesDistinctAssets(RECRUITS, "textures/item/", "_spawn_egg.png", "spawn eggs");
         validatesDistinctAssets(ARMOR_FAMILIES, "textures/armor/", ".png", "armor textures");
+        validatesDistinctAssets(
+                DATHOMIR_RECRUITS,
+                "geckolib/models/entity/",
+                ".geo.json",
+                "Dathomir silhouettes");
+        validatesDistinctAssets(
+                DATHOMIR_RECRUITS,
+                "textures/entity/",
+                ".png",
+                "Dathomir textures");
+        validatesDistinctAssets(
+                DATHOMIR_RECRUITS,
+                "geckolib/animations/entity/",
+                ".animation.json",
+                "Dathomir animation sets");
         validatesAnimationFamiliesDiffer();
         validatesCommanderTextureVariants();
         validatesAuthorizedSourceAssets();
@@ -112,6 +130,7 @@ public final class RecruitTextureAtlasTest {
         }
         assertContains(animation, "\"misc.idle\"", recruit + " idle animation");
         assertContains(animation, "\"move.walk\"", recruit + " walk animation");
+        assertContains(animation, "\"move.run\"", recruit + " run animation");
         assertContains(animation, "\"attack.swing\"", recruit + " attack animation");
         validatesNamedSilhouette(recruit, geometry);
         validatesRigPivots(recruit, geometry);
@@ -180,10 +199,21 @@ public final class RecruitTextureAtlasTest {
             requiredParts = List.of("trandoshan_muzzle", "right_brow_scale", "left_brow_scale");
         } else if (recruit.startsWith("mandalorian_")) {
             requiredParts = List.of("t_visor_brow", "t_visor_drop", "rangefinder", "jetpack");
-        } else if (Set.of("jedi_knight", "nightsister_acolyte", "nightsister_archer").contains(recruit)) {
+        } else if (recruit.equals("nightsister_acolyte")) {
+            requiredParts = List.of(
+                    "robe_mantle", "robe_skirt", "cloth_panels",
+                    "ritual_spires", "talisman_cords");
+        } else if (recruit.equals("nightsister_archer")) {
+            requiredParts = List.of(
+                    "robe_mantle", "robe_skirt", "cloth_panels",
+                    "quiver", "hair_locks", "archer_sash");
+        } else if (recruit.equals("jedi_knight")) {
             requiredParts = List.of("robe_mantle", "robe_skirt", "cloth_panels");
         } else if (recruit.equals("nightbrother_brute")) {
-            requiredParts = List.of("horns", "face_tattoo_vertical");
+            requiredParts = List.of(
+                    "horns", "face_tattoo_vertical", "shoulder_harness", "waist_cloth");
+        } else if (recruit.equals("nightsister_civilian")) {
+            requiredParts = List.of("shawl", "woven_apron", "satchel");
         } else {
             return;
         }
@@ -696,6 +726,9 @@ public final class RecruitTextureAtlasTest {
         String entities = Files.readString(Path.of(
                 "src/main/java/galacticwars/clonewars/registry/ModEntityTypes.java"));
         String provenance = Files.readString(Path.of("docs/galacticwars-asset-provenance.md"));
+        String turnaroundRenderer = Files.readString(Path.of("tools/render_asset_turnarounds.py"));
+        String turnaroundRendererTest = Files.readString(Path.of(
+                "tools/test_render_asset_turnarounds.py"));
         assertContains(recruitRenderer, "ItemInHandGeoLayer", "held item render layer");
         assertContains(armorItem, "implements GeoItem", "custom equipped armor item");
         assertContains(armorItem, "getGeoArmorRenderer", "custom equipped armor provider");
@@ -708,6 +741,22 @@ public final class RecruitTextureAtlasTest {
                 "Galaxies pinned source commit");
         assertContains(provenance, "c9555aa4966e9e63c22a59f488d4b05bc614569e",
                 "Forge pinned source commit");
+        assertContains(turnaroundRenderer, "all_27_recruits.png", "27-recruit turnaround output");
+        assertContains(turnaroundRenderer, "face_texture(", "turnaround UV pixel sampling");
+        assertContains(turnaroundRenderer, "Image.Transform.AFFINE",
+                "turnaround projected UV mapping");
+        assertNotContains(turnaroundRenderer, "face_color(", "averaged turnaround face colors");
+        assertContains(turnaroundRendererTest,
+                "assert_rotated_cube_renders_actual_texture_pixels",
+                "rotated cuboid texture-sampling QA");
+        assertContains(turnaroundRendererTest, "len(RECRUIT_ASSETS) != 27",
+                "27-recruit turnaround catalog QA");
+        for (String recruit : RECRUITS) {
+            assertContains(
+                    turnaroundRenderer,
+                    '"' + recruit + '"',
+                    recruit + " turnaround entry");
+        }
         String visualProfiles = Files.readString(Path.of(
                 "src/main/java/galacticwars/clonewars/client/render/RecruitVisualProfileCatalog.java"));
         assertContains(visualProfiles, "Map<EntityType<?>, String>",

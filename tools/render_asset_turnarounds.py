@@ -14,6 +14,16 @@ from generate_character_models import save_png
 ROOT = Path(__file__).resolve().parents[1]
 ASSETS = ROOT / "src/main/resources/assets/galacticwars"
 OUTPUT = ROOT / "build/previews/turnarounds"
+RECRUIT_ASSETS = (
+    "phase_i_clone_trooper", "phase_i_arc_trooper", "clone_trooper", "arc_trooper",
+    "jedi_knight", "sith_acolyte", "senate_commando", "republic_honor_guard",
+    "b1_battle_droid", "b1_security_droid", "b2_super_battle_droid", "commando_droid",
+    "mandalorian_warrior", "mandalorian_marksman", "mandalorian_heavy", "hutt_enforcer",
+    "bounty_hunter", "smuggler", "nightsister_acolyte", "nightsister_archer",
+    "nightbrother_brute", "republic_civilian", "togruta_civilian",
+    "separatist_technician", "mandalorian_clansperson", "hutt_civilian",
+    "nightsister_civilian",
+)
 VIEWS = {
     "front": ((0.0, 0.0, -1.0), lambda p: (p[0], p[1])),
     "side": ((1.0, 0.0, 0.0), lambda p: (p[2], p[1])),
@@ -75,25 +85,38 @@ def box_uv_bounds(uv: list[int], size: list[float], face: str) -> tuple[int, int
     }[face]
 
 
-def face_color(texture: Image.Image, cube: dict, face: str) -> tuple[int, int, int, int] | None:
+def face_texture(texture: Image.Image, cube: dict, face: str) -> Image.Image | None:
     uv = cube.get("uv")
+    mirror_x = False
+    mirror_y = False
+    uv_rotation = 0
     if isinstance(uv, list):
         left, top, width, height = box_uv_bounds(uv, cube["size"], face)
     elif isinstance(uv, dict) and face in uv:
         face_uv = uv[face]
-        left, top = (round(value) for value in face_uv["uv"])
-        width, height = (round(abs(value)) for value in face_uv.get("uv_size", (1, 1)))
+        u, v = (round(value) for value in face_uv["uv"])
+        signed_width, signed_height = (
+            round(value) for value in face_uv.get("uv_size", (1, 1))
+        )
+        mirror_x = signed_width < 0
+        mirror_y = signed_height < 0
+        width = max(1, abs(signed_width))
+        height = max(1, abs(signed_height))
+        left = u - width if mirror_x else u
+        top = v - height if mirror_y else v
+        uv_rotation = round(face_uv.get("uv_rotation", face_uv.get("rotation", 0))) % 360
     else:
         return None
-    pixels = []
-    for y in range(max(0, top), min(texture.height, top + max(1, height))):
-        for x in range(max(0, left), min(texture.width, left + max(1, width))):
-            pixel = texture.getpixel((x, y))
-            if pixel[3]:
-                pixels.append(pixel)
-    if not pixels:
+    patch = texture.crop((left, top, left + width, top + height))
+    if mirror_x:
+        patch = patch.transpose(Image.Transpose.FLIP_LEFT_RIGHT)
+    if mirror_y:
+        patch = patch.transpose(Image.Transpose.FLIP_TOP_BOTTOM)
+    if uv_rotation:
+        patch = patch.rotate(-uv_rotation, resample=Image.Resampling.NEAREST, expand=True)
+    if patch.getchannel("A").getbbox() is None:
         return None
-    return tuple(sum(pixel[index] for pixel in pixels) // len(pixels) for index in range(4))
+    return patch
 
 
 def scene(model_path: Path, texture_path: Path, view: str) -> tuple[list, tuple[float, float, float, float]]:
@@ -114,8 +137,8 @@ def scene(model_path: Path, texture_path: Path, view: str) -> tuple[list, tuple[
                 transformed_normal = tuple(transformed_normal_tip[index] - transformed_center[index] for index in range(3))
                 if sum(transformed_normal[index] * camera[index] for index in range(3)) <= 0.01:
                     continue
-                color = face_color(texture, cube, face)
-                if color is None:
+                patch = face_texture(texture, cube, face)
+                if patch is None:
                     continue
                 points = [project(vertices[index]) for index in indices]
                 for x, y in points:
@@ -123,11 +146,65 @@ def scene(model_path: Path, texture_path: Path, view: str) -> tuple[list, tuple[
                     bounds[1] = min(bounds[1], y)
                     bounds[2] = max(bounds[2], x)
                     bounds[3] = max(bounds[3], y)
-                depth = sum(center[index] * camera[index] for index in range(3))
-                polygons.append((depth, points, color))
+                depth = sum(transformed_center[index] * camera[index] for index in range(3))
+                polygons.append((depth, points, patch))
     if not polygons:
         raise ValueError(f"{model_path} has no visible {view} polygons")
     return sorted(polygons, key=lambda value: value[0]), tuple(bounds)
+
+
+def draw_textured_face(
+        canvas: Image.Image,
+        points: list[tuple[float, float]],
+        texture: Image.Image,
+) -> None:
+    # FACES stores each quad as bottom-left, bottom-right, top-right, top-left.
+    top_left, top_right, bottom_right, bottom_left = (
+        points[3], points[2], points[1], points[0]
+    )
+    min_x = math.floor(min(point[0] for point in points))
+    min_y = math.floor(min(point[1] for point in points))
+    max_x = math.ceil(max(point[0] for point in points))
+    max_y = math.ceil(max(point[1] for point in points))
+    width = max_x - min_x
+    height = max_y - min_y
+    if width < 1 or height < 1:
+        return
+
+    origin_x, origin_y = top_left[0] - min_x, top_left[1] - min_y
+    across_x, across_y = top_right[0] - top_left[0], top_right[1] - top_left[1]
+    down_x, down_y = bottom_left[0] - top_left[0], bottom_left[1] - top_left[1]
+    determinant = across_x * down_y - down_x * across_y
+    if abs(determinant) < 0.001:
+        return
+
+    source_width, source_height = texture.size
+    a = source_width * down_y / determinant
+    b = -source_width * down_x / determinant
+    c = -a * origin_x - b * origin_y
+    d = -source_height * across_y / determinant
+    e = source_height * across_x / determinant
+    f = -d * origin_x - e * origin_y
+    warped = texture.transform(
+        (width, height),
+        Image.Transform.AFFINE,
+        (a, b, c, d, e, f),
+        resample=Image.Resampling.NEAREST,
+        fillcolor=(0, 0, 0, 0),
+    )
+    local_points = [(round(x - min_x), round(y - min_y)) for x, y in points]
+    mask = Image.new("L", (width, height), 0)
+    ImageDraw.Draw(mask).polygon(local_points, fill=255)
+    if warped.mode != "RGBA":
+        warped = warped.convert("RGBA")
+    alpha = warped.getchannel("A")
+    warped.putalpha(Image.composite(alpha, Image.new("L", alpha.size, 0), mask))
+    canvas.alpha_composite(warped, (min_x, min_y))
+    ImageDraw.Draw(canvas).line(
+        [*[(round(x), round(y)) for x, y in points], (round(points[0][0]), round(points[0][1]))],
+        fill=(10, 12, 16, 210),
+        width=1,
+    )
 
 
 def render_turnaround(model_path: Path, texture_path: Path, label: str) -> Image.Image:
@@ -142,12 +219,12 @@ def render_turnaround(model_path: Path, texture_path: Path, label: str) -> Image
         scale = min(100 / max(1, right - left), 138 / max(1, top - bottom))
         center_x = cell_left + 57
         baseline = 151
-        for _, points, color in polygons:
+        for _, points, texture in polygons:
             projected = [
-                (round(center_x + (x - (left + right) / 2) * scale), round(baseline - (y - bottom) * scale))
+                (center_x + (x - (left + right) / 2) * scale, baseline - (y - bottom) * scale)
                 for x, y in points
             ]
-            draw.polygon(projected, fill=color, outline=(10, 12, 16, 210))
+            draw_textured_face(canvas, projected, texture)
         draw.text((cell_left + 5, 5), view, fill=(170, 178, 190, 255), font=font)
     text_width = draw.textbbox((0, 0), label, font=font)[2]
     draw.text(((width - text_width) // 2, 164), label, fill=(239, 241, 244, 255), font=font)
@@ -166,16 +243,13 @@ def contact_sheet(entries: list[tuple[Path, Path, str]], output: Path, columns: 
 def main() -> None:
     entity_models = ASSETS / "geckolib/models/entity"
     entity_textures = ASSETS / "textures/entity"
-    recruits = [
-        "phase_i_clone_trooper", "phase_i_arc_trooper", "clone_trooper", "arc_trooper",
-        "jedi_knight", "senate_commando", "republic_honor_guard", "b1_battle_droid",
-        "b1_security_droid", "b2_super_battle_droid", "commando_droid", "mandalorian_warrior",
-        "mandalorian_marksman", "mandalorian_heavy", "hutt_enforcer", "bounty_hunter",
-        "smuggler", "nightsister_acolyte", "nightsister_archer", "nightbrother_brute",
-        "republic_civilian", "togruta_civilian", "separatist_technician",
-        "mandalorian_clansperson", "hutt_civilian", "nightsister_civilian",
-    ]
-    contact_sheet([(entity_models / f"{asset}.geo.json", entity_textures / f"{asset}.png", asset) for asset in recruits], OUTPUT / "all_26_recruits.png")
+    contact_sheet(
+        [
+            (entity_models / f"{asset}.geo.json", entity_textures / f"{asset}.png", asset)
+            for asset in RECRUIT_ASSETS
+        ],
+        OUTPUT / "all_27_recruits.png",
+    )
     commander = [
         (entity_models / "clone_trooper.geo.json", entity_textures / "clone_trooper_commander.png", "clone commander"),
         (entity_models / "arc_trooper.geo.json", entity_textures / "arc_trooper_commander.png", "ARC commander"),
@@ -192,7 +266,7 @@ def main() -> None:
     contact_sheet([(ASSETS / f"geckolib/models/item/blaster/{asset}.geo.json", ASSETS / f"textures/item/blaster/{asset}.png", asset) for asset in blasters], OUTPUT / "blasters.png")
     capsules = ["clone_trooper", "b1_battle_droid", "togruta_civilian", "nightsister_acolyte"]
     contact_sheet([(ASSETS / "geckolib/models/item/spawn_capsule.geo.json", ASSETS / f"textures/item/spawn_capsule/{asset}.png", f"{asset} capsule") for asset in capsules], OUTPUT / "representative_capsules.png")
-    print(f"Rendered {len(recruits) + 3 + len(armor) + len(vehicles) + len(sabers) + len(blasters) + len(capsules)} front/side/back previews to {OUTPUT}")
+    print(f"Rendered {len(RECRUIT_ASSETS) + 3 + len(armor) + len(vehicles) + len(sabers) + len(blasters) + len(capsules)} front/side/back previews to {OUTPUT}")
 
 
 if __name__ == "__main__":

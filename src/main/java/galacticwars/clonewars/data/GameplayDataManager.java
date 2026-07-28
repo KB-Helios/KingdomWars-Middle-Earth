@@ -386,12 +386,7 @@ public final class GameplayDataManager extends SimplePreparableReloadListener<Ga
                     decimal(attributes, "movement_speed", 0.28D),
                     decimal(attributes, "follow_range", 24.0D),
                     decimal(attributes, "armor", 0.0D),
-                    new ArmyEquipmentLoadout(
-                            string(equipment, "main_hand", "minecraft:iron_sword"),
-                            string(equipment, "head", ""),
-                            string(equipment, "chest", ""),
-                            string(equipment, "legs", ""),
-                            string(equipment, "feet", "")),
+                    parseUnitEquipment(equipment),
                     strings(json, "force_loadout"));
             if (!seen.add(id)) {
                 throw new IllegalArgumentException("Duplicate unit id " + id + " in " + resource.id());
@@ -402,6 +397,16 @@ public final class GameplayDataManager extends SimplePreparableReloadListener<Ga
             throw new IllegalArgumentException("No army unit definitions were loaded");
         }
         return List.copyOf(definitions);
+    }
+
+    static ArmyEquipmentLoadout parseUnitEquipment(JsonObject equipment) {
+        JsonObject resolved = equipment == null ? new JsonObject() : equipment;
+        return new ArmyEquipmentLoadout(
+                string(resolved, "main_hand", ""),
+                string(resolved, "head", ""),
+                string(resolved, "chest", ""),
+                string(resolved, "legs", ""),
+                string(resolved, "feet", ""));
     }
 
     static Map<AbilityId, AbilityDefinition> loadAbilities(ResourceManager manager) throws IOException {
