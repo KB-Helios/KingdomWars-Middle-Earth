@@ -149,6 +149,21 @@
 - [x] Observe the consumed fuel slot while the furnace remains lit and fail immediately if the cook requests redundant coal before the input finishes. The corrected in-bounds fixture passed twice; the initial RED timeout proved the furnace was correctly rejected when it sat one block outside the claimed worksite.
 - [x] Run the focused GameTest twice, then run `runHarnesses`, two complete GameTest passes, `buildAll`, and `git diff --check` before committing. Both corrected cook runs passed 1/1; the initial RED fixture placed the furnace one block beyond the claimed worksite and correctly timed out during station discovery. Aggregate verification exposed that `worker_safety_and_upkeep` started its deadline before its distant fixture became entity-ticking, so the proof now waits for chunk/entity readiness and measures recruit ticks. Its focused control passed 1/1, both final aggregate runs passed 82/82, `runHarnesses` passed 176 actionable tasks, and `buildAll` passed 186 actionable tasks for Fabric and NeoForge.
 
+## Task 10: Ordinary-player lumberjack lifecycle
+
+**Files:**
+
+- Modify: `src/main/java/galacticwars/clonewars/gametest/ModGameTests.java`
+- Modify only if the black-box test exposes a gap: `src/main/java/galacticwars/clonewars/entity/GalacticRecruitEntity.java`
+- Modify: `README.md`
+- Modify: `docs/authorized-source-intake.md`
+
+- [x] Add a dedicated ordinary-player-path lumberjack GameTest using real hire, profession assignment, configured worksite, registered storage, navigation, connected-log harvesting, replanting, and deposit paths. Do not mutate private phases, invoke the worker controller, or move the recruit after assignment.
+- [x] Seed exactly one matching sapling in storage and a three-log oak tree in-bounds. Prove the worker physically withdraws the sapling, approaches the tree, consumes the sapling only by replanting it, deposits exactly three logs, completes its persisted work order, and applies exact axe wear.
+- [x] Assert log and sapling conservation throughout the lifecycle so no direct inventory/world mutation can duplicate or lose either resource. Both focused runs passed 1/1 without a production repair.
+- [x] Record the pinned Workers lumberjack behavioral mapping and Minecraft 26.2 transformation in the authorized-source ledger.
+- [x] Run the focused GameTest twice, then run `runHarnesses`, two complete GameTest passes, `buildAll`, and `git diff --check` before committing. Both focused runs passed 1/1, `runHarnesses` passed 176 actionable tasks, both aggregate NeoForge runs passed all 83 required GameTests, and `buildAll` passed 186 actionable tasks for Fabric and NeoForge. No production repair was required; the existing Minecraft 26.2 runtime already satisfied the ordinary lifecycle and exact conservation proof.
+
 ## Completion gate
 
-This slice is complete when courier contention and expiry are conservation-proven, an exact automatic transfer survives a live-lease reload, owner removal of settlement authority releases leases and pauses/resumes configured routes without physical loss or ghost delivery, concurrent role/revision/replay cases are rejected server-side, follow/hold/patrol/work commands survive real door traversal, self-care retains ordinary commands while yielding to danger and combat, tamed recruit bolts consume physical Energy Cells with no empty-gun melee fallback, collision-level friendly-fire proof passes, an ordinary cook completes one exact physical furnace cycle without redundant fuel, provenance is current, and all four verification gates are green.
+This slice is complete when courier contention and expiry are conservation-proven, an exact automatic transfer survives a live-lease reload, owner removal of settlement authority releases leases and pauses/resumes configured routes without physical loss or ghost delivery, concurrent role/revision/replay cases are rejected server-side, follow/hold/patrol/work commands survive real door traversal, self-care retains ordinary commands while yielding to danger and combat, tamed recruit bolts consume physical Energy Cells with no empty-gun melee fallback, collision-level friendly-fire proof passes, an ordinary cook completes one exact physical furnace cycle without redundant fuel, an ordinary lumberjack conserves a matching sapling and connected tree through replant and deposit, provenance is current, and all four verification gates are green.

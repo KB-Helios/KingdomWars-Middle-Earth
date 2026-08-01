@@ -318,6 +318,9 @@ public final class ModGameTests {
         isolatedEnvironments.put(id("black_box_cook_lifecycle"), event.registerEnvironment(
                         id("black_box_cook_lifecycle_environment"),
                         new TestEnvironmentDefinition.AllOf(List.of())));
+        isolatedEnvironments.put(id("black_box_lumberjack_lifecycle"), event.registerEnvironment(
+                        id("black_box_lumberjack_lifecycle_environment"),
+                        new TestEnvironmentDefinition.AllOf(List.of())));
         isolatedEnvironments.put(id("hybrid_courier_dispatch"), event.registerEnvironment(
                         id("hybrid_courier_dispatch_environment"),
                         new TestEnvironmentDefinition.AllOf(List.of())));
@@ -365,6 +368,7 @@ public final class ModGameTests {
                 id("recruit_door_command_resumption"),
                 id("specialist_worker_loops"),
                 id("black_box_cook_lifecycle"),
+                id("black_box_lumberjack_lifecycle"),
                 id("competing_courier_leases"),
                 id("courier_live_lease_reload"),
                 id("courier_hall_removal"),
@@ -407,6 +411,8 @@ public final class ModGameTests {
                                             ? 1_600
                                     : testId.equals(id("black_box_cook_lifecycle"))
                                             ? 900
+                                    : testId.equals(id("black_box_lumberjack_lifecycle"))
+                                            ? 1_000
                                     : testId.equals(id("competing_courier_leases"))
                                             ? 700
                                     : testId.equals(id("courier_live_lease_reload"))
@@ -513,6 +519,8 @@ public final class ModGameTests {
         tests.put(id("enabled_worker_loops"), ModGameTests::enabledWorkerLoops);
         tests.put(id("specialist_worker_loops"), ModGameTests::specialistWorkerLoops);
         tests.put(id("black_box_cook_lifecycle"), ModGameTests::blackBoxCookLifecycle);
+        tests.put(id("black_box_lumberjack_lifecycle"),
+                ModGameTests::blackBoxLumberjackLifecycle);
         tests.put(id("bounded_worker_scans"), ModGameTests::boundedWorkerScans);
         tests.put(id("hybrid_courier_dispatch"), ModGameTests::hybridCourierDispatch);
         tests.put(id("competing_courier_leases"), ModGameTests::competingCourierLeases);
@@ -8739,6 +8747,165 @@ public final class ModGameTests {
                         + ", consumedFuelWhileLit=" + consumedFuelWhileLit[0]
                         + ", furnace=" + List.of(
                                 furnace.getItem(0), furnace.getItem(1), furnace.getItem(2)));
+            }
+        });
+    }
+
+    /**
+     * Exercises one complete connected-tree order through ordinary hire, profession-assignment,
+     * worksite, registered-storage, navigation, harvest, replant, and deposit paths. The fixture
+     * never mutates a worker phase, invokes the controller, or moves the recruit after assignment.
+     */
+    private static void blackBoxLumberjackLifecycle(GameTestHelper helper) {
+        SmartBrainTestArea area = prepareSmartBrainTestAreaAt(
+                helper,
+                GameType.CREATIVE,
+                -2,
+                14,
+                -2,
+                8,
+                isolatedCapital(helper, 219));
+        ServerLevel level = helper.getLevel();
+        ServerPlayer owner = area.player();
+        BlockPos hallPos = area.at(0, 1, 0);
+        BlockPos recruitPos = area.at(2, 1, 4);
+        BlockPos treeRoot = area.at(7, 1, 4);
+        List<BlockPos> logPositions = List.of(
+                treeRoot,
+                treeRoot.above(),
+                treeRoot.above(2));
+        CommandCenterBlockEntity hall = placeCommandCenter(helper, hallPos);
+        hall.claim(owner);
+        KingdomSavedData data = KingdomSavedData.get(level);
+        if (data.activateHall(
+                owner.getUUID(),
+                hall.factionId(),
+                level.dimension().identifier().toString(),
+                hallPos).isEmpty()) {
+            helper.fail("Black-box lumberjack fixture could not activate its Command Center");
+            return;
+        }
+        putContainerItem(hall, new ItemStack(ModItems.CREDIT_CHIP.get(), 32));
+        FactionAlignmentSavedData.get(level).setScore(
+                owner.getUUID(), FactionId.of("republic"), 100);
+        applyCampaignSetupEvent(
+                ProgressionSavedData.get(level),
+                owner,
+                ProgressionEventType.FACTION_PLEDGED,
+                "galacticwars:republic");
+
+        level.setBlock(treeRoot.below(), Blocks.DIRT.defaultBlockState(), 3);
+        logPositions.forEach(pos -> level.setBlock(pos, Blocks.OAK_LOG.defaultBlockState(), 3));
+        GalacticRecruitEntity recruit = spawnRecruitAt(
+                helper, ModEntityTypes.CLONE_TROOPER.get(), recruitPos);
+        owner.setPos(recruit.getX(), recruit.getY(), recruit.getZ());
+        if (!recruit.handleMenuButton(owner, RecruitCommandMenu.BUTTON_HIRE)
+                || !recruit.handleMenuButton(
+                        owner, RecruitCommandMenu.BUTTON_ASSIGN_LUMBERJACK)) {
+            helper.fail("Black-box lumberjack could not be hired and assigned");
+            return;
+        }
+        if (!configureWorkerLifecycleWorksite(
+                helper,
+                data,
+                owner,
+                recruit,
+                hallPos,
+                List.of("minecraft:oak_log"))) {
+            return;
+        }
+        putContainerItem(hall, new ItemStack(Items.OAK_SAPLING));
+
+        Container recruitCargo = recruit.createCargoContainer();
+        int toolDamageBefore = recruit.getWorkerMainHandItem().getDamageValue();
+        boolean[] withdrewSapling = {false};
+        boolean[] approachedTree = {false};
+        boolean[] complete = {false};
+        int[] startedRecruitTick = {-1};
+        long readinessStartedAt = helper.getTick();
+        helper.onEachTick(() -> {
+            if (complete[0]) {
+                return;
+            }
+            if (startedRecruitTick[0] < 0) {
+                boolean areaTicking = areSmartBrainAreaChunksTicking(
+                        helper, area, -2, 14, -2, 8);
+                boolean recruitIndexed = level.getEntity(recruit.getUUID()) == recruit;
+                if (!areaTicking || !recruitIndexed || recruit.tickCount == 0) {
+                    if (helper.getTick() - readinessStartedAt
+                            >= SMART_BRAIN_CHUNK_READY_TIMEOUT) {
+                        complete[0] = true;
+                        helper.fail("Black-box lumberjack area never became entity-ticking: ticking="
+                                + areaTicking + ", recruit=" + recruitIndexed
+                                + ", recruitTick=" + recruit.tickCount);
+                    }
+                    return;
+                }
+                startedRecruitTick[0] = recruit.tickCount;
+            }
+
+            withdrewSapling[0] |= countContainerItem(hall, Items.OAK_SAPLING) == 0
+                    && countContainerItem(recruitCargo, Items.OAK_SAPLING) == 1;
+            approachedTree[0] |= recruit.distanceToSqr(Vec3.atCenterOf(treeRoot)) <= 4.0D;
+
+            int standingLogs = 0;
+            for (BlockPos logPos : logPositions) {
+                if (level.getBlockState(logPos).is(Blocks.OAK_LOG)) {
+                    standingLogs++;
+                }
+            }
+            int physicalLogs = standingLogs
+                    + countContainerItem(hall, Items.OAK_LOG)
+                    + countContainerItem(recruitCargo, Items.OAK_LOG);
+            int physicalSaplings = countContainerItem(hall, Items.OAK_SAPLING)
+                    + countContainerItem(recruitCargo, Items.OAK_SAPLING)
+                    + (level.getBlockState(treeRoot).is(Blocks.OAK_SAPLING) ? 1 : 0);
+            if (physicalLogs != 3 || physicalSaplings != 1) {
+                complete[0] = true;
+                helper.fail("Black-box lumberjack violated physical conservation: logs="
+                        + physicalLogs + ", saplings=" + physicalSaplings
+                        + ", standingLogs=" + standingLogs
+                        + ", storedLogs=" + countContainerItem(hall, Items.OAK_LOG)
+                        + ", storedSaplings=" + countContainerItem(hall, Items.OAK_SAPLING)
+                        + ", cargo=" + recruitCargo);
+                return;
+            }
+
+            boolean replanted = level.getBlockState(treeRoot).is(Blocks.OAK_SAPLING)
+                    && level.getBlockState(treeRoot.above()).isAir()
+                    && level.getBlockState(treeRoot.above(2)).isAir();
+            boolean completedOrder = hasCompletedWorkerOrder(
+                    data, owner.getUUID(), WorkOrderType.LUMBER);
+            int toolDamage = recruit.getWorkerMainHandItem().getDamageValue();
+            if (completedOrder
+                    && replanted
+                    && countContainerItem(hall, Items.OAK_LOG) == 3
+                    && countContainerItem(hall, Items.OAK_SAPLING) == 0
+                    && workerInventoryCount(recruit) == 0
+                    && withdrewSapling[0]
+                    && approachedTree[0]
+                    && toolDamage == toolDamageBefore + 3
+                    && recruit.getRecruitCommand() == RecruitmentAction.WORK_AT_SITE) {
+                complete[0] = true;
+                recruit.discard();
+                helper.succeed();
+                return;
+            }
+
+            if (recruit.tickCount - startedRecruitTick[0] >= 600) {
+                complete[0] = true;
+                helper.fail("Black-box lumberjack lifecycle timed out: status="
+                        + recruit.getWorkerStatus()
+                        + ", position=" + recruit.position()
+                        + ", standingLogs=" + standingLogs
+                        + ", storedLogs=" + countContainerItem(hall, Items.OAK_LOG)
+                        + ", storedSaplings=" + countContainerItem(hall, Items.OAK_SAPLING)
+                        + ", cargo=" + recruitCargo
+                        + ", replanted=" + replanted
+                        + ", withdrewSapling=" + withdrewSapling[0]
+                        + ", approachedTree=" + approachedTree[0]
+                        + ", completedOrder=" + completedOrder
+                        + ", toolDamage=" + toolDamageBefore + "->" + toolDamage);
             }
         });
     }
