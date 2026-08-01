@@ -65,10 +65,10 @@
 - Modify: `src/main/java/galacticwars/clonewars/entity/GalacticRecruitEntity.java`
 - Modify only if useful for a pure seam: `src/main/java/galacticwars/clonewars/entity/ai/RecruitSelfCarePolicy.java`
 
-- [ ] Add a failing GameTest for an exhausted recruit with physical food under follow, hold, and persisted patrol orders. Each case consumes exactly one item at the bounded cadence and retains its command/order.
-- [ ] Add combat and hazard controls proving food is unchanged while attack memory or escape authority is active.
-- [ ] Replace blanket command/group exclusions with explicit higher-priority-state arbitration, including SmartBrain attack memory.
-- [ ] Run the focused test twice, then commit `Allow command-preserving recruit self care`.
+- [x] Add a failing GameTest for an exhausted recruit with physical food under follow, hold, and persisted patrol orders. Each case consumes exactly one item at the bounded cadence and retains its command/order.
+- [x] Add combat and hazard controls proving food is unchanged while attack memory or escape authority is active.
+- [x] Replace blanket command/group exclusions with explicit higher-priority-state arbitration, including SmartBrain attack memory.
+- [x] Run the focused test twice, then commit `Allow command-preserving recruit self care`. Both corrected fresh-world NeoForge runs passed all 78 required tests; RED proved that attack memory and a save/reloaded worker safety retreat were both ignored by the previous command/group blacklist.
 
 ## Task 5: Physical recruit ammunition and collision-level friendly fire
 

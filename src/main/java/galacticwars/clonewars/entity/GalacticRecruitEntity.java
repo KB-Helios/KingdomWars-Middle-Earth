@@ -1392,18 +1392,18 @@ public class GalacticRecruitEntity extends TamableAnimal
     }
 
     public boolean shouldUseRecruitSelfCare() {
-        RecruitmentAction command = this.getRecruitCommand();
         return this.isTame()
                 && this.getRecruitVitals().isExhausted()
-                && this.getTarget() == null
+                && !this.hasActiveRecruitCombatAuthority()
                 && this.hurtTime == 0
-                && !this.isOrderedToSit()
                 && !this.hazardAvoidanceActive
-                && !this.hasAuthoritativeArmyGroup()
-                && command != RecruitmentAction.MOVE_TO_POSITION
-                && command != RecruitmentAction.PROTECT_OWNER
-                && command != RecruitmentAction.ATTACK_TARGET
-                && command != RecruitmentAction.PATROL_ROUTE;
+                && !this.isWorkerSafetyRetreating();
+    }
+
+    private boolean hasActiveRecruitCombatAuthority() {
+        LivingEntity target = this.getTarget();
+        return (target != null && target.isAlive())
+                || BrainUtil.hasMemory(this, MemoryModuleType.ATTACK_TARGET);
     }
 
     public void performRecruitSelfCare() {

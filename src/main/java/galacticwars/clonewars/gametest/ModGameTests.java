@@ -7425,80 +7425,196 @@ public final class ModGameTests {
 
     private static void recruitHazardAndSelfCare(GameTestHelper helper) {
         SmartBrainTestArea area = prepareSmartBrainTestAreaAt(
-                helper, GameType.SURVIVAL, -4, 12, -4, 8,
+                helper, GameType.SURVIVAL, -4, 24, -4, 8,
                 isolatedCapital(helper, 151));
         ServerPlayer owner = area.player();
-        BlockPos hazardPosition = area.at(2, 1, 2);
-        BlockPos campfirePosition = hazardPosition.below();
-        helper.getLevel().setBlockAndUpdate(
-                campfirePosition,
-                Blocks.CAMPFIRE.defaultBlockState().setValue(BlockStateProperties.LIT, false));
+        BlockPos hallPos = area.at(8, 1, 6);
+        CommandCenterBlockEntity hall = placeCommandCenter(helper, hallPos);
+        hall.claim(owner);
+        KingdomSavedData data = KingdomSavedData.get(helper.getLevel());
+        data.activateHall(
+                owner.getUUID(),
+                hall.factionId(),
+                helper.getLevel().dimension().identifier().toString(),
+                hallPos).orElseThrow();
+        FactionAlignmentSavedData.get(helper.getLevel()).setScore(
+                owner.getUUID(), FactionId.of("republic"), 100);
+        applyCampaignSetupEvent(
+                ProgressionSavedData.get(helper.getLevel()), owner,
+                ProgressionEventType.FACTION_PLEDGED, "galacticwars:republic");
 
+        BlockPos hazardPosition = area.at(2, 1, 2);
+        for (int x = 0; x <= 4; x++) {
+            for (int z = 0; z <= 4; z++) {
+                helper.getLevel().setBlockAndUpdate(
+                        area.at(x, 0, z),
+                        Blocks.CAMPFIRE.defaultBlockState()
+                                .setValue(BlockStateProperties.LIT, false));
+            }
+        }
         GalacticRecruitEntity escaping = spawnRecruitAt(
                 helper, ModEntityTypes.CLONE_TROOPER.get(), hazardPosition);
         escaping.initializeFromSpawnEgg();
         escaping.tame(owner);
+        escaping.setInvulnerable(true);
         invokeRecruitCommand(escaping, RecruitmentAction.HOLD_POSITION);
         if (escaping.isInRecruitHazard()) {
-            helper.fail("Unlit campfire incorrectly activated recruit hazard avoidance");
+            helper.fail("Unlit campfire field incorrectly activated recruit hazard avoidance");
+            return;
+        }
+        for (int x = 0; x <= 4; x++) {
+            for (int z = 0; z <= 4; z++) {
+                helper.getLevel().setBlockAndUpdate(
+                        area.at(x, 0, z),
+                        Blocks.CAMPFIRE.defaultBlockState()
+                                .setValue(BlockStateProperties.LIT, true));
+            }
+        }
+
+        GalacticRecruitEntity following = spawnRecruitAt(
+                helper, ModEntityTypes.CLONE_TROOPER.get(), area.at(10, 1, 6));
+        GalacticRecruitEntity holding = spawnRecruitAt(
+                helper, ModEntityTypes.CLONE_TROOPER.get(), area.at(12, 1, 6));
+        GalacticRecruitEntity patrolling = spawnRecruitAt(
+                helper, ModEntityTypes.CLONE_TROOPER.get(), area.at(16, 1, 6));
+        GalacticRecruitEntity combat = spawnRecruitAt(
+                helper, ModEntityTypes.CLONE_TROOPER.get(), area.at(22, 1, 6));
+        for (GalacticRecruitEntity recruit : List.of(
+                following, holding, patrolling, combat)) {
+            recruit.initializeFromSpawnEgg();
+            recruit.setInvulnerable(true);
+        }
+        for (GalacticRecruitEntity recruit : List.of(following, holding, combat)) {
+            recruit.tame(owner);
+        }
+        invokeRecruitCommand(following, RecruitmentAction.FOLLOW_OWNER);
+        invokeRecruitCommand(holding, RecruitmentAction.HOLD_POSITION);
+
+        KingdomBaseBlueprint forwardBase = GameplayDataManager.snapshot()
+                .blueprint("galacticwars:forward_base").orElseThrow();
+        BuildProject forwardBaseProject = fullyProgressProject(
+                data,
+                owner.getUUID(),
+                forwardBase,
+                helper.getLevel().dimension().identifier().toString(),
+                hallPos.offset(24, 0, 0));
+        owner.setPos(patrolling.getX(), patrolling.getY(), patrolling.getZ());
+        owner.getInventory().add(new ItemStack(ModItems.CREDIT_CHIP.get(), 25));
+        if (!patrolling.handleMenuButton(owner, RecruitCommandMenu.BUTTON_HIRE)
+                || !data.completeBuildProject(owner.getUUID(), forwardBaseProject, forwardBase)
+                || !patrolling.handleMenuButton(
+                        owner, RecruitCommandMenu.BUTTON_PROMOTE_COMMANDER)) {
+            helper.fail("Self-care patrol fixture could not hire and promote its commander");
+            return;
+        }
+        owner.setPos(
+                area.at(20, 1, 6).getX() + 0.5D,
+                area.at(20, 1, 6).getY(),
+                area.at(20, 1, 6).getZ() + 0.5D);
+        helper.getLevel().getChunkSource().move(owner);
+        if (!patrolling.handleMenuButton(owner, RecruitCommandMenu.BUTTON_PATROL)) {
+            helper.fail("Self-care patrol fixture could not persist a two-waypoint route");
+            return;
+        }
+        var patrolGroup = data.armyGroupForRecruit(patrolling.getUUID()).orElse(null);
+        if (patrolGroup == null
+                || patrolGroup.order().type() != ArmyCommandType.PATROL_ROUTE
+                || patrolGroup.effectivePatrolPlan().isEmpty()
+                || patrolling.getRecruitCommand() != RecruitmentAction.PATROL_ROUTE) {
+            helper.fail("Self-care patrol fixture lacks an authoritative persisted patrol");
             return;
         }
 
-        helper.getLevel().setBlockAndUpdate(
-                campfirePosition,
-                Blocks.CAMPFIRE.defaultBlockState().setValue(BlockStateProperties.LIT, true));
-        GalacticRecruitEntity selfCare = spawnRecruitAt(
-                helper, ModEntityTypes.CLONE_TROOPER.get(), area.at(7, 1, 2));
-        selfCare.initializeFromSpawnEgg();
-        selfCare.tame(owner);
-        invokeRecruitCommand(selfCare, RecruitmentAction.CLEAR_TARGET);
-        setRecruitField(selfCare, "hunger", 0);
-        setWorkerInventory(selfCare, new ItemStack(Items.DRIED_KELP, 3));
+        for (GalacticRecruitEntity recruit : List.of(
+                escaping, following, holding, patrolling, combat)) {
+            setRecruitField(recruit, "hunger", 0);
+            setWorkerInventory(recruit, new ItemStack(Items.DRIED_KELP, 3));
+        }
+        invokeRecruitCommand(combat, RecruitmentAction.FOLLOW_OWNER);
+        BrainUtil.setMemory(
+                combat,
+                net.minecraft.world.entity.ai.memory.MemoryModuleType.ATTACK_TARGET,
+                owner);
+        combat.setTarget(null);
+        if (combat.shouldUseRecruitSelfCare()) {
+            helper.fail("Attack memory alone did not preempt recruit self-care");
+            return;
+        }
+        combat.performRecruitSelfCare();
+        if (workerInventoryCount(combat) != 3
+                || combat.getRecruitCommand() != RecruitmentAction.FOLLOW_OWNER) {
+            helper.fail("Attack-memory self-care control consumed food or changed Follow");
+            return;
+        }
+        BrainUtil.clearMemory(
+                combat,
+                net.minecraft.world.entity.ai.memory.MemoryModuleType.ATTACK_TARGET);
+        combat.discard();
 
-        int[] startTick = {selfCare.tickCount};
+        int[] startTick = {following.tickCount};
         boolean[] escapeTargetObserved = {false};
         boolean[] complete = {false};
         helper.onEachTick(() -> {
             if (complete[0]) {
                 return;
             }
-            if (escaping.isHazardAvoidanceActive() && escaping.isInRecruitHazard()) {
-                if (!BrainUtil.hasMemory(
-                        escaping,
-                        net.minecraft.world.entity.ai.memory.MemoryModuleType.WALK_TARGET)) {
+            if (escaping.isHazardAvoidanceActive()) {
+                if (workerInventoryCount(escaping) != 3) {
                     complete[0] = true;
-                    helper.fail("Ordered sit cleared the active hazard escape walk target");
+                    helper.fail("Hazard escape consumed physical food while safety owned the tick");
                     return;
                 }
-                escapeTargetObserved[0] = true;
+                if (escaping.isInRecruitHazard()) {
+                    if (!BrainUtil.hasMemory(
+                            escaping,
+                            net.minecraft.world.entity.ai.memory.MemoryModuleType.WALK_TARGET)) {
+                        complete[0] = true;
+                        helper.fail("Ordered sit cleared the active hazard escape walk target");
+                        return;
+                    }
+                    escapeTargetObserved[0] = true;
+                }
             }
 
-            int elapsedTicks = selfCare.tickCount - startTick[0];
-            int remainingFood = workerInventoryCount(selfCare);
-            if (remainingFood < 2 && elapsedTicks < 40) {
+            int followFood = workerInventoryCount(following);
+            int holdFood = workerInventoryCount(holding);
+            int patrolFood = workerInventoryCount(patrolling);
+            if (followFood < 2 || holdFood < 2 || patrolFood < 2) {
                 complete[0] = true;
-                helper.fail("Recruit self-care consumed more than one food item in a 20-tick window: "
-                        + remainingFood);
+                helper.fail("Ordinary-command self-care consumed more than one item per cadence: follow="
+                        + followFood + ", hold=" + holdFood + ", patrol=" + patrolFood);
                 return;
             }
-            if (selfCare.tickCount >= 22 && escapeTargetObserved[0]) {
-                if (remainingFood != 2) {
-                    complete[0] = true;
-                    helper.fail("Recruit self-care did not consume exactly one food item at the first cadence: "
-                            + remainingFood);
-                    return;
-                }
+
+            var currentPatrolGroup = data.armyGroup(patrolGroup.id()).orElse(null);
+            boolean commandsRetained = following.getRecruitCommand()
+                    == RecruitmentAction.FOLLOW_OWNER
+                    && holding.getRecruitCommand() == RecruitmentAction.HOLD_POSITION
+                    && holding.isOrderedToSit()
+                    && patrolling.getRecruitCommand() == RecruitmentAction.PATROL_ROUTE
+                    && currentPatrolGroup != null
+                    && currentPatrolGroup.order().type() == ArmyCommandType.PATROL_ROUTE
+                    && currentPatrolGroup.effectivePatrolPlan().isPresent();
+            if (followFood == 2 && holdFood == 2 && patrolFood == 2
+                    && escapeTargetObserved[0] && commandsRetained) {
                 complete[0] = true;
-                escaping.discard();
-                selfCare.discard();
+                for (GalacticRecruitEntity recruit : List.of(
+                        escaping, following, holding, patrolling)) {
+                    recruit.discard();
+                }
                 helper.succeed();
                 return;
             }
-            if (elapsedTicks >= 80) {
+            int elapsedTicks = following.tickCount - startTick[0];
+            if (elapsedTicks >= 60) {
                 complete[0] = true;
-                helper.fail("Recruit hazard escape or self-care cadence was never observed: hazard="
-                        + escapeTargetObserved[0] + ", food=" + remainingFood
-                        + ", selfCareTick=" + selfCare.tickCount);
+                helper.fail("Command-preserving self-care cadence was not observed: follow="
+                        + followFood + ", hold=" + holdFood + ", patrol=" + patrolFood
+                        + ", hazard=" + workerInventoryCount(escaping)
+                        + ", escape=" + escapeTargetObserved[0]
+                        + ", commands=" + following.getRecruitCommand() + "/"
+                        + holding.getRecruitCommand() + "/" + patrolling.getRecruitCommand()
+                        + ", patrolGroup=" + currentPatrolGroup);
             }
         });
     }
@@ -7554,6 +7670,7 @@ public final class ModGameTests {
         GalacticRecruitEntity[] activeWorker = {worker};
         int[] phase = {0};
         int[] phaseStartTick = {worker.tickCount};
+        boolean[] selfCareBlockedDuringSafety = {false};
         boolean[] complete = {false};
         helper.onEachTick(() -> {
             if (complete[0]) {
@@ -7604,6 +7721,27 @@ public final class ModGameTests {
                 return;
             }
 
+            if (!selfCareBlockedDuringSafety[0]
+                    && current.isWorkerSafetyRetreating()
+                    && current.hurtTime == 0
+                    && current.getTarget() == null) {
+                setRecruitField(current, "hunger", 0);
+                setWorkerInventory(current, new ItemStack(Items.BREAD, 3));
+                if (current.shouldUseRecruitSelfCare()) {
+                    complete[0] = true;
+                    helper.fail("Loaded worker safety retreat did not preempt self-care");
+                    return;
+                }
+                current.performRecruitSelfCare();
+                if (workerInventoryCount(current) != 3) {
+                    complete[0] = true;
+                    helper.fail("Loaded worker safety retreat consumed physical food");
+                    return;
+                }
+                setRecruitField(current, "hunger", 100);
+                setWorkerInventory(current, new ItemStack(Items.DIAMOND, 3));
+                selfCareBlockedDuringSafety[0] = true;
+            }
             if (workerInventoryCount(current) != 3) {
                 complete[0] = true;
                 helper.fail("Worker cargo changed after safety save/reload: cargo="
@@ -7613,6 +7751,11 @@ public final class ModGameTests {
             }
             if (current.getWorkerStatus().phase() == WorkerPhase.ACQUIRE_ORDER
                     && current.getWorkerStatus().reasonCode().equals("threat_cleared")) {
+                if (!selfCareBlockedDuringSafety[0]) {
+                    complete[0] = true;
+                    helper.fail("Reloaded worker left safety before the self-care control ran");
+                    return;
+                }
                 long upkeepTime = helper.getLevel().getGameTime();
                 hall.clearContent();
                 hall.chargeDailyUpkeep(upkeepTime, 1);
@@ -7659,7 +7802,8 @@ public final class ModGameTests {
             if (current.tickCount - phaseStartTick[0] >= 150) {
                 complete[0] = true;
                 helper.fail("Reloaded worker did not resume after 100 threat-free ticks: "
-                        + current.getWorkerStatus());
+                        + current.getWorkerStatus() + ", selfCareBlocked="
+                        + selfCareBlockedDuringSafety[0]);
             }
         });
     }
