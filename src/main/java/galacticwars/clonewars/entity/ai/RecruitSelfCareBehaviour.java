@@ -19,7 +19,8 @@ public final class RecruitSelfCareBehaviour extends ExtendedBehaviour<GalacticRe
 
     @Override
     protected boolean checkExtraStartConditions(ServerLevel level, GalacticRecruitEntity recruit) {
-        return recruit.shouldUseRecruitSelfCare();
+        return RecruitAiCadence.shouldCheckSelfCare(recruit.tickCount)
+                && recruit.shouldUseRecruitSelfCare();
     }
 
     @Override

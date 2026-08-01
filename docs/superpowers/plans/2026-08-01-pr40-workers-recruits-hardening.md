@@ -176,7 +176,7 @@ git commit -m "Bound recruit ranged repositioning"
 - Produces: immediate `HURT_BY_ENTITY` publication for accepted living attackers.
 - Produces: non-combat walk producers that yield to an active hazard escape.
 
-- [ ] **Step 1: Extend GameTests before production changes**
+- [x] **Step 1: Extend GameTests before production changes**
 
 Keep `worker_safety_and_upkeep` as the existing RED regression. Add an isolated `recruit_hazard_and_self_care` GameTest that:
 
@@ -186,13 +186,13 @@ Keep `worker_safety_and_upkeep` as the existing RED regression. Add an isolated 
 
 Add the test to `createTests`, an isolated environment, the SmartBrain runtime list, and a 360-tick timeout.
 
-- [ ] **Step 2: Run GameTests and verify RED**
+- [x] **Step 2: Run GameTests and verify RED**
 
 Run: `rtk .\gradlew.bat runGameTestServer --no-daemon --console=plain`
 
 Expected: `worker_safety_and_upkeep` fails with “Damaged worker never entered its safety retreat”; the new test fails because unlit campfires are classified as dangerous and the exhausted recruit consumes multiple food items before the next 20-tick boundary.
 
-- [ ] **Step 3: Implement the damage and hazard fixes**
+- [x] **Step 3: Implement the damage and hazard fixes**
 
 After `super.actuallyHurt`, when health decreased and `damageSource.getEntity()` is a living entity, call:
 
@@ -209,7 +209,7 @@ Classify campfires with their lit property:
 
 Add `!recruit.isHazardAvoidanceActive()` to sit, natural work, shelter, faction reaction, and idle-wander predicates. In `RecruitWalkTargetBehaviour`, apply the ordered-sit clearing branch only when hazard avoidance is inactive. Preserve the already-audited pickup chain through `canStartRecruitItemPickup` without adding a redundant production branch.
 
-- [ ] **Step 4: Implement the 20-tick self-care cadence**
+- [x] **Step 4: Implement the 20-tick self-care cadence**
 
 Add `RecruitAiCadence.shouldCheckSelfCare(int tickCount)` and require it in `RecruitSelfCareBehaviour.checkExtraStartConditions` before `shouldUseRecruitSelfCare()`.
 
@@ -217,7 +217,7 @@ Add `RecruitAiCadence.shouldCheckSelfCare(int tickCount)` and require it in `Rec
 
 Run the full GameTest command twice. Expected on both fresh worlds: every required test passes, including `worker_safety_and_upkeep` and `recruit_hazard_and_self_care`.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```powershell
 git add src/main/java/galacticwars/clonewars/entity src/main/java/galacticwars/clonewars/entity/ai src/main/java/galacticwars/clonewars/gametest/ModGameTests.java

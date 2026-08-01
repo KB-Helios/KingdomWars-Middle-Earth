@@ -112,6 +112,7 @@ public final class RecruitBrain implements SmartBrainBuilder<GalacticRecruitEnti
 
     private static boolean canIdleWander(GalacticRecruitEntity recruit) {
         return !recruit.hasAuthoritativeArmyGroup()
+                && !recruit.isHazardAvoidanceActive()
                 && !recruit.isOrderedToSit()
                 && !recruit.shouldMoveToCommandTarget();
     }

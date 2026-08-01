@@ -55,14 +55,17 @@ public final class CivilianShelterBehaviour
 
     @Override
     protected void stop(GalacticRecruitEntity civilian) {
-        BrainUtil.clearMemories(civilian,
-                MemoryModuleType.WALK_TARGET,
-                MemoryModuleType.LOOK_TARGET,
-                MemoryModuleType.PATH);
+        if (!civilian.isHazardAvoidanceActive()) {
+            BrainUtil.clearMemories(civilian,
+                    MemoryModuleType.WALK_TARGET,
+                    MemoryModuleType.LOOK_TARGET,
+                    MemoryModuleType.PATH);
+        }
     }
 
     private static boolean shouldShelter(GalacticRecruitEntity civilian) {
         return civilian.isNaturalFactionCivilian()
+                && !civilian.isHazardAvoidanceActive()
                 && civilian.hasHome()
                 && !civilian.blockPosition().closerThan(civilian.getHomePosition(), 3.0D)
                 && (civilian.level().isDarkOutside()

@@ -280,6 +280,9 @@ public final class ModGameTests {
         isolatedEnvironments.put(id("worker_safety_and_upkeep"), event.registerEnvironment(
                         id("worker_safety_and_upkeep_environment"),
                         new TestEnvironmentDefinition.AllOf(List.of())));
+        isolatedEnvironments.put(id("recruit_hazard_and_self_care"), event.registerEnvironment(
+                        id("recruit_hazard_and_self_care_environment"),
+                        new TestEnvironmentDefinition.AllOf(List.of())));
         isolatedEnvironments.put(id("black_box_farmer_door_lifecycle"), event.registerEnvironment(
                         id("black_box_farmer_door_lifecycle_environment"),
                         new TestEnvironmentDefinition.AllOf(List.of())));
@@ -312,6 +315,7 @@ public final class ModGameTests {
                 id("grouped_patrol_pause_runtime"),
                 id("grouped_protect_entity_runtime"),
                 id("worker_safety_and_upkeep"),
+                id("recruit_hazard_and_self_care"),
                 id("black_box_farmer_door_lifecycle"),
                 id("specialist_worker_loops"),
                 id("local_recruit_protect_owner"),
@@ -353,6 +357,7 @@ public final class ModGameTests {
                                             id("ungrouped_recruit_ranged_brain"),
                                             id("ungrouped_recruit_melee_brain"),
                                             id("worker_safety_and_upkeep"),
+                                            id("recruit_hazard_and_self_care"),
                                             id("faction_selection_transaction")).contains(testId)
                                             ? 360
                                             : 100;
@@ -433,6 +438,7 @@ public final class ModGameTests {
         tests.put(id("local_recruit_protect_owner"), ModGameTests::localRecruitProtectOwner);
         tests.put(id("worker_resource_conservation"), ModGameTests::workerResourceConservation);
         tests.put(id("worker_safety_and_upkeep"), ModGameTests::workerSafetyAndUpkeep);
+        tests.put(id("recruit_hazard_and_self_care"), ModGameTests::recruitHazardAndSelfCare);
         tests.put(id("black_box_farmer_door_lifecycle"),
                 ModGameTests::blackBoxFarmerDoorLifecycle);
         tests.put(id("physical_logistics_transaction"),
@@ -6700,6 +6706,86 @@ public final class ModGameTests {
         });
     }
 
+    private static void recruitHazardAndSelfCare(GameTestHelper helper) {
+        SmartBrainTestArea area = prepareSmartBrainTestAreaAt(
+                helper, GameType.SURVIVAL, -4, 12, -4, 8,
+                isolatedCapital(helper, 151));
+        ServerPlayer owner = area.player();
+        BlockPos hazardPosition = area.at(2, 1, 2);
+        BlockPos campfirePosition = hazardPosition.below();
+        helper.getLevel().setBlockAndUpdate(
+                campfirePosition,
+                Blocks.CAMPFIRE.defaultBlockState().setValue(BlockStateProperties.LIT, false));
+
+        GalacticRecruitEntity escaping = spawnRecruitAt(
+                helper, ModEntityTypes.CLONE_TROOPER.get(), hazardPosition);
+        escaping.initializeFromSpawnEgg();
+        escaping.tame(owner);
+        invokeRecruitCommand(escaping, RecruitmentAction.HOLD_POSITION);
+        if (escaping.isInRecruitHazard()) {
+            helper.fail("Unlit campfire incorrectly activated recruit hazard avoidance");
+            return;
+        }
+
+        helper.getLevel().setBlockAndUpdate(
+                campfirePosition,
+                Blocks.CAMPFIRE.defaultBlockState().setValue(BlockStateProperties.LIT, true));
+        GalacticRecruitEntity selfCare = spawnRecruitAt(
+                helper, ModEntityTypes.CLONE_TROOPER.get(), area.at(7, 1, 2));
+        selfCare.initializeFromSpawnEgg();
+        selfCare.tame(owner);
+        invokeRecruitCommand(selfCare, RecruitmentAction.CLEAR_TARGET);
+        setRecruitField(selfCare, "hunger", 0);
+        setWorkerInventory(selfCare, new ItemStack(Items.DRIED_KELP, 3));
+
+        int[] startTick = {selfCare.tickCount};
+        boolean[] escapeTargetObserved = {false};
+        boolean[] complete = {false};
+        helper.onEachTick(() -> {
+            if (complete[0]) {
+                return;
+            }
+            if (escaping.isHazardAvoidanceActive() && escaping.isInRecruitHazard()) {
+                if (!BrainUtil.hasMemory(
+                        escaping,
+                        net.minecraft.world.entity.ai.memory.MemoryModuleType.WALK_TARGET)) {
+                    complete[0] = true;
+                    helper.fail("Ordered sit cleared the active hazard escape walk target");
+                    return;
+                }
+                escapeTargetObserved[0] = true;
+            }
+
+            int elapsedTicks = selfCare.tickCount - startTick[0];
+            int remainingFood = workerInventoryCount(selfCare);
+            if (remainingFood < 2 && elapsedTicks < 40) {
+                complete[0] = true;
+                helper.fail("Recruit self-care consumed more than one food item in a 20-tick window: "
+                        + remainingFood);
+                return;
+            }
+            if (selfCare.tickCount >= 22 && escapeTargetObserved[0]) {
+                if (remainingFood != 2) {
+                    complete[0] = true;
+                    helper.fail("Recruit self-care did not consume exactly one food item at the first cadence: "
+                            + remainingFood);
+                    return;
+                }
+                complete[0] = true;
+                escaping.discard();
+                selfCare.discard();
+                helper.succeed();
+                return;
+            }
+            if (elapsedTicks >= 80) {
+                complete[0] = true;
+                helper.fail("Recruit hazard escape or self-care cadence was never observed: hazard="
+                        + escapeTargetObserved[0] + ", food=" + remainingFood
+                        + ", selfCareTick=" + selfCare.tickCount);
+            }
+        });
+    }
+
     private static void workerSafetyAndUpkeep(GameTestHelper helper) {
         SmartBrainTestArea area = prepareSmartBrainTestAreaAt(
                 helper, GameType.SURVIVAL, -4, 12, -4, 6,
@@ -6778,6 +6864,12 @@ public final class ModGameTests {
                     current.discard();
                     threat.discard();
                     GalacticRecruitEntity loaded = loadRecruit(saved, helper.getLevel());
+                    if (workerInventoryCount(loaded) != 3) {
+                        complete[0] = true;
+                        helper.fail("Threatened worker cargo did not decode from its save: cargo="
+                                + workerInventoryCount(loaded));
+                        return;
+                    }
                     if (!helper.getLevel().addFreshEntity(loaded)) {
                         complete[0] = true;
                         helper.fail("Threatened worker could not be restored after save");
@@ -6797,7 +6889,9 @@ public final class ModGameTests {
 
             if (workerInventoryCount(current) != 3) {
                 complete[0] = true;
-                helper.fail("Worker cargo changed across safety save/reload");
+                helper.fail("Worker cargo changed after safety save/reload: cargo="
+                        + workerInventoryCount(current) + ", status=" + current.getWorkerStatus()
+                        + ", running=" + current.getBrain().getRunningBehaviors());
                 return;
             }
             if (current.getWorkerStatus().phase() == WorkerPhase.ACQUIRE_ORDER

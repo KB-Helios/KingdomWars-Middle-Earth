@@ -807,8 +807,12 @@ public class GalacticRecruitEntity extends TamableAnimal
         super.actuallyHurt(level, damageSource, damageAmount);
         if (this.getHealth() < before) {
             this.morale = clampVital(this.morale - this.factionMoraleLoss(10));
-            if (damageSource.getEntity() instanceof ServerPlayer attacker) {
-                FactionReputationService.recordNaturalNpcDamage(level, this, attacker);
+            if (damageSource.getEntity() instanceof LivingEntity livingAttacker) {
+                this.setLastHurtByMob(livingAttacker);
+                BrainUtil.setMemory(this, MemoryModuleType.HURT_BY_ENTITY, livingAttacker);
+            }
+            if (damageSource.getEntity() instanceof ServerPlayer playerAttacker) {
+                FactionReputationService.recordNaturalNpcDamage(level, this, playerAttacker);
             }
         }
     }
@@ -1557,8 +1561,8 @@ public class GalacticRecruitEntity extends TamableAnimal
                 || state.is(Blocks.LAVA)
                 || state.is(Blocks.CACTUS)
                 || state.is(Blocks.MAGMA_BLOCK)
-                || state.is(Blocks.CAMPFIRE)
-                || state.is(Blocks.SOUL_CAMPFIRE)
+                || ((state.is(Blocks.CAMPFIRE) || state.is(Blocks.SOUL_CAMPFIRE))
+                        && state.getValue(BlockStateProperties.LIT))
                 || state.is(Blocks.SWEET_BERRY_BUSH)
                 || state.is(Blocks.POWDER_SNOW);
     }
@@ -2504,6 +2508,7 @@ public class GalacticRecruitEntity extends TamableAnimal
                 && this.getRecruitDuty() == RecruitDuty.WORKER
                 && this.getRecruitCommand() == RecruitmentAction.WORK_AT_SITE
                 && !this.hazardAvoidanceActive
+                && !this.isWorkerSafetyRetreating()
                 && this.getWorkerProfession().filter(WorkerProfessionCatalog::isEnabled).isPresent()
                 && this.workTarget != null
                 && this.hasAuthoritativeWorkerAssignment()

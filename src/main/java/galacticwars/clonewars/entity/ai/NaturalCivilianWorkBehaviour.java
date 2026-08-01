@@ -61,14 +61,17 @@ public final class NaturalCivilianWorkBehaviour
 
     @Override
     protected void stop(GalacticRecruitEntity civilian) {
-        BrainUtil.clearMemories(civilian,
-                MemoryModuleType.WALK_TARGET,
-                MemoryModuleType.LOOK_TARGET,
-                MemoryModuleType.PATH);
+        if (!civilian.isHazardAvoidanceActive()) {
+            BrainUtil.clearMemories(civilian,
+                    MemoryModuleType.WALK_TARGET,
+                    MemoryModuleType.LOOK_TARGET,
+                    MemoryModuleType.PATH);
+        }
     }
 
     private static boolean canWork(GalacticRecruitEntity civilian) {
         return civilian.isNaturalFactionCivilian()
+                && !civilian.isHazardAvoidanceActive()
                 && civilian.hasHome()
                 && civilian.getWorkerProfession().isPresent()
                 && civilian.level().isBrightOutside();

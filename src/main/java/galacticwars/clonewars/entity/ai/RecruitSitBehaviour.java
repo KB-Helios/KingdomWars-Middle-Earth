@@ -57,6 +57,7 @@ public final class RecruitSitBehaviour extends ExtendedBehaviour<GalacticRecruit
     private static boolean shouldSit(GalacticRecruitEntity recruit) {
         return recruit.isTame()
                 && recruit.isOrderedToSit()
+                && !recruit.isHazardAvoidanceActive()
                 && !recruit.hasAuthoritativeArmyGroup();
     }
 
