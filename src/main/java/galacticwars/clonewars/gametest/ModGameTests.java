@@ -98,12 +98,14 @@ import galacticwars.clonewars.menu.FactionSelectionMenu;
 import galacticwars.clonewars.menu.MerchantTradeMenu;
 import galacticwars.clonewars.menu.MerchantTradeMenuProvider;
 import galacticwars.clonewars.menu.StarterCampSetupMenu;
+import galacticwars.clonewars.menu.WorksiteConfigurationAction;
 import galacticwars.clonewars.menu.WorksiteConfigurationMenu;
 import galacticwars.clonewars.menu.WorksiteConfigurationMenuProvider;
 import galacticwars.clonewars.network.ClassActivatePayload;
 import galacticwars.clonewars.network.ClassHudPayload;
 import galacticwars.clonewars.network.ClassSelectPayload;
 import galacticwars.clonewars.network.FieldCommandRequestPayload;
+import galacticwars.clonewars.network.WorksiteActionPayload;
 import galacticwars.clonewars.progression.LaunchContentCatalog;
 import galacticwars.clonewars.progression.GalacticProgressionCoordinator;
 import galacticwars.clonewars.progression.MissionAttemptSavedData;
@@ -5971,6 +5973,9 @@ public final class ModGameTests {
     private static void workforceSavedDataAuthority(GameTestHelper helper) {
         ServerPlayer owner = makeConnectedMockPlayer(helper, GameType.CREATIVE);
         ServerPlayer builder = makeConnectedMockPlayer(helper, GameType.CREATIVE);
+        ServerPlayer officer = makeConnectedMockPlayer(helper, GameType.CREATIVE);
+        ServerPlayer quartermaster = makeConnectedMockPlayer(helper, GameType.CREATIVE);
+        ServerPlayer member = makeConnectedMockPlayer(helper, GameType.CREATIVE);
         BlockPos hallPos = isolatedCapital(helper, 3);
         CommandCenterBlockEntity hall = placeCommandCenter(helper, hallPos);
         hall.claim(owner);
@@ -5987,6 +5992,13 @@ public final class ModGameTests {
         UUID second = UUID.randomUUID();
         UUID third = UUID.randomUUID();
         if (!data.addMember(owner.getUUID(), builder.getUUID(), KingdomMemberRole.BUILDER, "")
+                || !data.addMember(
+                        owner.getUUID(), officer.getUUID(), KingdomMemberRole.OFFICER, "")
+                || !data.addMember(
+                        owner.getUUID(), quartermaster.getUUID(),
+                        KingdomMemberRole.QUARTERMASTER, "")
+                || !data.addMember(
+                        owner.getUUID(), member.getUUID(), KingdomMemberRole.MEMBER, "")
                 || !data.registerRecruit(owner.getUUID(), first)
                 || !data.registerRecruit(owner.getUUID(), second)
                 || !data.registerRecruit(owner.getUUID(), third)
@@ -6173,11 +6185,131 @@ public final class ModGameTests {
                 .prepare(owner, assignedRecruit)
                 .orElseThrow(() -> new IllegalStateException(
                         "Assigned worker did not produce a menu provider"));
+        for (ServerPlayer actor : List.of(owner, officer, quartermaster, member)) {
+            actor.setPos(
+                    assignedRecruit.getX(),
+                    assignedRecruit.getY(),
+                    assignedRecruit.getZ());
+        }
         WorksiteConfigurationMenu preparedMenu = (WorksiteConfigurationMenu) provider.createMenu(
                 41, owner.getInventory(), owner);
         if (!preparedMenu.snapshot().worksiteId().equals(configuredWorksite.id())
                 || !preparedMenu.snapshot().recruitId().equals(assignedRecruit.getUUID())) {
             helper.fail("Prepared worksite menu did not retain its authoritative snapshot");
+        }
+
+        WorksiteConfigurationMenu officerMenu = (WorksiteConfigurationMenu)
+                WorksiteConfigurationMenuProvider.prepare(officer, assignedRecruit)
+                        .orElseThrow(() -> new IllegalStateException(
+                                "Officer did not receive a worksite snapshot"))
+                        .createMenu(42, officer.getInventory(), officer);
+        long concurrentRevision = preparedMenu.snapshot().configurationRevision();
+        boolean overlayBeforeConcurrentEdit = preparedMenu.snapshot().overlayVisible();
+        UUID replayId = UUID.randomUUID();
+        WorksiteActionPayload firstEdit = new WorksiteActionPayload(
+                replayId,
+                preparedMenu.containerId,
+                WorksiteConfigurationAction.TOGGLE_OVERLAY.id(),
+                concurrentRevision,
+                -1);
+        boolean firstEditAccepted = preparedMenu.handleReplayAction(owner, firstEdit);
+        WorksiteRecord afterFirstEdit = data.assignedWorksite(
+                owner.getUUID(), first).orElseThrow();
+        long afterFirstEditRevision = afterFirstEdit.configuration().revision();
+        boolean replayRejected = !preparedMenu.handleReplayAction(owner, firstEdit);
+        WorksiteRecord afterReplay = data.assignedWorksite(
+                owner.getUUID(), first).orElseThrow();
+        WorksiteActionPayload staleOfficerEdit = new WorksiteActionPayload(
+                UUID.randomUUID(),
+                officerMenu.containerId,
+                WorksiteConfigurationAction.TOGGLE_KINGDOM_ACCESS.id(),
+                concurrentRevision,
+                -1);
+        boolean staleOfficerRejected = !officerMenu.handleReplayAction(
+                officer, staleOfficerEdit);
+        WorksiteRecord afterStaleEdit = data.assignedWorksite(
+                owner.getUUID(), first).orElseThrow();
+        if (!firstEditAccepted
+                || afterFirstEdit.configuration().overlayVisible()
+                        == overlayBeforeConcurrentEdit
+                || !replayRejected
+                || afterReplay.configuration().revision() != afterFirstEditRevision
+                || !"replayed_request".equals(preparedMenu.snapshot().feedbackCode())
+                || !staleOfficerRejected
+                || afterStaleEdit.configuration().revision() != afterFirstEditRevision
+                || !"stale_revision".equals(officerMenu.snapshot().feedbackCode())) {
+            helper.fail("Concurrent worksite menus did not enforce revision and replay authority: "
+                    + "first=" + firstEditAccepted
+                    + ", replay=" + replayRejected
+                    + ", stale=" + staleOfficerRejected
+                    + ", ownerFeedback=" + preparedMenu.snapshot().feedbackCode()
+                    + ", officerFeedback=" + officerMenu.snapshot().feedbackCode()
+                    + ", before=" + concurrentRevision
+                    + ", after=" + afterStaleEdit.configuration().revision());
+            return;
+        }
+
+        WorksiteConfigurationMenu memberMenu = (WorksiteConfigurationMenu)
+                WorksiteConfigurationMenuProvider.prepare(member, assignedRecruit)
+                        .orElseThrow(() -> new IllegalStateException(
+                                "Member did not receive a read snapshot"))
+                        .createMenu(43, member.getInventory(), member);
+        long beforeMemberEdit = afterStaleEdit.configuration().revision();
+        boolean memberEditRejected = !memberMenu.handleReplayAction(
+                member,
+                new WorksiteActionPayload(
+                        UUID.randomUUID(),
+                        memberMenu.containerId,
+                        WorksiteConfigurationAction.HEIGHT_INCREASE.id(),
+                        beforeMemberEdit,
+                        -1));
+        WorksiteRecord afterMemberEdit = data.assignedWorksite(
+                owner.getUUID(), first).orElseThrow();
+        if (!memberEditRejected
+                || afterMemberEdit.configuration().revision() != beforeMemberEdit
+                || !"permission_denied".equals(memberMenu.snapshot().feedbackCode())) {
+            helper.fail("Ordinary member changed a worksite through the server menu: rejected="
+                    + memberEditRejected + ", feedback=" + memberMenu.snapshot().feedbackCode());
+            return;
+        }
+
+        WorksiteUpdateResult officerRoute = data.configureWorksiteRoute(
+                officer.getUUID(),
+                afterMemberEdit.id(),
+                afterMemberEdit.configuration().revision(),
+                route,
+                CourierRouteMode.LOOP);
+        WorksiteRecord afterOfficerRoute = data.assignedWorksite(
+                owner.getUUID(), first).orElseThrow();
+        WorksiteUpdateResult quartermasterRoute = data.configureWorksiteRoute(
+                quartermaster.getUUID(),
+                afterOfficerRoute.id(),
+                afterOfficerRoute.configuration().revision(),
+                route,
+                CourierRouteMode.PING_PONG);
+        WorksiteRecord afterQuartermasterRoute = data.assignedWorksite(
+                owner.getUUID(), first).orElseThrow();
+        WorksiteUpdateResult memberRoute = data.configureWorksiteRoute(
+                member.getUUID(),
+                afterQuartermasterRoute.id(),
+                afterQuartermasterRoute.configuration().revision(),
+                route,
+                CourierRouteMode.LOOP);
+        WorksiteRecord afterDeniedRoute = data.assignedWorksite(
+                owner.getUUID(), first).orElseThrow();
+        if (!officerRoute.accepted()
+                || !quartermasterRoute.accepted()
+                || memberRoute.accepted()
+                || !"permission_denied".equals(memberRoute.reasonCode())
+                || afterDeniedRoute.configuration().revision()
+                        != afterQuartermasterRoute.configuration().revision()
+                || afterDeniedRoute.configuration().courierRouteMode()
+                        != CourierRouteMode.PING_PONG) {
+            helper.fail("Worksite role matrix did not preserve logistics authority: officer="
+                    + officerRoute.reasonCode() + ", quartermaster="
+                    + quartermasterRoute.reasonCode() + ", member="
+                    + memberRoute.reasonCode());
+            return;
         }
         WorkOrder queued = new WorkOrder(
                 UUID.randomUUID(), WorkOrderType.FARM, java.util.Optional.empty(), WorkOrderState.QUEUED,

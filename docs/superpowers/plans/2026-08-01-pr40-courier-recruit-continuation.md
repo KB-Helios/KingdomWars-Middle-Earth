@@ -37,11 +37,11 @@
 - Modify only if required: `src/main/java/galacticwars/clonewars/menu/WorksiteConfigurationMenu.java`
 - Modify only if required: `src/main/java/galacticwars/clonewars/kingdom/KingdomSavedData.java`
 
-- [ ] Extend the authority GameTest with owner, officer, quartermaster, and member actors.
-- [ ] Open two immutable snapshots at the same configuration revision. Accept the first authorized edit, reject the second as stale, and leave its requested state unapplied.
-- [ ] Reject the same replay ID twice without advancing configuration or settlement revisions.
-- [ ] Prove officer and quartermaster logistics authority and member denial through the server menu/data boundary.
-- [ ] Run the GameTest twice, then commit `Prove concurrent worksite authority`.
+- [x] Extend the authority GameTest with owner, officer, quartermaster, and member actors.
+- [x] Open two immutable snapshots at the same configuration revision. Accept the first authorized edit, reject the second as stale, and leave its requested state unapplied.
+- [x] Reject the same replay ID twice without advancing configuration or settlement revisions.
+- [x] Prove officer and quartermaster logistics authority and member denial through the server menu/data boundary.
+- [x] Run the GameTest twice, then commit `Prove concurrent worksite authority`. Both corrected NeoForge runs passed all 77 required tests; the first two RED runs identified fixture proximity and a maximum-dimension no-op before the guaranteed overlay mutation exercised concurrency.
 
 ## Task 3: Follow, hold, patrol, and work resumption through doors
 
