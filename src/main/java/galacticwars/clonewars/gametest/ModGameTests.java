@@ -316,6 +316,9 @@ public final class ModGameTests {
         isolatedEnvironments.put(id("competing_courier_leases"), event.registerEnvironment(
                         id("competing_courier_leases_environment"),
                         new TestEnvironmentDefinition.AllOf(List.of())));
+        isolatedEnvironments.put(id("courier_live_lease_reload"), event.registerEnvironment(
+                        id("courier_live_lease_reload_environment"),
+                        new TestEnvironmentDefinition.AllOf(List.of())));
         isolatedEnvironments.put(id("commander_center_replay_runtime"), event.registerEnvironment(
                         id("commander_center_replay_runtime_environment"),
                         new TestEnvironmentDefinition.AllOf(List.of())));
@@ -351,6 +354,7 @@ public final class ModGameTests {
                 id("recruit_door_command_resumption"),
                 id("specialist_worker_loops"),
                 id("competing_courier_leases"),
+                id("courier_live_lease_reload"),
                 id("local_recruit_protect_owner"),
                 id("command_marker_runtime"));
         for (Identifier testId : TESTS.keySet()) {
@@ -388,6 +392,8 @@ public final class ModGameTests {
                                     : testId.equals(id("specialist_worker_loops"))
                                             ? 1_600
                                     : testId.equals(id("competing_courier_leases"))
+                                            ? 700
+                                    : testId.equals(id("courier_live_lease_reload"))
                                             ? 700
                                     : Set.of(
                                             id("local_recruit_protect_owner"),
@@ -488,6 +494,7 @@ public final class ModGameTests {
         tests.put(id("bounded_worker_scans"), ModGameTests::boundedWorkerScans);
         tests.put(id("hybrid_courier_dispatch"), ModGameTests::hybridCourierDispatch);
         tests.put(id("competing_courier_leases"), ModGameTests::competingCourierLeases);
+        tests.put(id("courier_live_lease_reload"), ModGameTests::courierLiveLeaseReload);
         tests.put(id("animal_farmer_species_pairing"), ModGameTests::animalFarmerSpeciesPairing);
         tests.put(id("workforce_saved_data_authority"), ModGameTests::workforceSavedDataAuthority);
         tests.put(id("recruit_spawn_eggs"), ModGameTests::recruitSpawnEggs);
@@ -8550,6 +8557,222 @@ public final class ModGameTests {
                         + ", first=" + firstCourier.getWorkerStatus()
                         + ", second=" + secondCourier.getWorkerStatus()
                         + ", requester=" + requesterCargo
+                        + ", demand=" + currentDemand
+                        + ", reservations=" + ledger.reservations());
+            }
+        });
+    }
+
+    /**
+     * Proves that an exact automatic delivery retries without partial mutation and that its
+     * physical cargo plus durable lease survive a real entity save/unload/load boundary.
+     */
+    private static void courierLiveLeaseReload(GameTestHelper helper) {
+        SmartBrainTestArea area = prepareSmartBrainTestAreaAt(
+                helper,
+                GameType.CREATIVE,
+                -2,
+                14,
+                -2,
+                8,
+                isolatedCapital(helper, 216));
+        ServerLevel level = helper.getLevel();
+        ServerPlayer owner = area.player();
+        BlockPos hallPos = area.at(1, 1, 3);
+        CommandCenterBlockEntity hall = placeCommandCenter(helper, hallPos);
+        hall.claim(owner);
+        hall.setFaction("galacticwars:republic");
+        KingdomSavedData data = KingdomSavedData.get(level);
+        KingdomRecord kingdom = data.activateHall(
+                owner.getUUID(),
+                hall.factionId(),
+                level.dimension().identifier().toString(),
+                hallPos).orElse(null);
+        if (kingdom == null) {
+            helper.fail("Live-lease reload fixture could not activate its kingdom");
+            return;
+        }
+        FactionAlignmentSavedData.get(level).setScore(
+                owner.getUUID(), FactionId.of("republic"), 100);
+        applyCampaignSetupEvent(
+                ProgressionSavedData.get(level),
+                owner,
+                ProgressionEventType.FACTION_PLEDGED,
+                "galacticwars:republic");
+
+        GalacticRecruitEntity courier = spawnRecruitAt(
+                helper, ModEntityTypes.CLONE_TROOPER.get(), area.at(3, 1, 3));
+        GalacticRecruitEntity requester = spawnRecruitAt(
+                helper, ModEntityTypes.CLONE_TROOPER.get(), area.at(11, 1, 3));
+        requester.initializeFromSpawnEgg();
+        requester.tame(owner);
+        requester.setNoAi(true);
+        if (!data.registerRecruit(
+                owner.getUUID(), requester.getUUID(), NpcServiceBranch.CIVILIAN)) {
+            helper.fail("Live-lease reload requester could not join the settlement");
+            return;
+        }
+        courier.initializeFromSpawnEgg();
+        owner.setPos(courier.getX(), courier.getY(), courier.getZ());
+        if (!courier.handleMenuButton(owner, RecruitCommandMenu.BUTTON_HIRE)
+                || !courier.handleMenuButton(owner, RecruitCommandMenu.BUTTON_ASSIGN_COURIER)) {
+            helper.fail("Live-lease reload courier could not be hired and assigned");
+            return;
+        }
+
+        Container requesterCargo = requester.createCargoContainer();
+        for (int slot = 0; slot < requesterCargo.getContainerSize(); slot++) {
+            requesterCargo.setItem(slot, new ItemStack(Items.COBBLESTONE, 64));
+        }
+        putContainerItem(hall, new ItemStack(ModItems.ENERGY_CELL.get(), 4));
+        SupplyDemand demand = new SupplyDemand(
+                UUID.randomUUID(),
+                SupplyCategory.AMMUNITION,
+                "galacticwars:energy_cell",
+                4,
+                0,
+                100,
+                "recruit/" + requester.getUUID() + "/live_lease_reload");
+        UUID settlementId = kingdom.settlement().id();
+        if (!data.requestSupply(owner.getUUID(), settlementId, demand)) {
+            helper.fail("Live-lease reload demand was rejected");
+            return;
+        }
+
+        UUID courierId = courier.getUUID();
+        GalacticRecruitEntity[] currentCourier = {courier};
+        CompoundTag[] persistedCourier = {null};
+        UUID[] reservationId = {null};
+        int[] phase = {0};
+        long startedAt = helper.getTick();
+        boolean[] complete = {false};
+        helper.onEachTick(() -> {
+            if (complete[0]) {
+                return;
+            }
+            SettlementSupplyLedger ledger = data.supplyLedger(settlementId).orElseThrow();
+            SupplyDemand currentDemand = ledger.demands().stream()
+                    .filter(candidate -> candidate.id().equals(demand.id()))
+                    .findFirst().orElseThrow();
+            List<SupplyReservation> activeReservations = ledger.reservations().stream()
+                    .filter(reservation -> reservation.workerId().equals(courierId))
+                    .filter(reservation -> reservation.active(level.getGameTime()))
+                    .toList();
+            if (activeReservations.size() > 1) {
+                complete[0] = true;
+                helper.fail("Reloading courier created duplicate active leases: "
+                        + activeReservations);
+                return;
+            }
+
+            GalacticRecruitEntity activeCourier = currentCourier[0];
+            int sourceCells = countContainerItem(hall, ModItems.ENERGY_CELL.get());
+            int courierCells = countContainerItem(
+                    activeCourier.createCargoContainer(), ModItems.ENERGY_CELL.get());
+            int requesterCells = countContainerItem(
+                    requesterCargo, ModItems.ENERGY_CELL.get());
+            if (sourceCells + courierCells + requesterCells != 4) {
+                complete[0] = true;
+                helper.fail("Live-lease reload violated physical conservation: source="
+                        + sourceCells + ", courier=" + courierCells
+                        + ", requester=" + requesterCells + ", phase=" + phase[0]);
+                return;
+            }
+
+            switch (phase[0]) {
+                case 0 -> {
+                    if (requesterCells != 0 || currentDemand.outstandingQuantity() != 4) {
+                        complete[0] = true;
+                        helper.fail("Full recipient was partially mutated before exact retry: requester="
+                                + requesterCells + ", demand=" + currentDemand);
+                        return;
+                    }
+                    if (courierCells == 4
+                            && activeCourier.getWorkerStatus().reasonCode()
+                                    .equals("recipient_inventory_full")) {
+                        if (sourceCells != 0 || activeReservations.size() != 1) {
+                            complete[0] = true;
+                            helper.fail("Exact retry did not retain one loaded lease: source="
+                                    + sourceCells + ", leases=" + activeReservations);
+                            return;
+                        }
+                        reservationId[0] = activeReservations.getFirst().id();
+                        persistedCourier[0] = saveRecruit(activeCourier, level);
+                        activeCourier.remove(Entity.RemovalReason.UNLOADED_TO_CHUNK);
+                        if (!activeCourier.isRemoved()
+                                || data.supplyLedger(settlementId).orElseThrow()
+                                        .reservation(reservationId[0])
+                                        .filter(candidate -> candidate.active(level.getGameTime()))
+                                        .isEmpty()) {
+                            complete[0] = true;
+                            helper.fail("Chunk-unload removal released the live courier lease");
+                            return;
+                        }
+                        phase[0] = 1;
+                    }
+                }
+                case 1 -> {
+                    GalacticRecruitEntity reloaded = loadRecruit(persistedCourier[0], level);
+                    if (!reloaded.getUUID().equals(courierId)
+                            || !level.addFreshEntity(reloaded)) {
+                        complete[0] = true;
+                        helper.fail("Serialized live-lease courier could not rejoin the server");
+                        return;
+                    }
+                    currentCourier[0] = reloaded;
+                    int reloadedCells = countContainerItem(
+                            reloaded.createCargoContainer(), ModItems.ENERGY_CELL.get());
+                    SettlementSupplyLedger reloadedLedger = data.supplyLedger(
+                            settlementId).orElseThrow();
+                    long matchingActiveLeases = reloadedLedger.reservations().stream()
+                            .filter(candidate -> candidate.id().equals(reservationId[0]))
+                            .filter(candidate -> candidate.workerId().equals(courierId))
+                            .filter(candidate -> candidate.active(level.getGameTime()))
+                            .count();
+                    if (reloadedCells != 4 || matchingActiveLeases != 1L) {
+                        complete[0] = true;
+                        helper.fail("Reload lost physical cargo or original lease: cargo="
+                                + reloadedCells + ", leases=" + reloadedLedger.reservations());
+                        return;
+                    }
+                    requesterCargo.setItem(8, ItemStack.EMPTY);
+                    phase[0] = 2;
+                }
+                case 2 -> {
+                    SupplyReservation persistedReservation = ledger.reservation(
+                            reservationId[0]).orElse(null);
+                    if (requesterCells == 4) {
+                        if (sourceCells != 0
+                                || courierCells != 0
+                                || currentDemand.outstandingQuantity() != 0
+                                || persistedReservation == null
+                                || persistedReservation.state()
+                                        != SupplyReservation.State.COMPLETED
+                                || activeReservations.size() != 0) {
+                            complete[0] = true;
+                            helper.fail("Reloaded courier did not complete the original exact lease: source="
+                                    + sourceCells + ", courier=" + courierCells
+                                    + ", requester=" + requesterCells
+                                    + ", demand=" + currentDemand
+                                    + ", reservation=" + persistedReservation);
+                            return;
+                        }
+                        complete[0] = true;
+                        currentCourier[0].discard();
+                        requester.discard();
+                        helper.succeed();
+                    }
+                }
+                default -> throw new IllegalStateException(
+                        "Unknown live-lease reload phase " + phase[0]);
+            }
+
+            if (!complete[0] && helper.getTick() - startedAt >= 650) {
+                complete[0] = true;
+                helper.fail("Live-lease reload delivery timed out: phase=" + phase[0]
+                        + ", courier=" + currentCourier[0].getWorkerStatus()
+                        + ", source=" + sourceCells + ", courierCargo=" + courierCells
+                        + ", requester=" + requesterCells
                         + ", demand=" + currentDemand
                         + ", reservations=" + ledger.reservations());
             }

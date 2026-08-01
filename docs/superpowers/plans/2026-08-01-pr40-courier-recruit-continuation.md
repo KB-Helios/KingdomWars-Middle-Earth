@@ -104,6 +104,21 @@
 - [x] Commit the verified documentation and evidence in the final local documentation commit.
 - [ ] When GitHub authentication is restored, first push repaired PR #40 and synchronize all three SHAs/comments/body. Then publish this branch as a stacked draft against `codex/workers-recruits-runtime-port` while PR #40 remains open. Blocked on 2026-08-01 because the active `KB01111` GitHub CLI token is invalid.
 
+## Task 7: Exact courier retry across live-lease reload
+
+**Files:**
+
+- Modify: `src/main/java/galacticwars/clonewars/gametest/ModGameTests.java`
+- Modify only if the black-box test exposes a gap: automatic courier runtime and persistence code in `GalacticRecruitEntity`
+- Modify: `README.md`
+- Modify: `docs/authorized-source-intake.md`
+
+- [x] Add an ordinary-path automatic courier GameTest with a full requester cargo and exact physical demand; do not set a private phase, invoke the worker controller, or move the courier after assignment.
+- [x] Observe the courier withdraw the complete reservation, then prove a full recipient causes an atomic retry: source stock is empty, courier cargo retains the complete batch, requester receives none, demand remains unchanged, and the lease remains active.
+- [x] Serialize and remove the courier with the chunk-unload removal reason, load the same entity back into the server, and prove its cargo and the single original reservation survive without duplication or release.
+- [x] Free exactly one requester slot and prove the reloaded courier completes the same lease with exact physical conservation and no stale cargo. No production repair was required; the existing Minecraft 26.2 runtime already preserved the cargo and lease invariants.
+- [x] Run the focused GameTest twice, then run the full harness, two full GameTest passes, `buildAll`, and `git diff --check` before committing. Both focused runs passed 1/1, `runHarnesses` passed 176 actionable tasks, both fresh full runs passed all 80 required GameTests, and `buildAll` passed 186 actionable tasks for Fabric and NeoForge.
+
 ## Completion gate
 
-This slice is complete when courier contention and expiry are conservation-proven, concurrent role/revision/replay cases are rejected server-side, follow/hold/patrol/work commands survive real door traversal, self-care retains ordinary commands while yielding to danger and combat, tamed recruit bolts consume physical Energy Cells with no empty-gun melee fallback, collision-level friendly-fire proof passes, provenance is current, and all four verification gates are green.
+This slice is complete when courier contention and expiry are conservation-proven, an exact automatic transfer survives a live-lease reload, concurrent role/revision/replay cases are rejected server-side, follow/hold/patrol/work commands survive real door traversal, self-care retains ordinary commands while yielding to danger and combat, tamed recruit bolts consume physical Energy Cells with no empty-gun melee fallback, collision-level friendly-fire proof passes, provenance is current, and all four verification gates are green.
