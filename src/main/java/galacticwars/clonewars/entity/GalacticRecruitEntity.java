@@ -2029,12 +2029,17 @@ public class GalacticRecruitEntity extends TamableAnimal
                 yield true;
             }
             case OPEN_WORKSITE_CONFIGURATION -> {
-                if (!this.canPlayerManageWorksites(player)
-                        || this.getWorkerAssignment().isEmpty()) {
+                if (!this.canPlayerManageWorksites(player)) {
+                    yield false;
+                }
+                var provider = WorksiteConfigurationMenuProvider.prepare(player, this);
+                if (provider.isEmpty()) {
+                    sendFeedback(player, Component.translatable(
+                            "reason.galacticwars.operations.worksite_missing"));
                     yield false;
                 }
                 MenuRegistry.openExtendedMenu(
-                        player, new WorksiteConfigurationMenuProvider(this));
+                        player, provider.orElseThrow());
                 yield true;
             }
             case FOLLOW -> {

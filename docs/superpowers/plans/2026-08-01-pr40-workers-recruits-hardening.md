@@ -213,7 +213,7 @@ Add `!recruit.isHazardAvoidanceActive()` to sit, natural work, shelter, faction 
 
 Add `RecruitAiCadence.shouldCheckSelfCare(int tickCount)` and require it in `RecruitSelfCareBehaviour.checkExtraStartConditions` before `shouldUseRecruitSelfCare()`.
 
-- [ ] **Step 5: Run GameTests and verify GREEN twice for the changed tests**
+- [x] **Step 5: Run GameTests and verify GREEN twice for the changed tests**
 
 Run the full GameTest command twice. Expected on both fresh worlds: every required test passes, including `worker_safety_and_upkeep` and `recruit_hazard_and_self_care`.
 
@@ -247,11 +247,11 @@ git commit -m "Make recruit safety arbitration deterministic"
 - Produces: provider factories that return `Optional<WorksiteConfigurationMenuProvider>` only after snapshot capture succeeds.
 - Produces: `CommandCenterActionAvailability.canConfigureWorksite(Optional<WorkerSummary>): boolean`.
 
-- [ ] **Step 1: Write failing pure harnesses**
+- [x] **Step 1: Write failing pure harnesses**
 
 `WorkAreaConfigurationTest` must assert an identical route and mode return the same object and retain both revisions. `CommandCenterActionAvailabilityTest` must assert absent worker and worker-with-empty-worksite are disabled while an assigned summary is enabled.
 
-- [ ] **Step 2: Add failing runtime authority assertions**
+- [x] **Step 2: Add failing runtime authority assertions**
 
 Extend `workforce_saved_data_authority` or add `worksite_configuration_authority` to prove:
 
@@ -261,19 +261,19 @@ Extend `workforce_saved_data_authority` or add `worksite_configuration_authority
 - provider preparation for a recruit without durable worksite returns empty and does not construct a menu;
 - a valid assigned recruit produces a snapshot and opens normally.
 
-- [ ] **Step 3: Run harnesses and GameTests for RED**
+- [x] **Step 3: Run harnesses and GameTests for RED**
 
 Run the two focused harness tasks, then `runGameTestServer`. Expected failures must name the missing identity short-circuit, UI availability, permission, single-waypoint, or preflight behavior.
 
-- [ ] **Step 4: Implement route validation and no-op identity**
+- [x] **Step 4: Implement route validation and no-op identity**
 
 In `WorkAreaConfiguration.withCourierRoute`, normalize the incoming list, then return `this` when both route and mode equal current values. In `SettlementRecord.configureWorksiteRoute`, return `this` when the configuration identity is unchanged. In `KingdomSavedData.configureWorksiteRoute`, require both permissions and reject `route.size() == 1` as `invalid_route`.
 
-- [ ] **Step 5: Implement snapshot preflight**
+- [x] **Step 5: Implement snapshot preflight**
 
 Change snapshot capture to an `Optional` result with missing kingdom, settlement, profession, or worksite mapped to empty. Make provider creation accept the captured immutable snapshot rather than a recruit whose menu constructor can throw. Both direct recruit and Command Center opening paths must call the factory, report `worksite_missing`, and skip `MenuRegistry.openExtendedMenu` when empty. Refresh must close the menu if a subsequent capture becomes empty.
 
-- [ ] **Step 6: Implement truthful client availability**
+- [x] **Step 6: Implement truthful client availability**
 
 Have `CommandCenterActionAvailability.canConfigureWorksite` return:
 
@@ -283,7 +283,7 @@ return worker.flatMap(WorkerSummary::worksite).isPresent();
 
 Use the selected `WorkerSummary` rather than only its UUID when constructing the Configure Worksite action.
 
-- [ ] **Step 7: Verify GREEN and commit**
+- [x] **Step 7: Verify GREEN and commit**
 
 Run both focused harnesses and GameTests. Then commit:
 

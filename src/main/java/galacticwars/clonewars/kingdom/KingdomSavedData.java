@@ -1273,7 +1273,8 @@ public final class KingdomSavedData extends SavedData {
         Objects.requireNonNull(mode, "mode");
         KingdomRecord kingdom = kingdomForPlayer(actorId).orElse(null);
         if (kingdom == null || inactiveHallOwners.contains(kingdom.ownerId())
-                || !kingdom.allows(actorId, KingdomPermission.MANAGE_WORKSITES)) {
+                || !kingdom.allows(actorId, KingdomPermission.MANAGE_WORKSITES)
+                || !kingdom.allows(actorId, KingdomPermission.MANAGE_LOGISTICS)) {
             return WorksiteUpdateResult.rejected("permission_denied");
         }
         SettlementRecord settlement = kingdom.settlements().stream()
@@ -1295,7 +1296,8 @@ public final class KingdomSavedData extends SavedData {
         if (current.configuration().revision() != expectedConfigurationRevision) {
             return WorksiteUpdateResult.rejected("stale_revision");
         }
-        if (route.size() > galacticwars.clonewars.workforce.CourierRoutePlan.MAX_WAYPOINTS
+        if (route.size() == 1
+                || route.size() > galacticwars.clonewars.workforce.CourierRoutePlan.MAX_WAYPOINTS
                 || route.stream().anyMatch(waypoint ->
                         !current.dimensionId().equals(waypoint.dimensionId()))
                 || route.stream().anyMatch(waypoint -> kingdom.claims().stream().noneMatch(claim ->

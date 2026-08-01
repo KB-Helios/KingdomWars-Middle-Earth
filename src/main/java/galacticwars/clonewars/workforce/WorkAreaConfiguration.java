@@ -116,8 +116,30 @@ public record WorkAreaConfiguration(
     }
 
     public WorkAreaConfiguration withCourierRoute(List<CourierWaypoint> route, CourierRouteMode mode) {
-        return new WorkAreaConfiguration(bounds, kingdomAccess, priority, overlayVisible, itemFilters,
-                route, mode, Math.addExact(courierRouteRevision, 1L), courierDispatchMode,
+        WorkAreaConfiguration candidate = new WorkAreaConfiguration(
+                bounds,
+                kingdomAccess,
+                priority,
+                overlayVisible,
+                itemFilters,
+                route,
+                mode,
+                courierRouteRevision,
+                courierDispatchMode,
+                revision);
+        if (this.equals(candidate)) {
+            return this;
+        }
+        return new WorkAreaConfiguration(
+                candidate.bounds(),
+                candidate.kingdomAccess(),
+                candidate.priority(),
+                candidate.overlayVisible(),
+                candidate.itemFilters(),
+                candidate.courierRoute(),
+                candidate.courierRouteMode(),
+                Math.addExact(courierRouteRevision, 1L),
+                candidate.courierDispatchMode(),
                 Math.addExact(revision, 1L));
     }
 

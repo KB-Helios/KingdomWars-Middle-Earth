@@ -392,13 +392,18 @@ public final class CommandCenterOperationsMenu extends AbstractContainerMenu {
                                     instanceof galacticwars.clonewars.entity.GalacticRecruitEntity recruit
                                             ? recruit
                                             : null;
-            if (worker == null || worker.getWorkerAssignment().isEmpty()) {
+            if (worker == null) {
                 return report(serverPlayer, false, selectionReason(
                         !workers.isEmpty(), primaryTargetId.isEmpty()));
             }
+            Optional<WorksiteConfigurationMenuProvider> provider =
+                    WorksiteConfigurationMenuProvider.prepare(serverPlayer, worker, hallPos);
+            if (provider.isEmpty()) {
+                return report(serverPlayer, false, "worksite_missing");
+            }
             MenuRegistry.openExtendedMenu(
                     serverPlayer,
-                    new WorksiteConfigurationMenuProvider(worker, hallPos));
+                    provider.orElseThrow());
             return true;
         } else if (buttonId == RESUME_WORKER
                 || buttonId == RECALL_WORKER

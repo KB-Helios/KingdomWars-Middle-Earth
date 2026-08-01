@@ -70,19 +70,6 @@ public final class WorksiteConfigurationMenu extends AbstractContainerMenu {
     WorksiteConfigurationMenu(
             int id,
             Inventory inventory,
-            GalacticRecruitEntity recruit,
-            Optional<BlockPos> commandCenterAnchor
-    ) {
-        this(
-                id,
-                inventory,
-                capture((ServerPlayer) inventory.player, recruit, "ready"),
-                commandCenterAnchor);
-    }
-
-    private WorksiteConfigurationMenu(
-            int id,
-            Inventory inventory,
             WorksiteConfigurationSnapshot snapshot,
             Optional<BlockPos> commandCenterAnchor
     ) {
@@ -370,35 +357,40 @@ public final class WorksiteConfigurationMenu extends AbstractContainerMenu {
     private void refresh(ServerPlayer player, String feedback) {
         Entity entity = ((ServerLevel) player.level()).getEntity(snapshot.recruitId());
         if (entity instanceof GalacticRecruitEntity recruit) {
-            try {
-                snapshot = capture(player, recruit, feedback);
+            capture(player, recruit, feedback).ifPresentOrElse(nextSnapshot -> {
+                snapshot = nextSnapshot;
                 GalacticNetwork.CHANNEL.sendToPlayer(
                         () -> player,
                         new WorksiteStatePayload(containerId, snapshot));
-            } catch (IllegalStateException missing) {
-                // The assignment disappeared between validation and refresh; close safely.
-                player.closeContainer();
-            }
+            }, player::closeContainer);
         } else {
             player.closeContainer();
         }
     }
 
-    private static WorksiteConfigurationSnapshot capture(
+    static Optional<WorksiteConfigurationSnapshot> capture(
             ServerPlayer player,
             GalacticRecruitEntity recruit,
             String feedback
     ) {
         ServerLevel level = (ServerLevel) player.level();
         KingdomSavedData data = KingdomSavedData.get(level);
-        KingdomRecord kingdom = data.kingdomForRecruit(recruit.getUUID()).orElseThrow(
-                () -> new IllegalStateException("recruit has no kingdom"));
+        KingdomRecord kingdom = data.kingdomForRecruit(recruit.getUUID()).orElse(null);
+        if (kingdom == null) {
+            return Optional.empty();
+        }
         SettlementRecord settlement = kingdom.settlements().stream()
                 .filter(candidate -> candidate.containsRecruit(recruit.getUUID()))
                 .findFirst()
-                .orElseThrow(() -> new IllegalStateException("recruit has no settlement"));
-        WorksiteRecord worksite = settlement.assignedWorksite(recruit.getUUID()).orElseThrow(
-                () -> new IllegalStateException("recruit has no worksite"));
+                .orElse(null);
+        if (settlement == null) {
+            return Optional.empty();
+        }
+        WorksiteRecord worksite = settlement.assignedWorksite(recruit.getUUID()).orElse(null);
+        var profession = recruit.getWorkerProfession().orElse(null);
+        if (worksite == null || profession == null) {
+            return Optional.empty();
+        }
         WorkAreaConfiguration configuration = worksite.configuration();
         WorkerStatus status = recruit.getWorkerStatus();
         List<WorksiteConfigurationSnapshot.RouteWaypointView> route =
@@ -432,12 +424,12 @@ public final class WorksiteConfigurationMenu extends AbstractContainerMenu {
                             "unloaded",
                             "chunk_unloaded");
                 }).toList();
-        return new WorksiteConfigurationSnapshot(
+        return Optional.of(new WorksiteConfigurationSnapshot(
                 recruit.getId(),
                 recruit.getUUID(),
                 recruit.getDisplayName().getString(),
                 worksite.id(),
-                recruit.getWorkerProfession().orElseThrow().id(),
+                profession.id(),
                 worksite.dimensionId(),
                 worksite.x(),
                 worksite.y(),
@@ -464,7 +456,7 @@ public final class WorksiteConfigurationMenu extends AbstractContainerMenu {
                 status.requiredResource(),
                 status.completedQuantity(),
                 status.totalQuantity(),
-                feedback);
+                feedback));
     }
 
     private static Optional<BlockPos> lookedAtBlock(ServerPlayer player) {

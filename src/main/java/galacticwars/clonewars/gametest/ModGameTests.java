@@ -87,6 +87,7 @@ import galacticwars.clonewars.kingdom.WorkOrder;
 import galacticwars.clonewars.kingdom.WorkOrderState;
 import galacticwars.clonewars.kingdom.WorkOrderType;
 import galacticwars.clonewars.kingdom.WorksiteRecord;
+import galacticwars.clonewars.kingdom.WorksiteUpdateResult;
 import galacticwars.clonewars.item.CommandTargetSelection;
 import galacticwars.clonewars.menu.RecruitCommandMenu;
 import galacticwars.clonewars.menu.CommandCenterOperationsMenu;
@@ -96,6 +97,8 @@ import galacticwars.clonewars.menu.FactionSelectionMenu;
 import galacticwars.clonewars.menu.MerchantTradeMenu;
 import galacticwars.clonewars.menu.MerchantTradeMenuProvider;
 import galacticwars.clonewars.menu.StarterCampSetupMenu;
+import galacticwars.clonewars.menu.WorksiteConfigurationMenu;
+import galacticwars.clonewars.menu.WorksiteConfigurationMenuProvider;
 import galacticwars.clonewars.network.ClassActivatePayload;
 import galacticwars.clonewars.network.ClassHudPayload;
 import galacticwars.clonewars.network.ClassSelectPayload;
@@ -132,6 +135,9 @@ import galacticwars.clonewars.settlement.StarterCampDeploymentService;
 import galacticwars.clonewars.workforce.WorkerPhase;
 import galacticwars.clonewars.workforce.WorkerProfession;
 import galacticwars.clonewars.workforce.CourierDispatchMode;
+import galacticwars.clonewars.workforce.CourierRouteMode;
+import galacticwars.clonewars.workforce.CourierTransferAction;
+import galacticwars.clonewars.workforce.CourierWaypoint;
 import galacticwars.clonewars.workforce.WorkAreaBounds;
 import galacticwars.clonewars.world.PlanetTravelService;
 import galacticwars.clonewars.world.PlanetTravelGameTests;
@@ -5846,15 +5852,22 @@ public final class ModGameTests {
 
     private static void workforceSavedDataAuthority(GameTestHelper helper) {
         ServerPlayer owner = makeConnectedMockPlayer(helper, GameType.CREATIVE);
+        ServerPlayer builder = makeConnectedMockPlayer(helper, GameType.CREATIVE);
         BlockPos hallPos = isolatedCapital(helper, 3);
         KingdomSavedData data = KingdomSavedData.get(helper.getLevel());
         KingdomRecord kingdom = data.activateHall(
                 owner.getUUID(), "galacticwars:republic",
                 helper.getLevel().dimension().identifier().toString(), hallPos).orElseThrow();
-        UUID first = UUID.randomUUID();
+        GalacticRecruitEntity assignedRecruit = helper.spawn(
+                ModEntityTypes.CLONE_TROOPER.get(), new BlockPos(2, 1, 2));
+        assignedRecruit.initializeFromSpawnEgg();
+        assignedRecruit.tame(owner);
+        assignedRecruit.setWorkerProfession(WorkerProfession.FARMER);
+        UUID first = assignedRecruit.getUUID();
         UUID second = UUID.randomUUID();
         UUID third = UUID.randomUUID();
-        if (!data.registerRecruit(owner.getUUID(), first)
+        if (!data.addMember(owner.getUUID(), builder.getUUID(), KingdomMemberRole.BUILDER, "")
+                || !data.registerRecruit(owner.getUUID(), first)
                 || !data.registerRecruit(owner.getUUID(), second)
                 || !data.registerRecruit(owner.getUUID(), third)
                 || !data.reserveWorksite(owner.getUUID(), first, WorkerProfession.FARMER)
@@ -5863,6 +5876,101 @@ public final class ModGameTests {
             helper.fail("Frontier worksite did not enforce its persisted two-worker capacity");
         }
         WorksiteRecord worksite = data.assignedWorksite(owner.getUUID(), first).orElseThrow();
+        UUID worksiteId = worksite.id();
+        List<CourierWaypoint> route = List.of(
+                new CourierWaypoint(
+                        worksite.dimensionId(),
+                        worksite.x(),
+                        worksite.y(),
+                        worksite.z(),
+                        List.of(CourierTransferAction.takeAll())),
+                new CourierWaypoint(
+                        worksite.dimensionId(),
+                        worksite.x() + 1,
+                        worksite.y(),
+                        worksite.z(),
+                        List.of(CourierTransferAction.putAll())));
+        WorksiteUpdateResult builderRoute = data.configureWorksiteRoute(
+                builder.getUUID(),
+                worksiteId,
+                worksite.configuration().revision(),
+                route,
+                CourierRouteMode.LOOP);
+        if (builderRoute.accepted() || !builderRoute.reasonCode().equals("permission_denied")) {
+            helper.fail("Builder changed courier logistics without MANAGE_LOGISTICS");
+        }
+        worksite = data.assignedWorksite(owner.getUUID(), first).orElseThrow();
+        WorksiteUpdateResult oneWaypoint = data.configureWorksiteRoute(
+                owner.getUUID(),
+                worksiteId,
+                worksite.configuration().revision(),
+                List.of(route.getFirst()),
+                CourierRouteMode.LOOP);
+        if (oneWaypoint.accepted() || !oneWaypoint.reasonCode().equals("invalid_route")) {
+            helper.fail("A one-waypoint courier route was accepted");
+        }
+        worksite = data.assignedWorksite(owner.getUUID(), first).orElseThrow();
+        WorksiteUpdateResult configuredRoute = data.configureWorksiteRoute(
+                owner.getUUID(),
+                worksiteId,
+                worksite.configuration().revision(),
+                route,
+                CourierRouteMode.PING_PONG);
+        if (!configuredRoute.accepted()) {
+            helper.fail("A valid claimed courier route was rejected: "
+                    + configuredRoute.reasonCode());
+        }
+        WorksiteRecord configuredWorksite = data.assignedWorksite(
+                owner.getUUID(), first).orElseThrow();
+        SettlementRecord configuredSettlement = data.kingdomForOwner(owner.getUUID()).orElseThrow()
+                .settlements().stream()
+                .filter(candidate -> candidate.worksites().stream()
+                        .anyMatch(candidateWorksite -> candidateWorksite.id().equals(worksiteId)))
+                .findFirst()
+                .orElseThrow();
+        long settlementRevision = configuredSettlement.revision();
+        long configurationRevision = configuredWorksite.configuration().revision();
+        long routeRevision = configuredWorksite.configuration().courierRouteRevision();
+        WorksiteUpdateResult unchangedRoute = data.configureWorksiteRoute(
+                owner.getUUID(),
+                configuredWorksite.id(),
+                configurationRevision,
+                List.copyOf(route),
+                CourierRouteMode.PING_PONG);
+        WorksiteRecord unchangedWorksite = data.assignedWorksite(
+                owner.getUUID(), first).orElseThrow();
+        SettlementRecord unchangedSettlement = data.kingdomForOwner(owner.getUUID()).orElseThrow()
+                .settlements().stream()
+                .filter(candidate -> candidate.worksites().stream()
+                        .anyMatch(candidateWorksite -> candidateWorksite.id().equals(worksiteId)))
+                .findFirst()
+                .orElseThrow();
+        if (unchangedRoute.accepted() || !unchangedRoute.reasonCode().equals("unchanged")
+                || unchangedWorksite.configuration().revision() != configurationRevision
+                || unchangedWorksite.configuration().courierRouteRevision() != routeRevision
+                || unchangedSettlement.revision() != settlementRevision) {
+            helper.fail("An identical courier route advanced durable revisions");
+        }
+
+        GalacticRecruitEntity unassignedRecruit = helper.spawn(
+                ModEntityTypes.CLONE_TROOPER.get(), new BlockPos(4, 1, 2));
+        unassignedRecruit.initializeFromSpawnEgg();
+        unassignedRecruit.tame(owner);
+        unassignedRecruit.setWorkerProfession(WorkerProfession.FARMER);
+        if (!data.registerRecruit(owner.getUUID(), unassignedRecruit.getUUID())
+                || WorksiteConfigurationMenuProvider.prepare(owner, unassignedRecruit).isPresent()) {
+            helper.fail("Menu preparation accepted a worker without a durable worksite");
+        }
+        WorksiteConfigurationMenuProvider provider = WorksiteConfigurationMenuProvider
+                .prepare(owner, assignedRecruit)
+                .orElseThrow(() -> new IllegalStateException(
+                        "Assigned worker did not produce a menu provider"));
+        WorksiteConfigurationMenu preparedMenu = (WorksiteConfigurationMenu) provider.createMenu(
+                41, owner.getInventory(), owner);
+        if (!preparedMenu.snapshot().worksiteId().equals(configuredWorksite.id())
+                || !preparedMenu.snapshot().recruitId().equals(assignedRecruit.getUUID())) {
+            helper.fail("Prepared worksite menu did not retain its authoritative snapshot");
+        }
         WorkOrder queued = new WorkOrder(
                 UUID.randomUUID(), WorkOrderType.FARM, java.util.Optional.empty(), WorkOrderState.QUEUED,
                 java.util.Optional.of(worksite.id()), java.util.Optional.empty(), worksite.dimensionId(),
