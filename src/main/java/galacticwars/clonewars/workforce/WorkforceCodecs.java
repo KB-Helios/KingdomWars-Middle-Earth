@@ -102,6 +102,37 @@ public final class WorkforceCodecs {
                             .forGetter(CourierRouteExecutionState::routeRevision)
             ).apply(instance, CourierRouteExecutionState::new));
 
+    public static final Codec<WorkerTarget> WORKER_TARGET =
+            RecordCodecBuilder.create(instance -> instance.group(
+                    Codec.STRING.fieldOf("dimension").forGetter(WorkerTarget::dimensionId),
+                    Codec.INT.fieldOf("x").forGetter(WorkerTarget::x),
+                    Codec.INT.fieldOf("y").forGetter(WorkerTarget::y),
+                    Codec.INT.fieldOf("z").forGetter(WorkerTarget::z)
+            ).apply(instance, WorkerTarget::new));
+
+    public static final Codec<WorkerExecutionState> WORKER_EXECUTION_STATE =
+            RecordCodecBuilder.create(instance -> instance.group(
+                    UUIDUtil.CODEC.optionalFieldOf("worksite_id")
+                            .forGetter(WorkerExecutionState::worksiteId),
+                    UUIDUtil.CODEC.optionalFieldOf("work_order_id")
+                            .forGetter(WorkerExecutionState::workOrderId),
+                    Codec.STRING.xmap(WorkerPhase::byId, WorkerPhase::id)
+                            .optionalFieldOf("phase", WorkerPhase.ACQUIRE_ORDER)
+                            .forGetter(WorkerExecutionState::phase),
+                    WORKER_TARGET.optionalFieldOf("target")
+                            .forGetter(WorkerExecutionState::target),
+                    Codec.LONG.optionalFieldOf("configuration_revision", 0L)
+                            .forGetter(WorkerExecutionState::configurationRevision),
+                    Codec.intRange(0, Integer.MAX_VALUE).optionalFieldOf("retry_count", 0)
+                            .forGetter(WorkerExecutionState::retryCount),
+                    Codec.LONG.optionalFieldOf("retry_at", 0L)
+                            .forGetter(WorkerExecutionState::retryAtGameTime),
+                    UUIDUtil.CODEC.optionalFieldOf("supply_reservation_id")
+                            .forGetter(WorkerExecutionState::supplyReservationId),
+                    Codec.STRING.optionalFieldOf("reason", "ready")
+                            .forGetter(WorkerExecutionState::reasonCode)
+            ).apply(instance, WorkerExecutionState::new));
+
     private WorkforceCodecs() {
     }
 

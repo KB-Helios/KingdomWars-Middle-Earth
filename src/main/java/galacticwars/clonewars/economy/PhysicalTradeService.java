@@ -101,6 +101,13 @@ public final class PhysicalTradeService {
         if (registeredItem(trade.itemId()) == null) {
             return TradePreview.rejected(trade, "unknown_trade_item", reaction);
         }
+        Item tradeItem = registeredItem(trade.itemId());
+        if (merchant != null
+                && merchant.isMarketAvailable()
+                && (tradeItem == null
+                        || !merchant.hasMerchantStock(tradeItem, trade.itemCount()))) {
+            return TradePreview.rejected(trade, "merchant_out_of_stock", reaction);
+        }
         int creditPrice = adjustedCreditPrice(
                 trade, reaction == null ? 100 : reaction.tradePricePercent());
         if (!player.hasInfiniteMaterials()
@@ -153,6 +160,17 @@ public final class PhysicalTradeService {
         if (resultItem == null) {
             return TradeResult.rejected("unknown_trade_item");
         }
+        GalacticRecruitEntity physicalStockMerchant = merchant != null
+                && merchant.isMarketAvailable()
+                ? merchant
+                : null;
+        ItemStack reservedStock = physicalStockMerchant == null
+                ? new ItemStack(resultItem, preview.itemCount())
+                : physicalStockMerchant.takeMerchantStock(
+                        resultItem, preview.itemCount());
+        if (reservedStock.getCount() != preview.itemCount()) {
+            return TradeResult.rejected("merchant_out_of_stock");
+        }
         ProgressionEvent event = new ProgressionEvent(
                 eventId, player.getUUID(), ProgressionEventType.TRADE_COMPLETED,
                 preview.tradeId(), 1);
@@ -164,6 +182,7 @@ public final class PhysicalTradeService {
             return TradeResult.duplicate();
         }
         if (!CreditTransactionService.withdrawPlayer(player, preview.creditPrice())) {
+            restoreMerchantStock(level, physicalStockMerchant, reservedStock);
             return TradeResult.rejected("insufficient_credits");
         }
 
@@ -172,16 +191,18 @@ public final class PhysicalTradeService {
             completion = progression.commitEvaluated(event, before, evaluated);
         } catch (RuntimeException failure) {
             CreditTransactionService.refundPlayer(player, preview.creditPrice());
+            restoreMerchantStock(level, physicalStockMerchant, reservedStock);
             return TradeResult.rejected("transaction_failed");
         }
         if (!completion.accepted() || !completion.changed()) {
             CreditTransactionService.refundPlayer(player, preview.creditPrice());
+            restoreMerchantStock(level, physicalStockMerchant, reservedStock);
             return completion.accepted()
                     ? TradeResult.duplicate()
                     : TradeResult.rejected(completion.reason());
         }
 
-        ItemStack result = new ItemStack(resultItem, preview.itemCount());
+        ItemStack result = reservedStock;
         player.getInventory().add(result);
         if (!result.isEmpty()) {
             player.spawnAtLocation(level, result);
@@ -207,6 +228,7 @@ public final class PhysicalTradeService {
                     "wary_merchant",
                     "veteran_trade_locked", "regional_control_required",
                     "unknown_trade_item", "insufficient_credits",
+                    "merchant_out_of_stock",
                     "offer_changed", "duplicate_event", "transaction_failed" ->
                     "reason.galacticwars.trade." + reason;
             default -> "reason.galacticwars.trade.unavailable";
@@ -223,6 +245,19 @@ public final class PhysicalTradeService {
         Item resultItem = BuiltInRegistries.ITEM.getValue(resultId);
         return resultItem != null && resultId.equals(BuiltInRegistries.ITEM.getKey(resultItem))
                 ? resultItem : null;
+    }
+
+    private static void restoreMerchantStock(
+            ServerLevel level,
+            GalacticRecruitEntity merchant,
+            ItemStack stock
+    ) {
+        if (merchant == null || stock.isEmpty()) {
+            return;
+        }
+        if (!merchant.restoreMerchantStock(stock)) {
+            merchant.spawnAtLocation(level, stock.copy());
+        }
     }
 
     private static int adjustedCreditPrice(

@@ -6,5 +6,6 @@ public enum SupplyCategory {
     AMMUNITION,
     MEDICAL,
     VEHICLE_FUEL,
-    TRADE_STOCK
+    TRADE_STOCK,
+    WORKER_INPUT
 }

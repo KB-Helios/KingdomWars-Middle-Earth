@@ -195,6 +195,22 @@ public record SettlementSupplyLedger(
         return changed ? copy(demands, updated) : this;
     }
 
+    public SettlementSupplyLedger release(UUID reservationId, UUID workerId) {
+        Objects.requireNonNull(reservationId, "reservationId");
+        Objects.requireNonNull(workerId, "workerId");
+        boolean changed = false;
+        ArrayList<SupplyReservation> updated = new ArrayList<>(reservations.size());
+        for (SupplyReservation reservation : reservations) {
+            SupplyReservation next = reservation.id().equals(reservationId)
+                    && reservation.workerId().equals(workerId)
+                    ? reservation.release()
+                    : reservation;
+            changed |= next != reservation;
+            updated.add(next);
+        }
+        return changed ? copy(demands, updated) : this;
+    }
+
     public Optional<SupplyReservation> reservation(UUID reservationId) {
         return reservations.stream().filter(candidate -> candidate.id().equals(reservationId)).findFirst();
     }

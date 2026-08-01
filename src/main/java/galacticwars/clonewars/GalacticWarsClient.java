@@ -18,6 +18,7 @@ import galacticwars.clonewars.client.gui.RecruitCommandScreen;
 import galacticwars.clonewars.client.gui.RecruitLoadoutScreen;
 import galacticwars.clonewars.client.gui.StarterCampSetupScreen;
 import galacticwars.clonewars.client.gui.FabricatorScreen;
+import galacticwars.clonewars.client.gui.WorksiteConfigurationScreen;
 import galacticwars.clonewars.client.render.GalacticRecruitRenderer;
 import galacticwars.clonewars.client.render.GalacticVehicleRenderer;
 import galacticwars.clonewars.combat.BlasterBoltEntity;
@@ -81,6 +82,8 @@ public final class GalacticWarsClient {
                 ModMenuTypes.COMMAND_CENTER_OPERATIONS.get(), CommandCenterOperationsScreen::new);
         MenuScreenRegistry.registerScreenFactory(
                 ModMenuTypes.FABRICATOR.get(), FabricatorScreen::new);
+        MenuScreenRegistry.registerScreenFactory(
+                ModMenuTypes.WORKSITE_CONFIGURATION.get(), WorksiteConfigurationScreen::new);
     }
 
     /**

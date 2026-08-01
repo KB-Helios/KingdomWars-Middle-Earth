@@ -56,11 +56,16 @@ public final class RecruitBrain implements SmartBrainBuilder<GalacticRecruitEnti
             GalacticRecruitEntity owner
     ) {
         return List.of(
+                new RecruitHazardAvoidanceBehaviour(),
+                new WorkerSafetyBehaviour(),
                 new ArmyPatrolBehaviour(),
                 new FloatToSurfaceOfFluid<GalacticRecruitEntity>(),
                 new LookAtTarget<GalacticRecruitEntity>(),
                 new FactionPlayerReactionBehaviour(),
                 new NaturalCommanderCoordinationBehaviour(),
+                new RecruitSelfCareBehaviour(),
+                new RecruitStatusAlertBehaviour(),
+                new RecruitDoorInteractionBehaviour(),
                 new RecruitWalkTargetBehaviour());
     }
 
@@ -70,13 +75,13 @@ public final class RecruitBrain implements SmartBrainBuilder<GalacticRecruitEnti
                 new RecruitAcquireAttackTargetBehaviour(),
                 new FirstApplicableBehaviour<GalacticRecruitEntity>(
                         new RecruitSitBehaviour(),
-                        new WorkerSafetyBehaviour(),
-                        new CivilianShelterBehaviour(),
-                        new NaturalCivilianWorkBehaviour(),
-                        new RecruitWorkerBehaviour(),
                         new ArmyOrderBehaviour(),
                         new RecruitMoveToCommandBehaviour(1.05D),
                         new RecruitCompanionBehaviour(1.0D),
+                        new CivilianShelterBehaviour(),
+                        new NaturalCivilianWorkBehaviour(),
+                        new RecruitWorkerBehaviour(),
+                        new RecruitItemPickupBehaviour(),
                         new OneRandomBehaviour<GalacticRecruitEntity>(
                                 new SetRandomWalkTarget<GalacticRecruitEntity>()
                                         .speedModifier(0.8F)

@@ -72,15 +72,25 @@ public final class RecruitRangedCombatBehaviour
             return;
         }
 
-        BrainUtil.clearMemories(
-                recruit, MemoryModuleType.WALK_TARGET, MemoryModuleType.PATH);
         ItemStack weapon = recruit.getMainHandItem();
         if (weapon.getItem() instanceof BlasterItem blaster && BlasterHeatPolicy.canFire(heat)) {
+            BrainUtil.clearMemories(
+                    recruit, MemoryModuleType.WALK_TARGET, MemoryModuleType.PATH);
             blaster.fireAt(level, recruit, target, weapon);
             heat = BlasterHeatPolicy.afterShot(heat);
         } else if (weapon.is(ModItems.NIGHTSISTER_BOW.get()) && bowCooldownTicks == 0) {
+            BrainUtil.clearMemories(
+                    recruit, MemoryModuleType.WALK_TARGET, MemoryModuleType.PATH);
             FactionRangedWeaponService.fireNightsisterBow(level, recruit, target, weapon);
             bowCooldownTicks = 24;
+        } else if (recruit.tickCount % 8 == 0) {
+            BrainUtil.setMemory(
+                    recruit,
+                    MemoryModuleType.WALK_TARGET,
+                    new WalkTarget(
+                            RecruitCombatMovement.coverOrDodge(recruit, target),
+                            1.1F,
+                            0));
         }
     }
 
@@ -99,6 +109,7 @@ public final class RecruitRangedCombatBehaviour
         LivingEntity target = target(recruit);
         return recruit.getRecruitDuty() == RecruitDuty.SOLDIER
                 && !recruit.hasAuthoritativeArmyGroup()
+                && !recruit.isHazardAvoidanceActive()
                 && recruit.canUseLocalAttackTarget(target)
                 && FactionRangedWeaponService.supportsRecruitRangedCombat(
                         recruit.getMainHandItem());

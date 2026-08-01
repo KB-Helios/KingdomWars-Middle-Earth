@@ -10,6 +10,9 @@ import galacticwars.clonewars.settlement.KingdomBaseBlueprint;
 import galacticwars.clonewars.workforce.WorkerProfession;
 import galacticwars.clonewars.workforce.CourierRouteMode;
 import galacticwars.clonewars.workforce.CourierWaypoint;
+import galacticwars.clonewars.workforce.CourierDispatchMode;
+import galacticwars.clonewars.workforce.WorkAreaBounds;
+import galacticwars.clonewars.workforce.WorkAreaConfiguration;
 import galacticwars.clonewars.workforce.WorkerProfessionCatalog;
 
 public record SettlementRecord(
@@ -288,6 +291,11 @@ public record SettlementRecord(
                 .filter(worksite -> worksite.accepts(profession) && worksite.hasCapacity())
                 .filter(worksite -> preferredProjectId.isEmpty()
                         || worksite.sourceProjectId().equals(preferredProjectId))
+                .sorted(java.util.Comparator
+                        .comparingInt((WorksiteRecord worksite) ->
+                                worksite.configuration().priority())
+                        .reversed()
+                        .thenComparing(worksite -> worksite.id().toString()))
                 .findFirst().orElse(null);
         if (available == null) {
             return this;
@@ -348,6 +356,96 @@ public record SettlementRecord(
             updated.add(worksite.id().equals(assigned.id()) ? configured : worksite);
         }
         return withOperationalState(List.copyOf(updated), buildProjects, workOrders, revision + 1);
+    }
+
+    public SettlementRecord configureWorksite(
+            UUID worksiteId,
+            long expectedConfigurationRevision,
+            WorkAreaBounds bounds,
+            boolean kingdomAccess,
+            int priority,
+            boolean overlayVisible,
+            List<String> itemFilters,
+            CourierDispatchMode dispatchMode
+    ) {
+        WorksiteRecord selected = worksites.stream()
+                .filter(worksite -> worksite.id().equals(worksiteId))
+                .findFirst()
+                .orElse(null);
+        if (selected == null
+                || selected.configuration().revision() != expectedConfigurationRevision) {
+            return this;
+        }
+        WorkAreaConfiguration configured = selected.configuration().withSettings(
+                bounds,
+                kingdomAccess,
+                priority,
+                overlayVisible,
+                itemFilters,
+                dispatchMode);
+        if (configured == selected.configuration()) {
+            return this;
+        }
+        java.util.ArrayList<WorksiteRecord> updated = new java.util.ArrayList<>(worksites.size());
+        for (WorksiteRecord worksite : worksites) {
+            updated.add(worksite.id().equals(worksiteId)
+                    ? worksite.configured(configured)
+                    : worksite);
+        }
+        return withOperationalState(List.copyOf(updated), buildProjects, workOrders, revision + 1);
+    }
+
+    public SettlementRecord configureWorksiteRoute(
+            UUID worksiteId,
+            long expectedConfigurationRevision,
+            List<galacticwars.clonewars.workforce.CourierWaypoint> route,
+            galacticwars.clonewars.workforce.CourierRouteMode mode
+    ) {
+        WorksiteRecord selected = worksites.stream()
+                .filter(worksite -> worksite.id().equals(worksiteId))
+                .findFirst()
+                .orElse(null);
+        if (selected == null
+                || selected.configuration().revision() != expectedConfigurationRevision) {
+            return this;
+        }
+        WorkAreaConfiguration configured = selected.configuration().withCourierRoute(route, mode);
+        java.util.ArrayList<WorksiteRecord> updated = new java.util.ArrayList<>(worksites.size());
+        for (WorksiteRecord worksite : worksites) {
+            updated.add(worksite.id().equals(worksiteId)
+                    ? worksite.configured(configured)
+                    : worksite);
+        }
+        return withOperationalState(List.copyOf(updated), buildProjects, workOrders, revision + 1);
+    }
+
+    public SettlementRecord configureWorksiteStorage(
+            UUID worksiteId,
+            long expectedConfigurationRevision,
+            StorageEndpoint endpoint
+    ) {
+        WorksiteRecord selected = worksites.stream()
+                .filter(worksite -> worksite.id().equals(worksiteId))
+                .findFirst()
+                .orElse(null);
+        if (selected == null
+                || selected.configuration().revision() != expectedConfigurationRevision) {
+            return this;
+        }
+        WorksiteRecord configured = selected.withPrimaryStorageEndpoint(endpoint);
+        if (configured == selected) {
+            return this;
+        }
+        java.util.ArrayList<WorksiteRecord> updated =
+                new java.util.ArrayList<>(worksites.size());
+        for (WorksiteRecord worksite : worksites) {
+            updated.add(worksite.id().equals(worksiteId) ? configured : worksite);
+        }
+        return withOperationalState(
+                List.copyOf(updated),
+                buildProjects,
+                workOrders,
+                revision + 1);
     }
 
     public SettlementRecord releaseWorksite(UUID recruitId) {

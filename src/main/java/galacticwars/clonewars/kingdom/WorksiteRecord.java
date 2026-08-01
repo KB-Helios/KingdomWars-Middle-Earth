@@ -112,10 +112,7 @@ public record WorksiteRecord(
     public WorksiteRecord withLocationAndRadius(String dimensionId, int x, int y, int z, int radius) {
         return new WorksiteRecord(id, type, dimensionId, x, y, z, radius, capacity,
                 acceptedProfessions, sourceProjectId, assignmentIds, storageEndpoints,
-                new WorkAreaConfiguration(WorkAreaBounds.radius(radius), configuration.kingdomAccess(),
-                        configuration.priority(), configuration.overlayVisible(), configuration.itemFilters(),
-                        configuration.courierRoute(), configuration.courierRouteMode(),
-                        configuration.courierRouteRevision()));
+                configuration.withBounds(WorkAreaBounds.radius(radius)));
     }
 
     static WorksiteRecord fromPersistence(
@@ -141,5 +138,42 @@ public record WorksiteRecord(
     public WorksiteRecord configured(WorkAreaConfiguration configuration) {
         return new WorksiteRecord(id, type, dimensionId, x, y, z, radius, capacity,
                 acceptedProfessions, sourceProjectId, assignmentIds, storageEndpoints, configuration);
+    }
+
+    public WorksiteRecord withPrimaryStorageEndpoint(StorageEndpoint endpoint) {
+        Objects.requireNonNull(endpoint, "endpoint");
+        if (!dimensionId.equals(endpoint.dimensionId())) {
+            return this;
+        }
+        java.util.ArrayList<StorageEndpoint> endpoints =
+                new java.util.ArrayList<>(storageEndpoints.size() + 1);
+        endpoints.add(endpoint);
+        storageEndpoints.stream()
+                .filter(existing -> !samePosition(existing, endpoint))
+                .forEach(endpoints::add);
+        if (storageEndpoints.equals(endpoints)) {
+            return this;
+        }
+        return new WorksiteRecord(
+                id,
+                type,
+                dimensionId,
+                x,
+                y,
+                z,
+                radius,
+                capacity,
+                acceptedProfessions,
+                sourceProjectId,
+                assignmentIds,
+                List.copyOf(endpoints),
+                configuration.nextRevision());
+    }
+
+    private static boolean samePosition(StorageEndpoint first, StorageEndpoint second) {
+        return first.dimensionId().equals(second.dimensionId())
+                && first.x() == second.x()
+                && first.y() == second.y()
+                && first.z() == second.z();
     }
 }

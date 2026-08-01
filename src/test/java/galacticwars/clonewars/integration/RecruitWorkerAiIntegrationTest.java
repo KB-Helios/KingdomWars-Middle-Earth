@@ -78,7 +78,8 @@ public final class RecruitWorkerAiIntegrationTest {
 
         assertContains(entity, "CropBlock", "farmer crop handling");
         assertContains(entity, "Items.WHEAT_SEEDS", "farmer seed consumption");
-        assertContains(entity, "Items.OAK_SAPLING", "lumberjack replanting");
+        assertContains(entity, "matchingSaplingForLog", "species-preserving lumberjack replanting");
+        assertContains(entity, "\"mangrove_propagule\"", "non-sapling tree propagation");
         assertContains(entity, "ModBlockTags.WORKER_MINEABLE", "miner allowlist");
         assertContains(entity, "acquireCourierOrder", "courier route handler");
         assertContains(entity, "placeCurrentBuildBlock", "builder placement handler");

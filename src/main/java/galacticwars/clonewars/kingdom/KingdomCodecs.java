@@ -35,6 +35,7 @@ import galacticwars.clonewars.settlement.StarterCampDeploymentPhase;
 import galacticwars.clonewars.workforce.WorkerProfession;
 import galacticwars.clonewars.workforce.CourierTransferAction;
 import galacticwars.clonewars.workforce.CourierRouteMode;
+import galacticwars.clonewars.workforce.CourierDispatchMode;
 import galacticwars.clonewars.workforce.CourierRoutePlan;
 import galacticwars.clonewars.workforce.CourierWaypoint;
 import galacticwars.clonewars.workforce.WorkAreaBounds;
@@ -431,8 +432,13 @@ final class KingdomCodecs {
                     .optionalFieldOf("courier_route_mode", CourierRouteMode.LOOP)
                     .forGetter(WorkAreaConfiguration::courierRouteMode),
             Codec.LONG.optionalFieldOf("courier_route_revision", 0L)
-                    .forGetter(WorkAreaConfiguration::courierRouteRevision)
-    ).apply(instance, WorkAreaConfiguration::new));
+                    .forGetter(WorkAreaConfiguration::courierRouteRevision),
+            Codec.STRING.xmap(CourierDispatchMode::byId, CourierDispatchMode::id)
+                    .optionalFieldOf("courier_dispatch_mode")
+                    .forGetter(configuration -> Optional.of(configuration.courierDispatchMode())),
+            Codec.LONG.optionalFieldOf("revision", 0L)
+                    .forGetter(WorkAreaConfiguration::revision)
+    ).apply(instance, WorkAreaConfiguration::fromPersistence));
 
     static final Codec<WorksiteRecord> WORKSITE = RecordCodecBuilder.create(instance -> instance.group(
             UUIDUtil.CODEC.fieldOf("id").forGetter(WorksiteRecord::id),

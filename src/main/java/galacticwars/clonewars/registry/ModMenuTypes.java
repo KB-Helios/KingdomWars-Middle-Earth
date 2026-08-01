@@ -12,6 +12,7 @@ import galacticwars.clonewars.menu.RecruitCommandMenu;
 import galacticwars.clonewars.menu.RecruitLoadoutMenu;
 import galacticwars.clonewars.menu.StarterCampSetupMenu;
 import galacticwars.clonewars.menu.FabricatorMenu;
+import galacticwars.clonewars.menu.WorksiteConfigurationMenu;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.RegistryFriendlyByteBuf;
@@ -59,6 +60,11 @@ public final class ModMenuTypes {
             MENU_TYPES.register("fabricator",
                     () -> MenuRegistry.ofExtended((id, inventory, buffer) ->
                             new FabricatorMenu(id, inventory, registryBuffer(buffer, inventory))));
+    public static final RegistrySupplier<MenuType<WorksiteConfigurationMenu>> WORKSITE_CONFIGURATION =
+            MENU_TYPES.register("worksite_configuration",
+                    () -> MenuRegistry.ofExtended((id, inventory, buffer) ->
+                            new WorksiteConfigurationMenu(
+                                    id, inventory, registryBuffer(buffer, inventory))));
 
     private ModMenuTypes() {
     }
