@@ -96,13 +96,13 @@
 - Modify: `docs/authorized-source-intake.md`
 - Modify: this plan
 
-- [ ] Record the donor behavior mapping for door traversal, command-aware self-care, courier lease behavior, and ranged ammunition without claiming copied Forge code.
-- [ ] Update the README port checklist only for acceptance rows actually proven by the new tests; keep fresh Survival and real two-client gates open.
-- [ ] Run `rtk .\gradlew.bat runHarnesses --no-daemon --console=plain`.
-- [ ] Run `rtk .\gradlew.bat runGameTestServer --no-daemon --console=plain` twice on fresh generated worlds.
-- [ ] Run `rtk .\gradlew.bat buildAll --no-daemon --console=plain` and `git diff --check`.
-- [ ] Commit the verified documentation and evidence.
-- [ ] When GitHub authentication is restored, first push repaired PR #40 and synchronize all three SHAs/comments/body. Then publish this branch as a stacked draft against `codex/workers-recruits-runtime-port` while PR #40 remains open.
+- [x] Record the donor behavior mapping for door traversal, command-aware self-care, courier lease behavior, and ranged ammunition without claiming copied Forge code.
+- [x] Update the README port checklist only for acceptance rows actually proven by the new tests; keep fresh Survival and real two-client gates open.
+- [x] Run `rtk .\gradlew.bat runHarnesses --no-daemon --console=plain`. All 176 actionable tasks passed.
+- [x] Run `rtk .\gradlew.bat runGameTestServer --no-daemon --console=plain` twice on fresh generated worlds. Both runs passed all 79 required tests.
+- [x] Run `rtk .\gradlew.bat buildAll --no-daemon --console=plain` and `git diff --check`. Both loader builds passed with 186 actionable tasks, and the diff check was clean.
+- [x] Commit the verified documentation and evidence in the final local documentation commit.
+- [ ] When GitHub authentication is restored, first push repaired PR #40 and synchronize all three SHAs/comments/body. Then publish this branch as a stacked draft against `codex/workers-recruits-runtime-port` while PR #40 remains open. Blocked on 2026-08-01 because the active `KB01111` GitHub CLI token is invalid.
 
 ## Completion gate
 
