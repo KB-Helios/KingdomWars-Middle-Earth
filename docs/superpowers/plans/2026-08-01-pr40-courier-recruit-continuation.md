@@ -136,6 +136,19 @@
 - [x] Re-place and reactivate the same Command Center, then prove the configured route resumes from durable state while the released automatic lease remains terminal and its cargo remains conserved for player recovery.
 - [x] Run focused harnesses and the focused GameTest twice, then run the full harness, two full GameTest passes, `buildAll`, and `git diff --check` before committing. `SettlementSupplyLedgerTest` and `SettlementSupplyPersistenceTest` passed, both focused `courier_hall_removal` runs passed 1/1, the final `runHarnesses` gate passed 176 actionable tasks, two fresh aggregate NeoForge runs passed all 81 required GameTests, and `buildAll` passed 186 actionable tasks for Fabric and NeoForge. Aggregate verification also exposed and fixed the cook's false second-fuel request for an already-lit furnace and replaced premature distant-fixture clocks with entity-index and entity-ticking readiness gates.
 
+## Task 9: Ordinary-player cook lifecycle
+
+**Files:**
+
+- Modify: `src/main/java/galacticwars/clonewars/gametest/ModGameTests.java`
+- Modify: `README.md`
+- Modify: `docs/authorized-source-intake.md`
+
+- [x] Add a dedicated ordinary-player-path cook GameTest using the real hire, profession assignment, worksite, registered storage, navigation, furnace, collection, and deposit paths. Do not mutate private phases, invoke the worker controller, or move the recruit after assignment.
+- [x] Seed exactly one raw beef and one coal, then prove exact input/output conservation, physical approach, furnace loading and ignition, work-order completion, and storage deposit.
+- [x] Observe the consumed fuel slot while the furnace remains lit and fail immediately if the cook requests redundant coal before the input finishes. The corrected in-bounds fixture passed twice; the initial RED timeout proved the furnace was correctly rejected when it sat one block outside the claimed worksite.
+- [x] Run the focused GameTest twice, then run `runHarnesses`, two complete GameTest passes, `buildAll`, and `git diff --check` before committing. Both corrected cook runs passed 1/1; the initial RED fixture placed the furnace one block beyond the claimed worksite and correctly timed out during station discovery. Aggregate verification exposed that `worker_safety_and_upkeep` started its deadline before its distant fixture became entity-ticking, so the proof now waits for chunk/entity readiness and measures recruit ticks. Its focused control passed 1/1, both final aggregate runs passed 82/82, `runHarnesses` passed 176 actionable tasks, and `buildAll` passed 186 actionable tasks for Fabric and NeoForge.
+
 ## Completion gate
 
-This slice is complete when courier contention and expiry are conservation-proven, an exact automatic transfer survives a live-lease reload, owner removal of settlement authority releases leases and pauses/resumes configured routes without physical loss or ghost delivery, concurrent role/revision/replay cases are rejected server-side, follow/hold/patrol/work commands survive real door traversal, self-care retains ordinary commands while yielding to danger and combat, tamed recruit bolts consume physical Energy Cells with no empty-gun melee fallback, collision-level friendly-fire proof passes, provenance is current, and all four verification gates are green.
+This slice is complete when courier contention and expiry are conservation-proven, an exact automatic transfer survives a live-lease reload, owner removal of settlement authority releases leases and pauses/resumes configured routes without physical loss or ghost delivery, concurrent role/revision/replay cases are rejected server-side, follow/hold/patrol/work commands survive real door traversal, self-care retains ordinary commands while yielding to danger and combat, tamed recruit bolts consume physical Energy Cells with no empty-gun melee fallback, collision-level friendly-fire proof passes, an ordinary cook completes one exact physical furnace cycle without redundant fuel, provenance is current, and all four verification gates are green.

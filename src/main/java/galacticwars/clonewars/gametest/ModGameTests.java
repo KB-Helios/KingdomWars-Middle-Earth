@@ -138,6 +138,7 @@ import galacticwars.clonewars.settlement.StarterCampDeploymentPhase;
 import galacticwars.clonewars.settlement.StarterCampDeploymentService;
 import galacticwars.clonewars.workforce.WorkerPhase;
 import galacticwars.clonewars.workforce.WorkerProfession;
+import galacticwars.clonewars.workforce.WorkerStatus;
 import galacticwars.clonewars.workforce.CourierDispatchMode;
 import galacticwars.clonewars.workforce.CourierRouteExecutionState;
 import galacticwars.clonewars.workforce.CourierRouteMode;
@@ -314,6 +315,9 @@ public final class ModGameTests {
         isolatedEnvironments.put(id("specialist_worker_loops"), event.registerEnvironment(
                         id("specialist_worker_loops_environment"),
                         new TestEnvironmentDefinition.AllOf(List.of())));
+        isolatedEnvironments.put(id("black_box_cook_lifecycle"), event.registerEnvironment(
+                        id("black_box_cook_lifecycle_environment"),
+                        new TestEnvironmentDefinition.AllOf(List.of())));
         isolatedEnvironments.put(id("hybrid_courier_dispatch"), event.registerEnvironment(
                         id("hybrid_courier_dispatch_environment"),
                         new TestEnvironmentDefinition.AllOf(List.of())));
@@ -360,6 +364,7 @@ public final class ModGameTests {
                 id("black_box_farmer_door_lifecycle"),
                 id("recruit_door_command_resumption"),
                 id("specialist_worker_loops"),
+                id("black_box_cook_lifecycle"),
                 id("competing_courier_leases"),
                 id("courier_live_lease_reload"),
                 id("courier_hall_removal"),
@@ -400,6 +405,8 @@ public final class ModGameTests {
                                             ? 900
                                     : testId.equals(id("specialist_worker_loops"))
                                             ? 1_600
+                                    : testId.equals(id("black_box_cook_lifecycle"))
+                                            ? 900
                                     : testId.equals(id("competing_courier_leases"))
                                             ? 700
                                     : testId.equals(id("courier_live_lease_reload"))
@@ -505,6 +512,7 @@ public final class ModGameTests {
                 PhysicalLogisticsGameTests::atomicPhysicalTransfer);
         tests.put(id("enabled_worker_loops"), ModGameTests::enabledWorkerLoops);
         tests.put(id("specialist_worker_loops"), ModGameTests::specialistWorkerLoops);
+        tests.put(id("black_box_cook_lifecycle"), ModGameTests::blackBoxCookLifecycle);
         tests.put(id("bounded_worker_scans"), ModGameTests::boundedWorkerScans);
         tests.put(id("hybrid_courier_dispatch"), ModGameTests::hybridCourierDispatch);
         tests.put(id("competing_courier_leases"), ModGameTests::competingCourierLeases);
@@ -8090,26 +8098,16 @@ public final class ModGameTests {
         }
         setWorkerInventory(worker, new ItemStack(Items.DIAMOND, 3));
         invokeRecruitCommand(worker, RecruitmentAction.WORK_AT_SITE);
-        BrainUtil.setMemory(
-                worker,
-                net.minecraft.world.entity.ai.memory.MemoryModuleType.WALK_TARGET,
-                new net.minecraft.world.entity.ai.memory.WalkTarget(area.at(10, 1, 2), 1.0F, 1));
 
         GalacticRecruitEntity threat = spawnRecruitAt(
                 helper, ModEntityTypes.B1_BATTLE_DROID.get(), area.at(3, 1, 2));
         threat.setNoAi(true);
-        if (!worker.hurtServer(
-                helper.getLevel(),
-                helper.getLevel().damageSources().mobAttack(threat),
-                1.0F)) {
-            helper.fail("Worker safety setup damage was not accepted");
-            return;
-        }
 
         GalacticRecruitEntity[] activeWorker = {worker};
         CompoundTag[] persistedWorker = {null};
-        int[] phase = {0};
+        int[] phase = {-1};
         long[] phaseStartGameTick = {helper.getTick()};
+        int[] phaseStartRecruitTick = {worker.tickCount};
         boolean[] selfCareBlockedDuringSafety = {false};
         boolean[] complete = {false};
         helper.onEachTick(() -> {
@@ -8117,6 +8115,40 @@ public final class ModGameTests {
                 return;
             }
             GalacticRecruitEntity current = activeWorker[0];
+            if (phase[0] == -1) {
+                boolean areaTicking = areSmartBrainAreaChunksTicking(
+                        helper, area, -4, 12, -4, 6);
+                boolean workerIndexed = helper.getLevel().getEntity(worker.getUUID()) == worker;
+                boolean threatIndexed = helper.getLevel().getEntity(threat.getUUID()) == threat;
+                if (!areaTicking || !workerIndexed || !threatIndexed || worker.tickCount == 0) {
+                    if (helper.getTick() - phaseStartGameTick[0]
+                            >= SMART_BRAIN_CHUNK_READY_TIMEOUT) {
+                        complete[0] = true;
+                        helper.fail("Worker safety area never became entity-ticking: ticking="
+                                + areaTicking + ", worker=" + workerIndexed
+                                + ", threat=" + threatIndexed
+                                + ", workerTick=" + worker.tickCount);
+                    }
+                    return;
+                }
+                BrainUtil.setMemory(
+                        worker,
+                        net.minecraft.world.entity.ai.memory.MemoryModuleType.WALK_TARGET,
+                        new net.minecraft.world.entity.ai.memory.WalkTarget(
+                                area.at(10, 1, 2), 1.0F, 1));
+                if (!worker.hurtServer(
+                        helper.getLevel(),
+                        helper.getLevel().damageSources().mobAttack(threat),
+                        1.0F)) {
+                    complete[0] = true;
+                    helper.fail("Worker safety setup damage was not accepted");
+                    return;
+                }
+                phase[0] = 0;
+                phaseStartGameTick[0] = helper.getTick();
+                phaseStartRecruitTick[0] = worker.tickCount;
+                return;
+            }
             if (phase[0] == 0) {
                 if (current.isWorkerSafetyRetreating()) {
                     if (workerInventoryCount(current) != 3
@@ -8146,9 +8178,13 @@ public final class ModGameTests {
                     phaseStartGameTick[0] = helper.getTick();
                     return;
                 }
-                if (helper.getTick() - phaseStartGameTick[0] >= 80L) {
+                if (current.tickCount - phaseStartRecruitTick[0] >= 80) {
                     complete[0] = true;
-                    helper.fail("Damaged worker never entered its safety retreat");
+                    helper.fail("Damaged worker never entered its safety retreat: status="
+                            + current.getWorkerStatus() + ", hurtTime=" + current.hurtTime
+                            + ", rememberedThreat=" + BrainUtil.hasMemory(
+                            current,
+                            net.minecraft.world.entity.ai.memory.MemoryModuleType.HURT_BY_ENTITY));
                 }
                 return;
             }
@@ -8171,6 +8207,7 @@ public final class ModGameTests {
                 activeWorker[0] = loaded;
                 phase[0] = 2;
                 phaseStartGameTick[0] = helper.getTick();
+                phaseStartRecruitTick[0] = loaded.tickCount;
                 return;
             }
 
@@ -8260,7 +8297,7 @@ public final class ModGameTests {
                 helper.succeed();
                 return;
             }
-            if (helper.getTick() - phaseStartGameTick[0] >= 200L) {
+            if (current.tickCount - phaseStartRecruitTick[0] >= 200) {
                 complete[0] = true;
                 helper.fail("Reloaded worker did not resume after 100 threat-free ticks: "
                         + current.getWorkerStatus() + ", selfCareBlocked="
@@ -8549,6 +8586,161 @@ public final class ModGameTests {
                 Set.copyOf(specialistChunks),
                 countContainerItems(hall));
         helper.onEachTick(scenario::tick);
+    }
+
+    /**
+     * Exercises one complete cook order through ordinary hire, profession-assignment, and
+     * worksite paths. The fixture never mutates a worker phase, invokes the controller, or
+     * moves the recruit after assignment.
+     */
+    private static void blackBoxCookLifecycle(GameTestHelper helper) {
+        SmartBrainTestArea area = prepareSmartBrainTestAreaAt(
+                helper,
+                GameType.CREATIVE,
+                -2,
+                14,
+                -2,
+                8,
+                isolatedCapital(helper, 218));
+        ServerLevel level = helper.getLevel();
+        ServerPlayer owner = area.player();
+        BlockPos hallPos = area.at(0, 1, 0);
+        BlockPos recruitPos = area.at(2, 1, 4);
+        BlockPos furnacePos = area.at(7, 1, 4);
+        CommandCenterBlockEntity hall = placeCommandCenter(helper, hallPos);
+        hall.claim(owner);
+        KingdomSavedData data = KingdomSavedData.get(level);
+        if (data.activateHall(
+                owner.getUUID(),
+                hall.factionId(),
+                level.dimension().identifier().toString(),
+                hallPos).isEmpty()) {
+            helper.fail("Black-box cook fixture could not activate its Command Center");
+            return;
+        }
+        putContainerItem(hall, new ItemStack(ModItems.CREDIT_CHIP.get(), 32));
+        FactionAlignmentSavedData.get(level).setScore(
+                owner.getUUID(), FactionId.of("republic"), 100);
+        applyCampaignSetupEvent(
+                ProgressionSavedData.get(level),
+                owner,
+                ProgressionEventType.FACTION_PLEDGED,
+                "galacticwars:republic");
+
+        level.setBlock(furnacePos, Blocks.FURNACE.defaultBlockState(), 3);
+        GalacticRecruitEntity recruit = spawnRecruitAt(
+                helper, ModEntityTypes.CLONE_TROOPER.get(), recruitPos);
+        owner.setPos(recruit.getX(), recruit.getY(), recruit.getZ());
+        if (!recruit.handleMenuButton(owner, RecruitCommandMenu.BUTTON_HIRE)
+                || !recruit.handleMenuButton(owner, RecruitCommandMenu.BUTTON_ASSIGN_COOK)) {
+            helper.fail("Black-box cook could not be hired and assigned");
+            return;
+        }
+        if (!configureWorkerLifecycleWorksite(
+                helper,
+                data,
+                owner,
+                recruit,
+                hallPos,
+                List.of("#minecraft:meat"))) {
+            return;
+        }
+        putContainerItem(hall, new ItemStack(Items.BEEF));
+        putContainerItem(hall, new ItemStack(Items.COAL));
+
+        Container recruitCargo = recruit.createCargoContainer();
+        boolean[] approachedFurnace = {false};
+        boolean[] furnaceLoaded = {false};
+        boolean[] furnaceLit = {false};
+        boolean[] consumedFuelWhileLit = {false};
+        boolean[] complete = {false};
+        long startedAt = helper.getTick();
+        helper.onEachTick(() -> {
+            if (complete[0]) {
+                return;
+            }
+            if (!(level.getBlockEntity(furnacePos) instanceof Container furnace)) {
+                complete[0] = true;
+                helper.fail("Black-box cook furnace became unavailable");
+                return;
+            }
+
+            approachedFurnace[0] |= recruit.distanceToSqr(Vec3.atCenterOf(furnacePos)) <= 4.0D;
+            furnaceLoaded[0] |= furnace.getItem(0).is(Items.BEEF);
+            var furnaceState = level.getBlockState(furnacePos);
+            boolean litNow = furnaceState.hasProperty(BlockStateProperties.LIT)
+                    && furnaceState.getValue(BlockStateProperties.LIT);
+            furnaceLit[0] |= litNow;
+            consumedFuelWhileLit[0] |= litNow
+                    && furnace.getItem(0).is(Items.BEEF)
+                    && furnace.getItem(1).isEmpty();
+
+            int raw = countContainerItem(hall, Items.BEEF)
+                    + countContainerItem(recruitCargo, Items.BEEF)
+                    + countContainerItem(furnace, Items.BEEF);
+            int cooked = countContainerItem(hall, Items.COOKED_BEEF)
+                    + countContainerItem(recruitCargo, Items.COOKED_BEEF)
+                    + countContainerItem(furnace, Items.COOKED_BEEF);
+            int coal = countContainerItem(hall, Items.COAL)
+                    + countContainerItem(recruitCargo, Items.COAL)
+                    + countContainerItem(furnace, Items.COAL);
+            if (raw + cooked != 1 || coal > 1) {
+                complete[0] = true;
+                helper.fail("Black-box cook violated physical conservation: raw="
+                        + raw + ", cooked=" + cooked + ", coal=" + coal
+                        + ", furnace=" + List.of(
+                                furnace.getItem(0), furnace.getItem(1), furnace.getItem(2))
+                        + ", cargo=" + workerInventoryCount(recruit));
+                return;
+            }
+
+            WorkerStatus status = recruit.getWorkerStatus();
+            if (litNow
+                    && furnace.getItem(0).is(Items.BEEF)
+                    && status.phase() == WorkerPhase.BLOCKED
+                    && status.requiredResource().equals("minecraft:coal")) {
+                complete[0] = true;
+                helper.fail("Lit furnace incorrectly requested a second fuel item: " + status);
+                return;
+            }
+
+            boolean completedOrder = hasCompletedWorkerOrder(
+                    data, owner.getUUID(), WorkOrderType.COOK);
+            if (completedOrder
+                    && countContainerItem(hall, Items.COOKED_BEEF) == 1
+                    && raw == 0
+                    && workerInventoryCount(recruit) == 0
+                    && furnace.getItem(0).isEmpty()
+                    && furnace.getItem(2).isEmpty()) {
+                if (!approachedFurnace[0]
+                        || !furnaceLoaded[0]
+                        || !furnaceLit[0]
+                        || !consumedFuelWhileLit[0]) {
+                    complete[0] = true;
+                    helper.fail("Cook completed without all embodied furnace observations: approached="
+                            + approachedFurnace[0] + ", loaded=" + furnaceLoaded[0]
+                            + ", lit=" + furnaceLit[0]
+                            + ", consumedFuelWhileLit=" + consumedFuelWhileLit[0]);
+                    return;
+                }
+                complete[0] = true;
+                recruit.discard();
+                helper.succeed();
+                return;
+            }
+
+            if (helper.getTick() - startedAt >= 750L) {
+                complete[0] = true;
+                helper.fail("Black-box cook lifecycle timed out: status=" + status
+                        + ", raw=" + raw + ", cooked=" + cooked + ", coal=" + coal
+                        + ", approached=" + approachedFurnace[0]
+                        + ", loaded=" + furnaceLoaded[0]
+                        + ", lit=" + furnaceLit[0]
+                        + ", consumedFuelWhileLit=" + consumedFuelWhileLit[0]
+                        + ", furnace=" + List.of(
+                                furnace.getItem(0), furnace.getItem(1), furnace.getItem(2)));
+            }
+        });
     }
 
     /**
