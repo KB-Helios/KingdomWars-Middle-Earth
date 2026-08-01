@@ -111,7 +111,7 @@ git commit -m "Harden worker value normalization and bounds"
 - Produces: `RecruitAiCadence.shouldCheckSelfCare(int tickCount): boolean` with a twenty-tick interval.
 - Produces: `RecruitCombatMovement.rankCandidates(...)` that deduplicates candidates and invokes each safety and cover predicate no more than once per unique position.
 
-- [ ] **Step 1: Write the failing movement harness**
+- [x] **Step 1: Write the failing movement harness**
 
 In the AI package, feed duplicate `BlockPos` values into the wished-for ranking seam, count predicate calls in maps, and assert literal order: covered candidates first, then distance, then `asLong`. Enumerate ticks `0..15` and assert only `0` and `8` request army cover recomputation.
 
@@ -128,17 +128,17 @@ assertEquals(List.of(0, 20), IntStream.range(0, 40)
         "self-care cadence");
 ```
 
-- [ ] **Step 2: Run the harness and verify RED**
+- [x] **Step 2: Run the harness and verify RED**
 
 Run: `rtk .\gradlew.bat :neoforge:runGalacticwarsClonewarsEntityAiRecruitCombatMovementTest --no-daemon --console=plain`
 
 Expected: compilation FAIL because the cadence and ranking seams do not exist.
 
-- [ ] **Step 3: Implement cadence and cached ranking**
+- [x] **Step 3: Implement cadence and cached ranking**
 
 Implement `RecruitAiCadence.shouldRecomputeArmyCover` with `Math.floorMod(tickCount, 8) == 0`. In `ArmyCombatBehaviour.holdOrRepositionRanged`, return without replacing `WALK_TARGET` when the recruit is in range/visible but the cadence is closed. In `RecruitCombatMovement`, build a `LinkedHashSet<BlockPos>` of immutable candidates, evaluate `safeStand` once, cache `hasCover` in a record or map, and sort only cached booleans and coordinates.
 
-- [ ] **Step 4: Run the focused harness and compile both loaders**
+- [x] **Step 4: Run the focused harness and compile both loaders**
 
 Run:
 
@@ -148,7 +148,7 @@ rtk .\gradlew.bat :neoforge:runGalacticwarsClonewarsEntityAiRecruitCombatMovemen
 
 Expected: PASS and no Java compile failures.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```powershell
 git add src/main/java/galacticwars/clonewars/entity/ai src/test/java/galacticwars/clonewars/entity/ai/RecruitCombatMovementTest.java

@@ -147,6 +147,9 @@ public final class ArmyCombatBehaviour extends ExtendedBehaviour<GalacticRecruit
                 recruit.getAttributeValue(Attributes.FOLLOW_RANGE));
         if (recruit.distanceToSqr(target) <= range * range
                 && recruit.getSensing().hasLineOfSight(target)) {
+            if (!RecruitAiCadence.shouldRecomputeArmyCover(recruit.tickCount)) {
+                return;
+            }
             BrainUtil.setMemory(
                     recruit,
                     MemoryModuleType.WALK_TARGET,
