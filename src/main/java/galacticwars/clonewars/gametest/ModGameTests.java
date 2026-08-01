@@ -36,6 +36,7 @@ import galacticwars.clonewars.combat.FactionRangedWeaponService;
 import galacticwars.clonewars.combat.BlasterHeatPolicy;
 import galacticwars.clonewars.combat.BlasterItem;
 import galacticwars.clonewars.combat.LightsaberDeflectionService;
+import galacticwars.clonewars.combat.RecruitAmmunitionService;
 import galacticwars.clonewars.classes.ClassProgressSavedData;
 import galacticwars.clonewars.classes.ClassAbilityEffectRegistry;
 import galacticwars.clonewars.classes.PlayerClassRuntime;
@@ -291,6 +292,9 @@ public final class ModGameTests {
         isolatedEnvironments.put(id("grouped_zero_supply_blaster"), event.registerEnvironment(
                         id("grouped_zero_supply_blaster_environment"),
                         new TestEnvironmentDefinition.AllOf(List.of())));
+        isolatedEnvironments.put(id("recruit_blaster_ammunition"), event.registerEnvironment(
+                        id("recruit_blaster_ammunition_environment"),
+                        new TestEnvironmentDefinition.AllOf(List.of())));
         isolatedEnvironments.put(id("worker_safety_and_upkeep"), event.registerEnvironment(
                         id("worker_safety_and_upkeep_environment"),
                         new TestEnvironmentDefinition.AllOf(List.of())));
@@ -338,6 +342,7 @@ public final class ModGameTests {
                 id("planet_faction_outpost_runtime"),
                 id("grouped_brain_authority"),
                 id("grouped_zero_supply_blaster"),
+                id("recruit_blaster_ammunition"),
                 id("grouped_patrol_pause_runtime"),
                 id("grouped_protect_entity_runtime"),
                 id("worker_safety_and_upkeep"),
@@ -388,6 +393,7 @@ public final class ModGameTests {
                                             id("local_recruit_protect_owner"),
                                             id("ungrouped_recruit_ranged_brain"),
                                             id("ungrouped_recruit_melee_brain"),
+                                            id("recruit_blaster_ammunition"),
                                             id("worker_safety_and_upkeep"),
                                             id("recruit_hazard_and_self_care"),
                                             id("faction_selection_transaction")).contains(testId)
@@ -498,6 +504,7 @@ public final class ModGameTests {
         tests.put(id("faction_ai_reaction_runtime"), ModGameTests::factionAiReactionRuntime);
         tests.put(id("grouped_brain_authority"), ModGameTests::groupedBrainAuthority);
         tests.put(id("grouped_zero_supply_blaster"), ModGameTests::groupedZeroSupplyBlaster);
+        tests.put(id("recruit_blaster_ammunition"), ModGameTests::recruitBlasterAmmunition);
         tests.put(id("grouped_patrol_pause_runtime"), ModGameTests::groupedPatrolPauseRuntime);
         tests.put(id("grouped_protect_entity_runtime"), ModGameTests::groupedProtectEntityRuntime);
         tests.put(id("field_command_authority"), ModGameTests::fieldCommandAuthority);
@@ -1153,6 +1160,14 @@ public final class ModGameTests {
         shooter.tame(owner);
         ItemStack weapon = new ItemStack(ModItems.DC15_BLASTER.get());
         shooter.setItemInHand(InteractionHand.MAIN_HAND, weapon);
+        shooter.createCargoContainer().setItem(
+                0, new ItemStack(ModItems.ENERGY_CELL.get()));
+        if (!RecruitAmmunitionService.tryConsumeForShot(shooter)
+                || countContainerItem(
+                shooter.createCargoContainer(), ModItems.ENERGY_CELL.get()) != 0) {
+            helper.fail("Tamed recruit projectile fixture could not consume its physical Energy Cell");
+            return;
+        }
         ModItems.DC15_BLASTER.get().fireAt(helper.getLevel(), shooter, target, weapon);
 
         GalacticRecruitEntity archer = helper.spawn(
@@ -1384,6 +1399,10 @@ public final class ModGameTests {
         target.setHealth(target.getMaxHealth());
         shooter.initializeNaturalFactionNpc(UUID.randomUUID(), NpcServiceBranch.MILITARY);
         shooter.setItemInHand(InteractionHand.MAIN_HAND, new ItemStack(ModItems.DC15_BLASTER.get()));
+        if (!shooter.createCargoContainer().isEmpty()) {
+            helper.fail("Natural ranged recruit unexpectedly began with player-managed cargo ammunition");
+            return;
+        }
         if (!(shooter.getBrain() instanceof net.tslat.smartbrainlib.api.internal.SmartBrain<?>)) {
             helper.fail("Recruit did not receive a SmartBrainLib brain");
             return;
@@ -1408,9 +1427,196 @@ public final class ModGameTests {
                 helper.fail("Ungrouped ranged recruit brain fired a bolt without its weapon identity");
                 return;
             }
+            if (!shooter.createCargoContainer().isEmpty()) {
+                helper.fail("Natural faction recruit consumed or created player-managed cargo ammunition");
+                return;
+            }
             shooter.discard();
             target.discard();
             bolts.forEach(BlasterBoltEntity::discard);
+        });
+    }
+
+    private static void recruitBlasterAmmunition(GameTestHelper helper) {
+        SmartBrainTestArea area = prepareSmartBrainTestArea(
+                helper, GameType.CREATIVE, -2, 48, -3, 5);
+        ServerPlayer owner = area.player();
+        BlockPos shooterPosition = area.at(2, 1, 1);
+        BlockPos targetNearPosition = area.at(12, 1, 1);
+        BlockPos targetFarPosition = area.at(44, 1, 1);
+        GalacticRecruitEntity shooter = spawnRecruitAt(
+                helper, ModEntityTypes.CLONE_TROOPER.get(), shooterPosition);
+        GalacticRecruitEntity target = spawnRecruitAt(
+                helper, ModEntityTypes.B1_BATTLE_DROID.get(), targetNearPosition);
+        target.setNoAi(true);
+        target.getAttribute(Attributes.MAX_HEALTH).setBaseValue(1024.0D);
+        target.setHealth(target.getMaxHealth());
+        shooter.tame(owner);
+        shooter.setItemInHand(
+                InteractionHand.MAIN_HAND, new ItemStack(ModItems.DC15_BLASTER.get()));
+        shooter.getAttribute(Attributes.MOVEMENT_SPEED).setBaseValue(0.0D);
+        owner.setPos(shooter.getX(), shooter.getY(), shooter.getZ());
+
+        ItemStack marker = new ItemStack(ModItems.COMMAND_MARKER.get());
+        owner.setItemInHand(InteractionHand.MAIN_HAND, marker);
+        owner.setShiftKeyDown(true);
+        marker.interactLivingEntity(owner, target, InteractionHand.MAIN_HAND);
+        owner.setShiftKeyDown(false);
+        if (!shooter.handleMenuButton(owner, RecruitCommandMenu.BUTTON_ATTACK)
+                || shooter.getRecruitCommand() != RecruitmentAction.ATTACK_TARGET
+                || shooter.getTarget() != target) {
+            helper.fail("Physical-ammunition recruit could not receive its embodied attack order");
+            return;
+        }
+
+        target.setPos(
+                targetFarPosition.getX() + 0.5D,
+                targetFarPosition.getY(),
+                targetFarPosition.getZ() + 0.5D);
+        target.setDeltaMovement(Vec3.ZERO);
+        Container cargo = shooter.createCargoContainer();
+        cargo.setItem(0, new ItemStack(ModItems.ENERGY_CELL.get()));
+        BlockPos wallBase = area.at(7, 1, 1);
+        AABB shotArea = shooter.getBoundingBox().inflate(64.0D);
+        Set<UUID> observedBolts = new java.util.HashSet<>();
+        int[] phase = {0};
+        int[] phaseStartedRecruitTick = {shooter.tickCount};
+        boolean[] complete = {false};
+
+        helper.onEachTick(() -> {
+            if (complete[0]) {
+                return;
+            }
+            helper.getLevel().getEntitiesOfClass(
+                            BlasterBoltEntity.class,
+                            shotArea,
+                            bolt -> bolt.getOwner() == shooter)
+                    .forEach(bolt -> observedBolts.add(bolt.getUUID()));
+            int cells = countContainerItem(cargo, ModItems.ENERGY_CELL.get());
+            if (shooter.isWithinMeleeAttackRange(target)) {
+                complete[0] = true;
+                helper.fail("Empty blaster recruit silently closed into melee range");
+                return;
+            }
+
+            int elapsed = shooter.tickCount - phaseStartedRecruitTick[0];
+            switch (phase[0]) {
+                case 0 -> {
+                    if (!observedBolts.isEmpty() || cells != 1) {
+                        complete[0] = true;
+                        helper.fail("Out-of-range blaster attempt consumed or fired ammunition: bolts="
+                                + observedBolts.size() + ", cells=" + cells);
+                        return;
+                    }
+                    if (elapsed >= 30) {
+                        target.setPos(
+                                targetNearPosition.getX() + 0.5D,
+                                targetNearPosition.getY(),
+                                targetNearPosition.getZ() + 0.5D);
+                        target.setDeltaMovement(Vec3.ZERO);
+                        for (int x = -1; x <= 1; x++) {
+                            for (int y = 0; y <= 3; y++) {
+                                for (int z = -4; z <= 4; z++) {
+                                    helper.getLevel().setBlockAndUpdate(
+                                            wallBase.offset(x, y, z), Blocks.STONE.defaultBlockState());
+                                }
+                            }
+                        }
+                        shooter.getSensing().tick();
+                        if (shooter.getSensing().hasLineOfSight(target)) {
+                            complete[0] = true;
+                            helper.fail("Physical-ammunition sight barrier did not block the target");
+                            return;
+                        }
+                        phase[0] = 1;
+                        phaseStartedRecruitTick[0] = shooter.tickCount;
+                    }
+                }
+                case 1 -> {
+                    if (!observedBolts.isEmpty() || cells != 1) {
+                        complete[0] = true;
+                        helper.fail("Line-of-sight-blocked blaster attempt consumed or fired ammunition: bolts="
+                                + observedBolts.size() + ", cells=" + cells);
+                        return;
+                    }
+                    if (elapsed >= 24) {
+                        for (int x = -1; x <= 1; x++) {
+                            for (int y = 0; y <= 3; y++) {
+                                for (int z = -4; z <= 4; z++) {
+                                    helper.getLevel().setBlockAndUpdate(
+                                            wallBase.offset(x, y, z), Blocks.AIR.defaultBlockState());
+                                }
+                            }
+                        }
+                        shooter.getSensing().tick();
+                        phase[0] = 2;
+                        phaseStartedRecruitTick[0] = shooter.tickCount;
+                    }
+                }
+                case 2 -> {
+                    if (observedBolts.size() > 1) {
+                        complete[0] = true;
+                        helper.fail("One physical Energy Cell produced multiple blaster bolts");
+                        return;
+                    }
+                    if (observedBolts.size() == 1) {
+                        if (cells != 0) {
+                            complete[0] = true;
+                            helper.fail("Recruit blaster created a bolt without consuming its Energy Cell");
+                            return;
+                        }
+                        phase[0] = 3;
+                        phaseStartedRecruitTick[0] = shooter.tickCount;
+                        return;
+                    }
+                    if (elapsed >= 100) {
+                        complete[0] = true;
+                        helper.fail("Supplied recruit did not resume ranged fire after line of sight cleared");
+                    }
+                }
+                case 3 -> {
+                    if (observedBolts.size() != 1 || cells != 0) {
+                        complete[0] = true;
+                        helper.fail("Empty recruit blaster fired again or recreated ammunition: bolts="
+                                + observedBolts.size() + ", cells=" + cells);
+                        return;
+                    }
+                    if (elapsed >= BlasterHeatPolicy.SHOT_COOLDOWN_TICKS + 24) {
+                        cargo.setItem(0, new ItemStack(ModItems.ENERGY_CELL.get()));
+                        phase[0] = 4;
+                        phaseStartedRecruitTick[0] = shooter.tickCount;
+                    }
+                }
+                case 4 -> {
+                    if (observedBolts.size() > 2) {
+                        complete[0] = true;
+                        helper.fail("One-cell resupply produced multiple blaster bolts");
+                        return;
+                    }
+                    if (observedBolts.size() == 2) {
+                        if (cells != 0) {
+                            complete[0] = true;
+                            helper.fail("Resupplied recruit fired without consuming the replacement Energy Cell");
+                            return;
+                        }
+                        complete[0] = true;
+                        shooter.discard();
+                        target.discard();
+                        helper.getLevel().getEntitiesOfClass(
+                                        BlasterBoltEntity.class,
+                                        shotArea,
+                                        bolt -> bolt.getOwner() == shooter)
+                                .forEach(BlasterBoltEntity::discard);
+                        helper.succeed();
+                        return;
+                    }
+                    if (elapsed >= 100) {
+                        complete[0] = true;
+                        helper.fail("Physical Energy Cell resupply did not restore ranged fire");
+                    }
+                }
+                default -> throw new IllegalStateException("Unknown ammunition phase " + phase[0]);
+            }
         });
     }
 
@@ -2000,6 +2206,9 @@ public final class ModGameTests {
         soldier.tame(owner);
         commander.setMilitaryMainHandItem(new ItemStack(Items.IRON_SWORD));
         soldier.setMilitaryMainHandItem(new ItemStack(ModItems.DC15_BLASTER.get()));
+        Container soldierCargo = soldier.createCargoContainer();
+        soldierCargo.setItem(0, new ItemStack(
+                ModItems.ENERGY_CELL.get(), BlasterHeatPolicy.SHOTS_BEFORE_OVERHEAT + 1));
         target.setNoAi(true);
         target.setInvulnerable(true);
         target.getAttribute(Attributes.MAX_HEALTH).setBaseValue(4096.0D);
@@ -2059,12 +2268,29 @@ public final class ModGameTests {
             }
             if (observedBolts.size() >= BlasterHeatPolicy.SHOTS_BEFORE_OVERHEAT
                     && overheatStartedRecruitTick[0] < 0) {
+                int expectedRemainingCells = 1;
+                int remainingCells = countContainerItem(
+                        soldierCargo, ModItems.ENERGY_CELL.get());
+                if (remainingCells != expectedRemainingCells) {
+                    complete[0] = true;
+                    helper.fail("Grouped blaster did not consume exactly one physical cell per shot: bolts="
+                            + observedBolts.size() + ", cells=" + remainingCells);
+                    return;
+                }
                 overheatStartedRecruitTick[0] = soldier.tickCount;
             }
             if (overheatStartedRecruitTick[0] >= 0) {
                 if (observedBolts.size() > BlasterHeatPolicy.SHOTS_BEFORE_OVERHEAT) {
                     complete[0] = true;
                     helper.fail("Grouped blaster fired before its overheat window elapsed");
+                    return;
+                }
+                int remainingCells = countContainerItem(
+                        soldierCargo, ModItems.ENERGY_CELL.get());
+                if (remainingCells != 1) {
+                    complete[0] = true;
+                    helper.fail("Overheated grouped blaster consumed its reserved Energy Cell: cells="
+                            + remainingCells);
                     return;
                 }
                 if (soldier.tickCount - overheatStartedRecruitTick[0] >= 30) {
@@ -2630,7 +2856,104 @@ public final class ModGameTests {
             helper.fail("Faction recruit projectile damaged a neutral player");
             return;
         }
-        helper.succeed();
+
+        SmartBrainTestArea collisionArea = prepareSmartBrainTestArea(
+                helper, GameType.CREATIVE, 0, 16, 0, 3);
+        ServerPlayer collisionOwner = collisionArea.player();
+        GalacticRecruitEntity collisionShooter = spawnRecruitAt(
+                helper, ModEntityTypes.CLONE_TROOPER.get(), collisionArea.at(2, 1, 1));
+        GalacticRecruitEntity protectedRecruit = spawnRecruitAt(
+                helper, ModEntityTypes.ARC_TROOPER.get(), collisionArea.at(7, 1, 1));
+        GalacticRecruitEntity collisionTarget = spawnRecruitAt(
+                helper, ModEntityTypes.B1_BATTLE_DROID.get(), collisionArea.at(13, 1, 1));
+        collisionShooter.tame(collisionOwner);
+        protectedRecruit.tame(collisionOwner);
+        collisionShooter.setNoAi(true);
+        protectedRecruit.setNoAi(true);
+        collisionTarget.setNoAi(true);
+        collisionShooter.setNoGravity(true);
+        protectedRecruit.setNoGravity(true);
+        collisionTarget.setNoGravity(true);
+        collisionTarget.initializeNaturalFactionNpc(UUID.randomUUID(), NpcServiceBranch.MILITARY);
+        protectedRecruit.getAttribute(Attributes.MAX_HEALTH).setBaseValue(128.0D);
+        protectedRecruit.setHealth(protectedRecruit.getMaxHealth());
+        collisionTarget.getAttribute(Attributes.MAX_HEALTH).setBaseValue(128.0D);
+        collisionTarget.setHealth(collisionTarget.getMaxHealth());
+        ItemStack collisionWeapon = new ItemStack(ModItems.DC15_BLASTER.get());
+        collisionShooter.setItemInHand(InteractionHand.MAIN_HAND, collisionWeapon);
+        collisionShooter.createCargoContainer().setItem(
+                0, new ItemStack(ModItems.ENERGY_CELL.get()));
+        if (!RecruitAmmunitionService.tryConsumeForShot(collisionShooter)) {
+            helper.fail("Collision-level friendly-fire shooter could not consume its Energy Cell");
+            return;
+        }
+        ModItems.DC15_BLASTER.get().fireAt(
+                helper.getLevel(), collisionShooter, collisionTarget, collisionWeapon);
+        List<BlasterBoltEntity> crossingBolts = helper.getLevel().getEntitiesOfClass(
+                BlasterBoltEntity.class,
+                collisionShooter.getBoundingBox().inflate(20.0D),
+                candidate -> candidate.getOwner() == collisionShooter);
+        if (crossingBolts.size() != 1) {
+            helper.fail("Collision-level friendly-fire fixture did not create exactly one recruit-owned bolt");
+            return;
+        }
+        BlasterBoltEntity crossingBolt = crossingBolts.getFirst();
+        Vec3 collisionPathStart = crossingBolt.position();
+        Vec3 collisionPathEnd = collisionPathStart.add(
+                crossingBolt.getDeltaMovement().normalize().scale(24.0D));
+        if (protectedRecruit.getBoundingBox().clip(collisionPathStart, collisionPathEnd).isEmpty()
+                || collisionTarget.getBoundingBox().clip(collisionPathStart, collisionPathEnd).isEmpty()) {
+            helper.fail("Recruit-owned bolt trajectory did not cross both collision fixtures: start="
+                    + collisionPathStart + ", end=" + collisionPathEnd
+                    + ", protectedBox=" + protectedRecruit.getBoundingBox()
+                    + ", enemyBox=" + collisionTarget.getBoundingBox()
+                    + ", protectedHittable=" + protectedRecruit.canBeHitByProjectile()
+                    + ", enemyHittable=" + collisionTarget.canBeHitByProjectile());
+            return;
+        }
+        long collisionStartedTick = helper.getTick();
+        boolean[] complete = {false};
+        helper.onEachTick(() -> {
+            if (complete[0]) {
+                return;
+            }
+            if (protectedRecruit.hurtTime > 0
+                    || protectedRecruit.getLastDamageSource() != null) {
+                complete[0] = true;
+                helper.fail("Real recruit-owned bolt damaged the same-owner recruit in its path: health="
+                        + protectedRecruit.getHealth() + ", hurtTime=" + protectedRecruit.hurtTime
+                        + ", source=" + protectedRecruit.getLastDamageSource());
+                return;
+            }
+            if (collisionTarget.hurtTime > 0
+                    || collisionTarget.getLastDamageSource() != null) {
+                complete[0] = true;
+                helper.fail("Friendly-fire bolt crossed the protected recruit and damaged the enemy behind it: health="
+                        + collisionTarget.getHealth() + ", hurtTime=" + collisionTarget.hurtTime
+                        + ", source=" + collisionTarget.getLastDamageSource());
+                return;
+            }
+            if (crossingBolt.isRemoved()) {
+                if (crossingBolt.position().distanceToSqr(protectedRecruit.position()) > 6.25D) {
+                    complete[0] = true;
+                    helper.fail("Recruit-owned bolt was removed away from the protected collision target");
+                    return;
+                }
+                complete[0] = true;
+                collisionShooter.discard();
+                protectedRecruit.discard();
+                collisionTarget.discard();
+                helper.succeed();
+                return;
+            }
+            if (helper.getTick() - collisionStartedTick >= 20L) {
+                complete[0] = true;
+                helper.fail("Recruit-owned bolt did not collide with and stop at the protected recruit: bolt="
+                        + crossingBolt.position() + ", velocity=" + crossingBolt.getDeltaMovement()
+                        + ", protected=" + protectedRecruit.position()
+                        + ", enemy=" + collisionTarget.position());
+            }
+        });
     }
 
     private static void recruitSpawnEggs(GameTestHelper helper) {

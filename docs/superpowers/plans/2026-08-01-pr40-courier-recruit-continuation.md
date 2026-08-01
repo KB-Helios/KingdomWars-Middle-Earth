@@ -81,12 +81,12 @@
 - Modify: `src/main/java/galacticwars/clonewars/gametest/ModGameTests.java`
 - Modify as needed: existing blaster integration harnesses
 
-- [ ] Add RED coverage showing a tamed recruit cannot create a bolt with empty cargo, does not close into melee, consumes exactly one `energy_cell` for one shot, and resumes ranged fire when one cell is physically supplied.
-- [ ] Keep natural faction NPC ammunition outside player-managed cargo logistics; only tamed/player-managed recruits consume shared cargo cells.
-- [ ] Consume a cell immediately before `BlasterItem.fireAt`; overheated, blocked, or out-of-range attempts consume nothing. Preserve the ranged weapon classification when empty so melee never becomes an implicit fallback.
-- [ ] Extend friendly-fire GameTest coverage from direct policy invocation to a real recruit-owned projectile crossing an owned/allied recruit before an enemy. Assert the protected entity is unharmed and the projectile is consumed.
-- [ ] Seed existing tamed-recruit blaster fixtures with explicit Energy Cells where they intend to prove firing. Preserve the separate zero-army-supply test.
-- [ ] Run harnesses and GameTests twice, then commit `Require physical recruit blaster ammunition`.
+- [x] Add RED coverage showing a tamed recruit cannot create a bolt with empty cargo, does not close into melee, consumes exactly one `energy_cell` for one shot, and resumes ranged fire when one cell is physically supplied.
+- [x] Keep natural faction NPC ammunition outside player-managed cargo logistics; only tamed/player-managed recruits consume shared cargo cells.
+- [x] Consume a cell immediately before `BlasterItem.fireAt`; overheated, blocked, or out-of-range attempts consume nothing. Preserve the ranged weapon classification when empty so melee never becomes an implicit fallback.
+- [x] Extend friendly-fire GameTest coverage from direct policy invocation to a real recruit-owned projectile crossing an owned/allied recruit before an enemy. Assert the protected entity is unharmed and the projectile is consumed.
+- [x] Seed existing tamed-recruit blaster fixtures with explicit Energy Cells where they intend to prove firing. Preserve the separate zero-army-supply test.
+- [x] Run harnesses and GameTests twice, then commit `Require physical recruit blaster ammunition`. The focused ammunition harness and all 163 full harness tasks passed; both fresh NeoForge runs passed all 79 required tests. RED first proved that tamed blasters produced bolts without consuming seeded cells, while natural faction recruits correctly retained cargo-free firing.
 
 ## Task 6: Documentation, full verification, and publication
 
