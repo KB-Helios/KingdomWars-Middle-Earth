@@ -29,6 +29,7 @@ public final class SettlementSupplyLedgerTest {
                 == SupplyReservation.State.RELEASED, "expired lease released");
         repeatedRequestsAndEndpointAccounting(demand, storage, firstWorker);
         competingWorkersRespectExpiredLeases(storage);
+        releasesEveryActiveLease(storage);
         compactsCompletedDemandHistory(storage);
         handlesReservationCapacity(storage);
         System.out.println("SettlementSupplyLedgerTest passed");
@@ -82,6 +83,41 @@ public final class SettlementSupplyLedgerTest {
                         reacquired.reservation().orElseThrow().id(), secondWorker, 4, 111L)
                         == completed,
                 "successful competing delivery retry remains idempotent");
+    }
+
+    private static void releasesEveryActiveLease(StorageEndpoint storage) {
+        SupplyDemand demand = demand(2_500, 8, 0);
+        SupplyReservation firstActive = reservation(
+                2_501, demand.id(), 2_501, storage, SupplyReservation.State.ACTIVE);
+        SupplyReservation secondActive = reservation(
+                2_502, demand.id(), 2_502, storage, SupplyReservation.State.ACTIVE);
+        SupplyReservation completed = reservation(
+                2_503, demand.id(), 2_503, storage, SupplyReservation.State.COMPLETED);
+        SupplyReservation released = reservation(
+                2_504, demand.id(), 2_504, storage, SupplyReservation.State.RELEASED);
+        SettlementSupplyLedger ledger = new SettlementSupplyLedger(
+                UUID.randomUUID(),
+                List.of(demand),
+                List.of(firstActive, secondActive, completed, released),
+                12);
+
+        SettlementSupplyLedger deactivated = ledger.releaseAllActive();
+        assertTrue(deactivated.reservations().stream()
+                        .noneMatch(candidate -> candidate.state() == SupplyReservation.State.ACTIVE),
+                "bulk release terminates every active lease");
+        assertTrue(deactivated.reservation(completed.id()).orElseThrow().state()
+                        == SupplyReservation.State.COMPLETED,
+                "bulk release preserves completed history");
+        assertTrue(deactivated.reservation(released.id()).orElseThrow().state()
+                        == SupplyReservation.State.RELEASED,
+                "bulk release preserves released history");
+        assertEquals(demand.outstandingQuantity(),
+                deactivated.demands().getFirst().outstandingQuantity(),
+                "bulk release preserves demand quantity");
+        assertEquals(ledger.revision() + 1, deactivated.revision(),
+                "bulk release advances the ledger once");
+        assertTrue(deactivated.releaseAllActive() == deactivated,
+                "repeated bulk release is idempotent");
     }
 
     private static void compactsCompletedDemandHistory(StorageEndpoint storage) {

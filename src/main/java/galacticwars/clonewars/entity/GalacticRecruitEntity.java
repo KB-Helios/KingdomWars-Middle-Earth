@@ -5118,7 +5118,10 @@ public class GalacticRecruitEntity extends TamableAnimal
         }
 
         if (!furnace.getItem(0).isEmpty()) {
-            if (furnace.getItem(1).isEmpty()) {
+            BlockState stationState = level.getBlockState(stationPos);
+            boolean stationBurning = stationState.hasProperty(BlockStateProperties.LIT)
+                    && stationState.getValue(BlockStateProperties.LIT);
+            if (furnace.getItem(1).isEmpty() && !stationBurning) {
                 net.minecraft.world.item.Item fuel = this.availableCarriedCookingFuel(level);
                 if (fuel == null) {
                     net.minecraft.world.item.Item storedFuel =

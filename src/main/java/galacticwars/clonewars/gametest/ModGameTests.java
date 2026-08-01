@@ -139,6 +139,7 @@ import galacticwars.clonewars.settlement.StarterCampDeploymentService;
 import galacticwars.clonewars.workforce.WorkerPhase;
 import galacticwars.clonewars.workforce.WorkerProfession;
 import galacticwars.clonewars.workforce.CourierDispatchMode;
+import galacticwars.clonewars.workforce.CourierRouteExecutionState;
 import galacticwars.clonewars.workforce.CourierRouteMode;
 import galacticwars.clonewars.workforce.CourierTransferAction;
 import galacticwars.clonewars.workforce.CourierWaypoint;
@@ -228,6 +229,9 @@ public final class ModGameTests {
     private static final Identifier EMPTY_STRUCTURE = Identifier.withDefaultNamespace("empty");
     private static final int SMART_BRAIN_TEST_SETUP_INTERVAL = 300;
     private static final int SMART_BRAIN_CHUNK_READY_TIMEOUT = 300;
+    private static final int SMART_BRAIN_TEST_AREA_HORIZONTAL_SPACING = 160;
+    private static final int SMART_BRAIN_TEST_AREA_VERTICAL_SPACING = 120;
+    private static final int SMART_BRAIN_TEST_AREA_VERTICAL_LANES = 2;
     private static final AtomicInteger SMART_BRAIN_AREA_SEQUENCE = new AtomicInteger();
     private static final Map<Identifier, Consumer<GameTestHelper>> TESTS = createTests();
 
@@ -319,6 +323,9 @@ public final class ModGameTests {
         isolatedEnvironments.put(id("courier_live_lease_reload"), event.registerEnvironment(
                         id("courier_live_lease_reload_environment"),
                         new TestEnvironmentDefinition.AllOf(List.of())));
+        isolatedEnvironments.put(id("courier_hall_removal"), event.registerEnvironment(
+                        id("courier_hall_removal_environment"),
+                        new TestEnvironmentDefinition.AllOf(List.of())));
         isolatedEnvironments.put(id("commander_center_replay_runtime"), event.registerEnvironment(
                         id("commander_center_replay_runtime_environment"),
                         new TestEnvironmentDefinition.AllOf(List.of())));
@@ -355,24 +362,26 @@ public final class ModGameTests {
                 id("specialist_worker_loops"),
                 id("competing_courier_leases"),
                 id("courier_live_lease_reload"),
+                id("courier_hall_removal"),
                 id("local_recruit_protect_owner"),
                 id("command_marker_runtime"));
         for (Identifier testId : TESTS.keySet()) {
             int timeoutTicks = testId.equals(id("smart_brain_move_stall_recovery"))
                     ? 520
                     : Set.of(
-                    id("smart_brain_move_command"),
                     id("grouped_brain_authority"),
+                    id("grouped_protect_entity_runtime"),
+                    id("vehicle_embodied_runtime")).contains(testId)
+                    ? 600
+                    : Set.of(
+                    id("smart_brain_move_command"),
                     id("grouped_zero_supply_blaster"),
-                    id("grouped_patrol_pause_runtime"),
-                    id("grouped_protect_entity_runtime")).contains(testId)
+                    id("grouped_patrol_pause_runtime")).contains(testId)
                     ? 260
                     : testId.equals(id("smart_brain_follow_and_sit"))
-                            ? 720
+                            ? 900
                             : Set.of(id("command_marker_runtime"), id("field_command_authority")).contains(testId)
                                     ? 180
-                                    : testId.equals(id("vehicle_embodied_runtime"))
-                                            ? 260
                                     : testId.equals(id("mission_failure_retry_persistence"))
                                             ? 360
                                     : testId.equals(id("chapter_three_campaign_runtime"))
@@ -384,7 +393,7 @@ public final class ModGameTests {
                                     : testId.equals(id("natural_civilian_brain_runtime"))
                                             ? 600
                                     : testId.equals(id("faction_ai_reaction_runtime"))
-                                            ? 360
+                                            ? 900
                                     : testId.equals(id("black_box_farmer_door_lifecycle"))
                                             ? 700
                                     : testId.equals(id("recruit_door_command_resumption"))
@@ -395,15 +404,20 @@ public final class ModGameTests {
                                             ? 700
                                     : testId.equals(id("courier_live_lease_reload"))
                                             ? 700
+                                    : testId.equals(id("courier_hall_removal"))
+                                            ? 900
                                     : Set.of(
                                             id("local_recruit_protect_owner"),
                                             id("ungrouped_recruit_ranged_brain"),
                                             id("ungrouped_recruit_melee_brain"),
-                                            id("recruit_blaster_ammunition"),
                                             id("worker_safety_and_upkeep"),
                                             id("recruit_hazard_and_self_care"),
                                             id("faction_selection_transaction")).contains(testId)
                                             ? 360
+                                    : testId.equals(id("recruit_blaster_ammunition"))
+                                            ? 800
+                                    : testId.equals(id("blaster_friendly_fire"))
+                                            ? 400
                                             : 100;
             if (testId.equals(id("faction_selection_transaction"))) {
                 timeoutTicks = 2_000;
@@ -495,6 +509,7 @@ public final class ModGameTests {
         tests.put(id("hybrid_courier_dispatch"), ModGameTests::hybridCourierDispatch);
         tests.put(id("competing_courier_leases"), ModGameTests::competingCourierLeases);
         tests.put(id("courier_live_lease_reload"), ModGameTests::courierLiveLeaseReload);
+        tests.put(id("courier_hall_removal"), ModGameTests::courierHallRemoval);
         tests.put(id("animal_farmer_species_pairing"), ModGameTests::animalFarmerSpeciesPairing);
         tests.put(id("workforce_saved_data_authority"), ModGameTests::workforceSavedDataAuthority);
         tests.put(id("recruit_spawn_eggs"), ModGameTests::recruitSpawnEggs);
@@ -1463,31 +1478,14 @@ public final class ModGameTests {
                 InteractionHand.MAIN_HAND, new ItemStack(ModItems.DC15_BLASTER.get()));
         shooter.getAttribute(Attributes.MOVEMENT_SPEED).setBaseValue(0.0D);
         owner.setPos(shooter.getX(), shooter.getY(), shooter.getZ());
-
-        ItemStack marker = new ItemStack(ModItems.COMMAND_MARKER.get());
-        owner.setItemInHand(InteractionHand.MAIN_HAND, marker);
-        owner.setShiftKeyDown(true);
-        marker.interactLivingEntity(owner, target, InteractionHand.MAIN_HAND);
-        owner.setShiftKeyDown(false);
-        if (!shooter.handleMenuButton(owner, RecruitCommandMenu.BUTTON_ATTACK)
-                || shooter.getRecruitCommand() != RecruitmentAction.ATTACK_TARGET
-                || shooter.getTarget() != target) {
-            helper.fail("Physical-ammunition recruit could not receive its embodied attack order");
-            return;
-        }
-
-        target.setPos(
-                targetFarPosition.getX() + 0.5D,
-                targetFarPosition.getY(),
-                targetFarPosition.getZ() + 0.5D);
-        target.setDeltaMovement(Vec3.ZERO);
         Container cargo = shooter.createCargoContainer();
         cargo.setItem(0, new ItemStack(ModItems.ENERGY_CELL.get()));
         BlockPos wallBase = area.at(7, 1, 1);
         AABB shotArea = shooter.getBoundingBox().inflate(64.0D);
         Set<UUID> observedBolts = new java.util.HashSet<>();
-        int[] phase = {0};
+        int[] phase = {-1};
         int[] phaseStartedRecruitTick = {shooter.tickCount};
+        long indexWaitStartedTick = helper.getTick();
         boolean[] complete = {false};
 
         helper.onEachTick(() -> {
@@ -1508,6 +1506,41 @@ public final class ModGameTests {
 
             int elapsed = shooter.tickCount - phaseStartedRecruitTick[0];
             switch (phase[0]) {
+                case -1 -> {
+                    boolean shooterIndexed = helper.getLevel().getEntity(shooter.getUUID()) == shooter;
+                    boolean targetIndexed = helper.getLevel().getEntity(target.getUUID()) == target;
+                    boolean chunkTicking = helper.getLevel().areEntitiesActuallyLoadedAndTicking(
+                            ChunkPos.containing(shooter.blockPosition()));
+                    if (!shooterIndexed || !targetIndexed || !chunkTicking) {
+                        if (helper.getTick() - indexWaitStartedTick
+                                >= SMART_BRAIN_CHUNK_READY_TIMEOUT) {
+                            complete[0] = true;
+                            helper.fail("Physical-ammunition entities never entered the server index: shooter="
+                                    + shooterIndexed + ", target=" + targetIndexed
+                                    + ", chunkTicking=" + chunkTicking);
+                        }
+                        return;
+                    }
+                    ItemStack marker = new ItemStack(ModItems.COMMAND_MARKER.get());
+                    owner.setItemInHand(InteractionHand.MAIN_HAND, marker);
+                    owner.setShiftKeyDown(true);
+                    marker.interactLivingEntity(owner, target, InteractionHand.MAIN_HAND);
+                    owner.setShiftKeyDown(false);
+                    if (!shooter.handleMenuButton(owner, RecruitCommandMenu.BUTTON_ATTACK)
+                            || shooter.getRecruitCommand() != RecruitmentAction.ATTACK_TARGET
+                            || shooter.getTarget() != target) {
+                        complete[0] = true;
+                        helper.fail("Physical-ammunition recruit could not receive its embodied attack order");
+                        return;
+                    }
+                    target.setPos(
+                            targetFarPosition.getX() + 0.5D,
+                            targetFarPosition.getY(),
+                            targetFarPosition.getZ() + 0.5D);
+                    target.setDeltaMovement(Vec3.ZERO);
+                    phase[0] = 0;
+                    phaseStartedRecruitTick[0] = shooter.tickCount;
+                }
                 case 0 -> {
                     if (!observedBolts.isEmpty() || cells != 1) {
                         complete[0] = true;
@@ -1662,7 +1695,7 @@ public final class ModGameTests {
         owner.setYRot(-90.0F);
         long indexWaitStartedTick = helper.getTick();
         int[] phase = {0};
-        int[] phaseStartedRecruitTick = {0};
+        long[] phaseStartedGameTick = {0L};
         Vec3[] startingPosition = {Vec3.ZERO};
         Vec3[] heldPosition = {Vec3.ZERO};
         double[] startingDistance = {0.0D};
@@ -1695,15 +1728,19 @@ public final class ModGameTests {
                 invokeRecruitCommand(recruit, RecruitmentAction.FOLLOW_OWNER);
                 startingPosition[0] = recruit.position();
                 startingDistance[0] = recruit.distanceToSqr(owner);
-                phaseStartedRecruitTick[0] = recruit.tickCount;
+                phaseStartedGameTick[0] = helper.getTick();
                 phase[0] = 1;
                 return;
             }
-            if (phase[0] == 1 && recruit.tickCount - phaseStartedRecruitTick[0] >= 320) {
+            if (phase[0] == 1) {
+                long elapsed = helper.getTick() - phaseStartedGameTick[0];
                 boolean approachedOwner = recruit.distanceToSqr(owner) < startingDistance[0] - 4.0D;
                 boolean followedAnchor = recruit.position().distanceToSqr(startingPosition[0]) > 4.0D
                         && BrainUtil.hasMemory(recruit,
                         net.minecraft.world.entity.ai.memory.MemoryModuleType.WALK_TARGET);
+                if (!approachedOwner && !followedAnchor && elapsed < 520L) {
+                    return;
+                }
                 if (!approachedOwner && !followedAnchor) {
                     phase[0] = 4;
                     net.minecraft.world.level.pathfinder.Path activePath = recruit.getNavigation().getPath();
@@ -1723,7 +1760,8 @@ public final class ModGameTests {
                             + ", recruitChunkTicking=" + helper.getLevel().areEntitiesActuallyLoadedAndTicking(
                             ChunkPos.containing(recruit.blockPosition()))
                             + ", navigationDone=" + recruit.getNavigation().isDone()
-                            + ", recruitTicks=" + (recruit.tickCount - phaseStartedRecruitTick[0])
+                            + ", gameTicks=" + elapsed
+                            + ", recruitTicks=" + recruit.tickCount
                             + ", path=" + pathState(recruit, owner.blockPosition())
                             + ", activePath=" + (activePath == null ? "none" : "nodes="
                             + activePath.getNodeCount() + ", index=" + activePath.getNextNodeIndex()
@@ -1741,11 +1779,11 @@ public final class ModGameTests {
                 recruit.setWorkerProfession(WorkerProfession.FARMER);
                 invokeRecruitCommand(recruit, RecruitmentAction.HOLD_POSITION);
                 heldPosition[0] = recruit.position();
-                phaseStartedRecruitTick[0] = recruit.tickCount;
+                phaseStartedGameTick[0] = helper.getTick();
                 phase[0] = 2;
                 return;
             }
-            if (phase[0] == 2 && recruit.tickCount - phaseStartedRecruitTick[0] >= 20) {
+            if (phase[0] == 2 && helper.getTick() - phaseStartedGameTick[0] >= 20L) {
                 double heldDeltaX = recruit.getX() - heldPosition[0].x();
                 double heldDeltaZ = recruit.getZ() - heldPosition[0].z();
                 if (!recruit.isOrderedToSit()
@@ -1761,11 +1799,11 @@ public final class ModGameTests {
                     return;
                 }
                 invokeRecruitCommand(recruit, RecruitmentAction.CLEAR_TARGET);
-                phaseStartedRecruitTick[0] = recruit.tickCount;
+                phaseStartedGameTick[0] = helper.getTick();
                 phase[0] = 3;
                 return;
             }
-            if (phase[0] == 3 && recruit.tickCount - phaseStartedRecruitTick[0] >= 5) {
+            if (phase[0] == 3 && helper.getTick() - phaseStartedGameTick[0] >= 5L) {
                 phase[0] = 4;
                 if (recruit.isOrderedToSit()) {
                     helper.fail("Clear-target command incorrectly kept the recruit sitting");
@@ -2069,22 +2107,6 @@ public final class ModGameTests {
         // virtual/hibernate transition. A field Hold must therefore resolve the commander's
         // current server position, rather than pulling a live squad back to that stale anchor.
         BlockPos liveHoldPosition = area.at(5, 1, 1);
-        commander.setPos(liveHoldPosition.getX() + 0.5D, liveHoldPosition.getY(), liveHoldPosition.getZ() + 0.5D);
-        var holdState = ArmyFieldCommandService.execute(owner, new FieldCommandRequestPayload(
-                UUID.randomUUID(), FieldCommandAction.HOLD, List.of(squad.id())));
-        ArmyGroupOrder heldOrder = data.armyGroup(squad.id()).orElseThrow().order();
-        if (holdState.result() != FieldCommandResult.ACCEPTED
-                || heldOrder.type() != ArmyCommandType.HOLD_POSITION
-                || heldOrder.targetPosition().isEmpty()
-                || heldOrder.targetPosition().orElseThrow().blockPosition().x()
-                != commander.blockPosition().getX()
-                || heldOrder.targetPosition().orElseThrow().blockPosition().z()
-                != commander.blockPosition().getZ()) {
-            helper.fail("Field Hold did not use the live commander's server position: result="
-                    + holdState.result() + ", order=" + heldOrder + ", commander=" + commander.blockPosition());
-            return;
-        }
-
         BlockPos moveTarget = area.at(14, 1, 1);
         ArmyLocation moveLocation = new ArmyLocation(
                 helper.getLevel().dimension().identifier().toString(),
@@ -2092,12 +2114,8 @@ public final class ModGameTests {
         ArmyGroupOrder moveOrder = new ArmyGroupOrder(
                 ArmyCommandType.MOVE_TO_POSITION,
                 Optional.of(moveLocation), Optional.empty(), squad.order().formation(), squad.order().spacing());
-        if (!data.issueArmyOrder(owner.getUUID(), squad.id(), moveOrder)) {
-            helper.fail("Grouped SmartBrain setup could not persist its move order");
-            return;
-        }
-
-        long startedAt = helper.getTick();
+        long[] startedAt = {helper.getTick()};
+        boolean[] ordersIssued = {false};
         boolean[] complete = {false};
         helper.onEachTick(() -> {
             if (complete[0]) {
@@ -2105,6 +2123,46 @@ public final class ModGameTests {
             }
             boolean commanderIndexed = helper.getLevel().getEntity(commander.getUUID()) == commander;
             boolean soldierIndexed = helper.getLevel().getEntity(soldier.getUUID()) == soldier;
+            if (!ordersIssued[0]) {
+                if (!commanderIndexed || !soldierIndexed) {
+                    if (helper.getTick() - startedAt[0] >= SMART_BRAIN_CHUNK_READY_TIMEOUT) {
+                        complete[0] = true;
+                        helper.fail("Grouped SmartBrain entities never entered the server index: commander="
+                                + commanderIndexed + ", soldier=" + soldierIndexed);
+                    }
+                    return;
+                }
+                commander.setPos(
+                        liveHoldPosition.getX() + 0.5D,
+                        liveHoldPosition.getY(),
+                        liveHoldPosition.getZ() + 0.5D);
+                var holdState = ArmyFieldCommandService.execute(
+                        owner,
+                        new FieldCommandRequestPayload(
+                                UUID.randomUUID(), FieldCommandAction.HOLD, List.of(squad.id())));
+                ArmyGroupOrder heldOrder = data.armyGroup(squad.id()).orElseThrow().order();
+                if (holdState.result() != FieldCommandResult.ACCEPTED
+                        || heldOrder.type() != ArmyCommandType.HOLD_POSITION
+                        || heldOrder.targetPosition().isEmpty()
+                        || heldOrder.targetPosition().orElseThrow().blockPosition().x()
+                        != commander.blockPosition().getX()
+                        || heldOrder.targetPosition().orElseThrow().blockPosition().z()
+                        != commander.blockPosition().getZ()) {
+                    complete[0] = true;
+                    helper.fail("Field Hold did not use the live commander's server position: result="
+                            + holdState.result() + ", order=" + heldOrder
+                            + ", commander=" + commander.blockPosition());
+                    return;
+                }
+                if (!data.issueArmyOrder(owner.getUUID(), squad.id(), moveOrder)) {
+                    complete[0] = true;
+                    helper.fail("Grouped SmartBrain setup could not persist its move order");
+                    return;
+                }
+                ordersIssued[0] = true;
+                startedAt[0] = helper.getTick();
+                return;
+            }
             ArmyBrainState commanderState = BrainUtil.getMemory(commander, ArmyBrainMemoryTypes.ARMY_STATE);
             ArmyBrainState soldierState = BrainUtil.getMemory(soldier, ArmyBrainMemoryTypes.ARMY_STATE);
             ArmyMarchMemory commanderMarch = BrainUtil.getMemory(commander, ArmyBrainMemoryTypes.MARCH_STATE);
@@ -2116,7 +2174,7 @@ public final class ModGameTests {
             if (!commanderIndexed || !soldierIndexed || commanderState == null || soldierState == null
                     || commanderMarch == null || soldierMarch == null
                     || commanderWalkTarget == null || soldierWalkTarget == null) {
-                if (helper.getTick() - startedAt >= 180L) {
+                if (helper.getTick() - startedAt[0] >= 180L) {
                     complete[0] = true;
                     helper.fail("Live grouped SmartBrain did not publish state and formation walk targets: indexed="
                             + commanderIndexed + "/" + soldierIndexed
@@ -2587,24 +2645,9 @@ public final class ModGameTests {
             return;
         }
 
-        ItemStack marker = new ItemStack(ModItems.COMMAND_MARKER.get());
-        marker.set(ModDataComponents.COMMAND_TARGET,
-                CommandTargetSelection.entity(helper.getLevel(), protectedRecruit));
-        owner.setItemInHand(InteractionHand.MAIN_HAND, marker);
-        ArmyFieldCommandService.clearReplayHistory(owner.getUUID());
-        var protectedResult = ArmyFieldCommandService.execute(owner, new FieldCommandRequestPayload(
-                UUID.randomUUID(), FieldCommandAction.PROTECT_MARKED_ENTITY, List.of(squad.id())));
-        ArmyGroupOrder protectedOrder = data.armyGroup(squad.id()).orElseThrow().order();
-        if (protectedResult.result() != FieldCommandResult.ACCEPTED
-                || protectedOrder.type() != ArmyCommandType.PROTECT_ENTITY
-                || protectedOrder.targetEntityId().filter(protectedRecruit.getUUID()::equals).isEmpty()) {
-            helper.fail("Protect Marked Entity did not persist an authoritative group order: result="
-                    + protectedResult.result() + ", order=" + protectedOrder);
-            return;
-        }
-
-        long startedAt = helper.getTick();
+        long[] startedAt = {helper.getTick()};
         int[] threatStartedAtRecruitTick = {-1};
+        boolean[] commandIssued = {false};
         boolean[] complete = {false};
         helper.onEachTick(() -> {
             if (complete[0]) {
@@ -2614,10 +2657,43 @@ public final class ModGameTests {
                     && helper.getLevel().getEntity(soldier.getUUID()) == soldier
                     && helper.getLevel().getEntity(protectedRecruit.getUUID()) == protectedRecruit
                     && helper.getLevel().getEntity(attacker.getUUID()) == attacker;
+            if (!commandIssued[0]) {
+                if (!entitiesIndexed) {
+                    if (helper.getTick() - startedAt[0] >= SMART_BRAIN_CHUNK_READY_TIMEOUT) {
+                        complete[0] = true;
+                        helper.fail("Grouped Protect Entity fixtures never entered the server index");
+                    }
+                    return;
+                }
+                ItemStack marker = new ItemStack(ModItems.COMMAND_MARKER.get());
+                marker.set(ModDataComponents.COMMAND_TARGET,
+                        CommandTargetSelection.entity(helper.getLevel(), protectedRecruit));
+                owner.setItemInHand(InteractionHand.MAIN_HAND, marker);
+                ArmyFieldCommandService.clearReplayHistory(owner.getUUID());
+                var protectedResult = ArmyFieldCommandService.execute(
+                        owner,
+                        new FieldCommandRequestPayload(
+                                UUID.randomUUID(),
+                                FieldCommandAction.PROTECT_MARKED_ENTITY,
+                                List.of(squad.id())));
+                ArmyGroupOrder protectedOrder = data.armyGroup(squad.id()).orElseThrow().order();
+                if (protectedResult.result() != FieldCommandResult.ACCEPTED
+                        || protectedOrder.type() != ArmyCommandType.PROTECT_ENTITY
+                        || protectedOrder.targetEntityId()
+                                .filter(protectedRecruit.getUUID()::equals).isEmpty()) {
+                    complete[0] = true;
+                    helper.fail("Protect Marked Entity did not persist an authoritative group order: result="
+                            + protectedResult.result() + ", order=" + protectedOrder);
+                    return;
+                }
+                commandIssued[0] = true;
+                startedAt[0] = helper.getTick();
+                return;
+            }
             ArmyBrainState commanderState = BrainUtil.getMemory(commander, ArmyBrainMemoryTypes.ARMY_STATE);
             ArmyBrainState soldierState = BrainUtil.getMemory(soldier, ArmyBrainMemoryTypes.ARMY_STATE);
             if (!entitiesIndexed || commanderState == null || soldierState == null) {
-                if (helper.getTick() - startedAt >= 120L) {
+                if (helper.getTick() - startedAt[0] >= 120L) {
                     complete[0] = true;
                     helper.fail("Grouped Protect Entity squad never entered the live brain: indexed="
                             + entitiesIndexed + ", states=" + (commanderState != null) + "/"
@@ -2890,43 +2966,76 @@ public final class ModGameTests {
         collisionShooter.setItemInHand(InteractionHand.MAIN_HAND, collisionWeapon);
         collisionShooter.createCargoContainer().setItem(
                 0, new ItemStack(ModItems.ENERGY_CELL.get()));
-        if (!RecruitAmmunitionService.tryConsumeForShot(collisionShooter)) {
-            helper.fail("Collision-level friendly-fire shooter could not consume its Energy Cell");
-            return;
-        }
-        ModItems.DC15_BLASTER.get().fireAt(
-                helper.getLevel(), collisionShooter, collisionTarget, collisionWeapon);
-        List<BlasterBoltEntity> crossingBolts = helper.getLevel().getEntitiesOfClass(
-                BlasterBoltEntity.class,
-                collisionShooter.getBoundingBox().inflate(20.0D),
-                candidate -> candidate.getOwner() == collisionShooter);
-        if (crossingBolts.size() != 1) {
-            helper.fail("Collision-level friendly-fire fixture did not create exactly one recruit-owned bolt");
-            return;
-        }
-        BlasterBoltEntity crossingBolt = crossingBolts.getFirst();
-        Vec3 collisionPathStart = crossingBolt.position();
-        Vec3 collisionPathEnd = collisionPathStart.add(
-                crossingBolt.getDeltaMovement().normalize().scale(24.0D));
-        if (protectedRecruit.getBoundingBox().clip(collisionPathStart, collisionPathEnd).isEmpty()
-                || collisionTarget.getBoundingBox().clip(collisionPathStart, collisionPathEnd).isEmpty()) {
-            helper.fail("Recruit-owned bolt trajectory did not cross both collision fixtures: start="
-                    + collisionPathStart + ", end=" + collisionPathEnd
-                    + ", protectedBox=" + protectedRecruit.getBoundingBox()
-                    + ", enemyBox=" + collisionTarget.getBoundingBox()
-                    + ", protectedHittable=" + protectedRecruit.canBeHitByProjectile()
-                    + ", enemyHittable=" + collisionTarget.canBeHitByProjectile());
-            return;
-        }
-        long collisionStartedTick = helper.getTick();
-        boolean[] complete = {false};
+        long collisionIndexWaitStartedTick = helper.getTick();
+        int[] collisionPhase = {0};
+        long[] collisionPhaseStartedTick = {helper.getTick()};
+        BlasterBoltEntity[] crossingBolt = {null};
         helper.onEachTick(() -> {
-            if (complete[0]) {
+            if (collisionPhase[0] == 3) {
+                return;
+            }
+            if (collisionPhase[0] == 0) {
+                boolean entitiesIndexed = helper.getLevel().getEntity(collisionShooter.getUUID())
+                        == collisionShooter
+                        && helper.getLevel().getEntity(protectedRecruit.getUUID()) == protectedRecruit
+                        && helper.getLevel().getEntity(collisionTarget.getUUID()) == collisionTarget;
+                boolean chunkTicking = helper.getLevel().areEntitiesActuallyLoadedAndTicking(
+                        ChunkPos.containing(collisionShooter.blockPosition()));
+                if (!entitiesIndexed || !chunkTicking) {
+                    if (helper.getTick() - collisionIndexWaitStartedTick
+                            >= SMART_BRAIN_CHUNK_READY_TIMEOUT) {
+                        collisionPhase[0] = 3;
+                        helper.fail("Collision-level friendly-fire fixtures never became ready: indexed="
+                                + entitiesIndexed + ", chunkTicking=" + chunkTicking);
+                    }
+                    return;
+                }
+                if (!RecruitAmmunitionService.tryConsumeForShot(collisionShooter)) {
+                    collisionPhase[0] = 3;
+                    helper.fail("Collision-level friendly-fire shooter could not consume its Energy Cell");
+                    return;
+                }
+                ModItems.DC15_BLASTER.get().fireAt(
+                        helper.getLevel(), collisionShooter, collisionTarget, collisionWeapon);
+                collisionPhase[0] = 1;
+                collisionPhaseStartedTick[0] = helper.getTick();
+                return;
+            }
+
+            if (collisionPhase[0] == 1) {
+                if (helper.getTick() == collisionPhaseStartedTick[0]) {
+                    return;
+                }
+                List<BlasterBoltEntity> crossingBolts = helper.getLevel().getEntitiesOfClass(
+                        BlasterBoltEntity.class,
+                        collisionShooter.getBoundingBox().inflate(20.0D),
+                        candidate -> candidate.getOwner() == collisionShooter);
+                if (crossingBolts.size() != 1) {
+                    collisionPhase[0] = 3;
+                    helper.fail("Collision-level friendly-fire fixture did not create exactly one recruit-owned bolt");
+                    return;
+                }
+                crossingBolt[0] = crossingBolts.getFirst();
+                Vec3 collisionPathStart = crossingBolt[0].position();
+                Vec3 collisionPathEnd = collisionPathStart.add(
+                        crossingBolt[0].getDeltaMovement().normalize().scale(24.0D));
+                if (protectedRecruit.getBoundingBox().clip(collisionPathStart, collisionPathEnd).isEmpty()
+                        || collisionTarget.getBoundingBox().clip(collisionPathStart, collisionPathEnd).isEmpty()) {
+                    collisionPhase[0] = 3;
+                    helper.fail("Recruit-owned bolt trajectory did not cross both collision fixtures: start="
+                            + collisionPathStart + ", end=" + collisionPathEnd
+                            + ", protectedBox=" + protectedRecruit.getBoundingBox()
+                            + ", enemyBox=" + collisionTarget.getBoundingBox()
+                            + ", protectedHittable=" + protectedRecruit.canBeHitByProjectile()
+                            + ", enemyHittable=" + collisionTarget.canBeHitByProjectile());
+                    return;
+                }
+                collisionPhase[0] = 2;
                 return;
             }
             if (protectedRecruit.hurtTime > 0
                     || protectedRecruit.getLastDamageSource() != null) {
-                complete[0] = true;
+                collisionPhase[0] = 3;
                 helper.fail("Real recruit-owned bolt damaged the same-owner recruit in its path: health="
                         + protectedRecruit.getHealth() + ", hurtTime=" + protectedRecruit.hurtTime
                         + ", source=" + protectedRecruit.getLastDamageSource());
@@ -2934,29 +3043,29 @@ public final class ModGameTests {
             }
             if (collisionTarget.hurtTime > 0
                     || collisionTarget.getLastDamageSource() != null) {
-                complete[0] = true;
+                collisionPhase[0] = 3;
                 helper.fail("Friendly-fire bolt crossed the protected recruit and damaged the enemy behind it: health="
                         + collisionTarget.getHealth() + ", hurtTime=" + collisionTarget.hurtTime
                         + ", source=" + collisionTarget.getLastDamageSource());
                 return;
             }
-            if (crossingBolt.isRemoved()) {
-                if (crossingBolt.position().distanceToSqr(protectedRecruit.position()) > 6.25D) {
-                    complete[0] = true;
+            if (crossingBolt[0].isRemoved()) {
+                if (crossingBolt[0].position().distanceToSqr(protectedRecruit.position()) > 6.25D) {
+                    collisionPhase[0] = 3;
                     helper.fail("Recruit-owned bolt was removed away from the protected collision target");
                     return;
                 }
-                complete[0] = true;
+                collisionPhase[0] = 3;
                 collisionShooter.discard();
                 protectedRecruit.discard();
                 collisionTarget.discard();
                 helper.succeed();
                 return;
             }
-            if (helper.getTick() - collisionStartedTick >= 20L) {
-                complete[0] = true;
+            if (helper.getTick() - collisionPhaseStartedTick[0] >= 20L) {
+                collisionPhase[0] = 3;
                 helper.fail("Recruit-owned bolt did not collide with and stop at the protected recruit: bolt="
-                        + crossingBolt.position() + ", velocity=" + crossingBolt.getDeltaMovement()
+                        + crossingBolt[0].position() + ", velocity=" + crossingBolt[0].getDeltaMovement()
                         + ", protected=" + protectedRecruit.position()
                         + ", enemy=" + collisionTarget.position());
             }
@@ -7998,8 +8107,9 @@ public final class ModGameTests {
         }
 
         GalacticRecruitEntity[] activeWorker = {worker};
+        CompoundTag[] persistedWorker = {null};
         int[] phase = {0};
-        int[] phaseStartTick = {worker.tickCount};
+        long[] phaseStartGameTick = {helper.getTick()};
         boolean[] selfCareBlockedDuringSafety = {false};
         boolean[] complete = {false};
         helper.onEachTick(() -> {
@@ -8024,29 +8134,50 @@ public final class ModGameTests {
                                 + ", cargo=" + workerInventoryCount(current));
                         return;
                     }
-                    CompoundTag saved = saveRecruit(current, helper.getLevel());
-                    current.discard();
+                    persistedWorker[0] = saveRecruit(current, helper.getLevel());
+                    current.remove(Entity.RemovalReason.UNLOADED_TO_CHUNK);
                     threat.discard();
-                    GalacticRecruitEntity loaded = loadRecruit(saved, helper.getLevel());
-                    if (workerInventoryCount(loaded) != 3) {
+                    if (!current.isRemoved()) {
                         complete[0] = true;
-                        helper.fail("Threatened worker cargo did not decode from its save: cargo="
-                                + workerInventoryCount(loaded));
+                        helper.fail("Threatened worker did not cross a real unload boundary");
                         return;
                     }
-                    if (!helper.getLevel().addFreshEntity(loaded)) {
-                        complete[0] = true;
-                        helper.fail("Threatened worker could not be restored after save");
-                        return;
-                    }
-                    activeWorker[0] = loaded;
                     phase[0] = 1;
-                    phaseStartTick[0] = loaded.tickCount;
+                    phaseStartGameTick[0] = helper.getTick();
                     return;
                 }
-                if (current.tickCount - phaseStartTick[0] >= 80) {
+                if (helper.getTick() - phaseStartGameTick[0] >= 80L) {
                     complete[0] = true;
                     helper.fail("Damaged worker never entered its safety retreat");
+                }
+                return;
+            }
+
+            if (phase[0] == 1) {
+                GalacticRecruitEntity loaded = loadRecruit(
+                        persistedWorker[0], helper.getLevel());
+                if (!loaded.getUUID().equals(worker.getUUID())
+                        || workerInventoryCount(loaded) != 3) {
+                    complete[0] = true;
+                    helper.fail("Threatened worker identity or cargo did not decode from its save: id="
+                            + loaded.getUUID() + ", cargo=" + workerInventoryCount(loaded));
+                    return;
+                }
+                if (!helper.getLevel().addFreshEntity(loaded)) {
+                    complete[0] = true;
+                    helper.fail("Threatened worker could not be restored after unload");
+                    return;
+                }
+                activeWorker[0] = loaded;
+                phase[0] = 2;
+                phaseStartGameTick[0] = helper.getTick();
+                return;
+            }
+
+            if (helper.getLevel().getEntity(current.getUUID()) != current) {
+                if (helper.getTick() - phaseStartGameTick[0] >= 40L) {
+                    complete[0] = true;
+                    helper.fail("Reloaded worker never entered the server entity index");
                 }
                 return;
             }
@@ -8129,7 +8260,7 @@ public final class ModGameTests {
                 helper.succeed();
                 return;
             }
-            if (current.tickCount - phaseStartTick[0] >= 150) {
+            if (helper.getTick() - phaseStartGameTick[0] >= 200L) {
                 complete[0] = true;
                 helper.fail("Reloaded worker did not resume after 100 threat-free ticks: "
                         + current.getWorkerStatus() + ", selfCareBlocked="
@@ -8773,6 +8904,315 @@ public final class ModGameTests {
                         + ", courier=" + currentCourier[0].getWorkerStatus()
                         + ", source=" + sourceCells + ", courierCargo=" + courierCells
                         + ", requester=" + requesterCells
+                        + ", demand=" + currentDemand
+                        + ", reservations=" + ledger.reservations());
+            }
+        });
+    }
+
+    /**
+     * Proves that owner removal of the authoritative Command Center releases an in-flight
+     * automatic lease, pauses a configured route, and preserves every physical item.
+     */
+    private static void courierHallRemoval(GameTestHelper helper) {
+        SmartBrainTestArea area = prepareSmartBrainTestAreaAt(
+                helper,
+                GameType.CREATIVE,
+                -2,
+                14,
+                -2,
+                8,
+                isolatedCapital(helper, 217));
+        ServerLevel level = helper.getLevel();
+        ServerPlayer owner = area.player();
+        BlockPos hallPos = area.at(1, 1, 3);
+        CommandCenterBlockEntity hall = placeCommandCenter(helper, hallPos);
+        hall.claim(owner);
+        hall.setFaction("galacticwars:republic");
+        KingdomSavedData data = KingdomSavedData.get(level);
+        KingdomRecord kingdom = data.activateHall(
+                owner.getUUID(),
+                hall.factionId(),
+                level.dimension().identifier().toString(),
+                hallPos).orElse(null);
+        if (kingdom == null) {
+            helper.fail("Courier hall-removal fixture could not activate its kingdom");
+            return;
+        }
+        FactionAlignmentSavedData.get(level).setScore(
+                owner.getUUID(), FactionId.of("republic"), 100);
+        applyCampaignSetupEvent(
+                ProgressionSavedData.get(level),
+                owner,
+                ProgressionEventType.FACTION_PLEDGED,
+                "galacticwars:republic");
+
+        GalacticRecruitEntity firstCourier = spawnRecruitAt(
+                helper, ModEntityTypes.CLONE_TROOPER.get(), area.at(3, 1, 3));
+        GalacticRecruitEntity secondCourier = spawnRecruitAt(
+                helper, ModEntityTypes.CLONE_TROOPER.get(), area.at(3, 1, 6));
+        GalacticRecruitEntity requester = spawnRecruitAt(
+                helper, ModEntityTypes.CLONE_TROOPER.get(), area.at(11, 1, 3));
+        requester.initializeFromSpawnEgg();
+        requester.tame(owner);
+        requester.setNoAi(true);
+        if (!data.registerRecruit(
+                owner.getUUID(), requester.getUUID(), NpcServiceBranch.CIVILIAN)) {
+            helper.fail("Courier hall-removal requester could not join the settlement");
+            return;
+        }
+        firstCourier.initializeFromSpawnEgg();
+        secondCourier.initializeFromSpawnEgg();
+        owner.setPos(firstCourier.getX(), firstCourier.getY(), firstCourier.getZ());
+        if (!firstCourier.handleMenuButton(owner, RecruitCommandMenu.BUTTON_HIRE)
+                || !firstCourier.handleMenuButton(
+                        owner, RecruitCommandMenu.BUTTON_ASSIGN_COURIER)) {
+            helper.fail("First hall-removal courier could not be hired and assigned");
+            return;
+        }
+        owner.setPos(secondCourier.getX(), secondCourier.getY(), secondCourier.getZ());
+        if (!secondCourier.handleMenuButton(owner, RecruitCommandMenu.BUTTON_HIRE)
+                || !secondCourier.handleMenuButton(
+                        owner, RecruitCommandMenu.BUTTON_ASSIGN_COURIER)) {
+            helper.fail("Second hall-removal courier could not be hired and assigned");
+            return;
+        }
+
+        WorksiteRecord sharedWorksite = data.assignedWorksite(
+                owner.getUUID(), firstCourier.getUUID()).orElse(null);
+        if (sharedWorksite == null
+                || data.assignedWorksite(owner.getUUID(), secondCourier.getUUID())
+                        .filter(candidate -> candidate.id().equals(sharedWorksite.id()))
+                        .isEmpty()) {
+            helper.fail("Hall-removal couriers did not share the frontier worksite");
+            return;
+        }
+        var configuration = sharedWorksite.configuration();
+        WorksiteUpdateResult dispatchConfigured = data.configureWorksite(
+                owner.getUUID(),
+                sharedWorksite.id(),
+                configuration.revision(),
+                configuration.bounds(),
+                configuration.kingdomAccess(),
+                configuration.priority(),
+                configuration.overlayVisible(),
+                configuration.itemFilters(),
+                CourierDispatchMode.HYBRID);
+        if (!dispatchConfigured.accepted()) {
+            helper.fail("Hall-removal hybrid dispatch configuration failed: "
+                    + dispatchConfigured.reasonCode());
+            return;
+        }
+        String dimensionId = level.dimension().identifier().toString();
+        List<CourierWaypoint> route = List.of(
+                new CourierWaypoint(
+                        dimensionId,
+                        area.at(4, 1, 6).getX(),
+                        area.at(4, 1, 6).getY(),
+                        area.at(4, 1, 6).getZ(),
+                        List.of(CourierTransferAction.waitTicks(400))),
+                new CourierWaypoint(
+                        dimensionId,
+                        area.at(10, 1, 6).getX(),
+                        area.at(10, 1, 6).getY(),
+                        area.at(10, 1, 6).getZ(),
+                        List.of(CourierTransferAction.waitTicks(1))));
+        WorksiteRecord hybridWorksite = dispatchConfigured.worksite().orElseThrow();
+        WorksiteUpdateResult routeConfigured = data.configureWorksiteRoute(
+                owner.getUUID(),
+                hybridWorksite.id(),
+                hybridWorksite.configuration().revision(),
+                route,
+                CourierRouteMode.LOOP);
+        if (!routeConfigured.accepted()) {
+            helper.fail("Hall-removal route configuration failed: "
+                    + routeConfigured.reasonCode());
+            return;
+        }
+
+        Container requesterCargo = requester.createCargoContainer();
+        for (int slot = 0; slot < requesterCargo.getContainerSize(); slot++) {
+            requesterCargo.setItem(slot, new ItemStack(Items.COBBLESTONE, 64));
+        }
+        putContainerItem(hall, new ItemStack(ModItems.ENERGY_CELL.get(), 4));
+        SupplyDemand demand = new SupplyDemand(
+                UUID.randomUUID(),
+                SupplyCategory.AMMUNITION,
+                "galacticwars:energy_cell",
+                4,
+                0,
+                100,
+                "recruit/" + requester.getUUID() + "/hall_removal");
+        UUID settlementId = kingdom.settlement().id();
+        if (!data.requestSupply(owner.getUUID(), settlementId, demand)) {
+            helper.fail("Courier hall-removal demand was rejected");
+            return;
+        }
+
+        GalacticRecruitEntity[] leaseCourier = {null};
+        GalacticRecruitEntity[] routeCourier = {null};
+        UUID[] reservationId = {null};
+        CourierRouteExecutionState[] frozenRoute = {null};
+        int[] phase = {0};
+        long[] phaseStartedAt = {helper.getTick()};
+        boolean[] complete = {false};
+        helper.onEachTick(() -> {
+            if (complete[0]) {
+                return;
+            }
+            SettlementSupplyLedger ledger = data.supplyLedger(settlementId).orElseThrow();
+            SupplyDemand currentDemand = ledger.demands().stream()
+                    .filter(candidate -> candidate.id().equals(demand.id()))
+                    .findFirst().orElseThrow();
+            List<SupplyReservation> activeReservations = ledger.reservations().stream()
+                    .filter(candidate -> candidate.active(level.getGameTime()))
+                    .toList();
+            int firstCells = countContainerItem(
+                    firstCourier.createCargoContainer(), ModItems.ENERGY_CELL.get());
+            int secondCells = countContainerItem(
+                    secondCourier.createCargoContainer(), ModItems.ENERGY_CELL.get());
+            int requesterCells = countContainerItem(
+                    requesterCargo, ModItems.ENERGY_CELL.get());
+            int hallCells = level.getBlockEntity(hallPos) instanceof Container currentHall
+                    ? countContainerItem(currentHall, ModItems.ENERGY_CELL.get())
+                    : 0;
+            if (firstCells + secondCells + requesterCells + hallCells != 4) {
+                complete[0] = true;
+                helper.fail("Hall removal violated physical courier conservation: first="
+                        + firstCells + ", second=" + secondCells
+                        + ", requester=" + requesterCells + ", hall=" + hallCells
+                        + ", phase=" + phase[0]);
+                return;
+            }
+
+            switch (phase[0]) {
+                case 0 -> {
+                    GalacticRecruitEntity loaded = firstCells == 4
+                            ? firstCourier
+                            : secondCells == 4 ? secondCourier : null;
+                    GalacticRecruitEntity routing = loaded == firstCourier
+                            ? secondCourier
+                            : loaded == secondCourier ? firstCourier : null;
+                    if (loaded != null
+                            && routing.courierRouteExecutionState().dwellTicksRemaining() > 0
+                            && loaded.getWorkerStatus().reasonCode()
+                                    .equals("recipient_inventory_full")
+                            && currentDemand.outstandingQuantity() == 4
+                            && activeReservations.size() == 1
+                            && activeReservations.getFirst().workerId()
+                                    .equals(loaded.getUUID())) {
+                        leaseCourier[0] = loaded;
+                        routeCourier[0] = routing;
+                        reservationId[0] = activeReservations.getFirst().id();
+                        frozenRoute[0] = routing.courierRouteExecutionState();
+                        owner.setPos(hallPos.getX() + 0.5D, hallPos.getY(), hallPos.getZ() + 0.5D);
+                        if (!owner.gameMode.destroyBlock(hallPos)
+                                || !level.getBlockState(hallPos).isAir()
+                                || data.isHallActive(owner.getUUID())) {
+                            complete[0] = true;
+                            helper.fail("Owner block removal did not deactivate the Command Center");
+                            return;
+                        }
+                        SupplyReservation released = data.supplyLedger(settlementId)
+                                .flatMap(current -> current.reservation(reservationId[0]))
+                                .orElse(null);
+                        if (released == null
+                                || released.state() != SupplyReservation.State.RELEASED) {
+                            complete[0] = true;
+                            helper.fail("Command Center removal did not release the active lease: "
+                                    + released);
+                            return;
+                        }
+                        phase[0] = 1;
+                        phaseStartedAt[0] = helper.getTick();
+                    }
+                }
+                case 1 -> {
+                    SupplyReservation released = ledger.reservation(reservationId[0])
+                            .orElse(null);
+                    if (released == null
+                            || released.state() != SupplyReservation.State.RELEASED
+                            || !activeReservations.isEmpty()
+                            || currentDemand.outstandingQuantity() != 4
+                            || countContainerItem(
+                                    leaseCourier[0].createCargoContainer(),
+                                    ModItems.ENERGY_CELL.get()) != 4
+                            || requesterCells != 0
+                            || !routeCourier[0].courierRouteExecutionState()
+                                    .equals(frozenRoute[0])) {
+                        complete[0] = true;
+                        helper.fail("Inactive settlement mutated courier state: lease="
+                                + released + ", active=" + activeReservations
+                                + ", demand=" + currentDemand
+                                + ", leaseCargo=" + countContainerItem(
+                                        leaseCourier[0].createCargoContainer(),
+                                        ModItems.ENERGY_CELL.get())
+                                + ", requester=" + requesterCells
+                                + ", route=" + routeCourier[0].courierRouteExecutionState());
+                        return;
+                    }
+                    if (helper.getTick() - phaseStartedAt[0] >= 45
+                            && leaseCourier[0].getWorkerStatus().phase() == WorkerPhase.PAUSED
+                            && routeCourier[0].getWorkerStatus().phase() == WorkerPhase.PAUSED
+                            && leaseCourier[0].getWorkerStatus().reasonCode()
+                                    .equals("upkeep_unpaid")
+                            && routeCourier[0].getWorkerStatus().reasonCode()
+                                    .equals("upkeep_unpaid")) {
+                        requesterCargo.setItem(8, ItemStack.EMPTY);
+                        CommandCenterBlockEntity replacement = placeCommandCenter(helper, hallPos);
+                        replacement.claim(owner);
+                        replacement.setFaction("galacticwars:republic");
+                        if (data.activateHall(
+                                owner.getUUID(),
+                                replacement.factionId(),
+                                dimensionId,
+                                hallPos).isEmpty()) {
+                            complete[0] = true;
+                            helper.fail("Removed Command Center could not be reactivated");
+                            return;
+                        }
+                        phase[0] = 2;
+                        phaseStartedAt[0] = helper.getTick();
+                    }
+                }
+                case 2 -> {
+                    SupplyReservation released = ledger.reservation(reservationId[0])
+                            .orElse(null);
+                    int retainedCargo = countContainerItem(
+                            leaseCourier[0].createCargoContainer(),
+                            ModItems.ENERGY_CELL.get());
+                    if (released == null
+                            || released.state() != SupplyReservation.State.RELEASED
+                            || !activeReservations.isEmpty()
+                            || currentDemand.outstandingQuantity() != 4
+                            || retainedCargo != 4
+                            || requesterCells != 0) {
+                        complete[0] = true;
+                        helper.fail("Reactivation completed or duplicated a released lease: lease="
+                                + released + ", active=" + activeReservations
+                                + ", demand=" + currentDemand
+                                + ", cargo=" + retainedCargo
+                                + ", requester=" + requesterCells);
+                        return;
+                    }
+                    if (!routeCourier[0].courierRouteExecutionState().equals(frozenRoute[0])
+                            && routeCourier[0].getWorkerStatus().phase() != WorkerPhase.PAUSED) {
+                        complete[0] = true;
+                        firstCourier.discard();
+                        secondCourier.discard();
+                        requester.discard();
+                        helper.succeed();
+                    }
+                }
+                default -> throw new IllegalStateException(
+                        "Unknown courier hall-removal phase " + phase[0]);
+            }
+
+            if (!complete[0] && helper.getTick() - phaseStartedAt[0] >= 700) {
+                complete[0] = true;
+                helper.fail("Courier hall-removal lifecycle timed out: phase=" + phase[0]
+                        + ", first=" + firstCourier.getWorkerStatus()
+                        + ", second=" + secondCourier.getWorkerStatus()
                         + ", demand=" + currentDemand
                         + ", reservations=" + ledger.reservations());
             }
@@ -9714,12 +10154,21 @@ public final class ModGameTests {
             int minZ,
             int maxZ
     ) {
-        int verticalLane = SMART_BRAIN_AREA_SEQUENCE.getAndIncrement();
+        int lane = SMART_BRAIN_AREA_SEQUENCE.getAndIncrement();
+        int horizontalLane = lane / SMART_BRAIN_TEST_AREA_VERTICAL_LANES;
+        int verticalLane = lane % SMART_BRAIN_TEST_AREA_VERTICAL_LANES;
         BlockPos testOrigin = helper.absolutePos(BlockPos.ZERO);
         int baseY = Math.min(
                 helper.getLevel().getMaxY() - 8,
-                helper.getLevel().getMinY() + 256 + verticalLane * 12);
-        BlockPos isolatedBase = new BlockPos(testOrigin.getX(), baseY, testOrigin.getZ());
+                helper.getLevel().getMinY() + 256
+                        + verticalLane * SMART_BRAIN_TEST_AREA_VERTICAL_SPACING);
+        // Two well-separated vertical floors halve chunk generation, while the horizontal
+        // lane prevents the old max-height clamp from collapsing later fixtures together.
+        BlockPos isolatedBase = new BlockPos(
+                testOrigin.getX()
+                        + horizontalLane * SMART_BRAIN_TEST_AREA_HORIZONTAL_SPACING,
+                baseY,
+                testOrigin.getZ());
         return prepareSmartBrainTestAreaAt(
                 helper, playerGameType, minX, maxX, minZ, maxZ,
                 isolatedBase);
@@ -9769,6 +10218,29 @@ public final class ModGameTests {
         // advances a player's entity-ticking chunk ticket after a same-dimension teleport.
         helper.getLevel().getChunkSource().move(player);
         return new SmartBrainTestArea(base, player);
+    }
+
+    private static boolean areSmartBrainAreaChunksTicking(
+            GameTestHelper helper,
+            SmartBrainTestArea area,
+            int minX,
+            int maxX,
+            int minZ,
+            int maxZ
+    ) {
+        int minChunkX = Math.min(area.base().getX() + minX, area.base().getX() + maxX) >> 4;
+        int maxChunkX = Math.max(area.base().getX() + minX, area.base().getX() + maxX) >> 4;
+        int minChunkZ = Math.min(area.base().getZ() + minZ, area.base().getZ() + maxZ) >> 4;
+        int maxChunkZ = Math.max(area.base().getZ() + minZ, area.base().getZ() + maxZ) >> 4;
+        for (int chunkX = minChunkX; chunkX <= maxChunkX; chunkX++) {
+            for (int chunkZ = minChunkZ; chunkZ <= maxChunkZ; chunkZ++) {
+                if (!helper.getLevel().areEntitiesActuallyLoadedAndTicking(
+                        new ChunkPos(chunkX, chunkZ))) {
+                    return false;
+                }
+            }
+        }
+        return true;
     }
 
     private static GalacticRecruitEntity spawnRecruitAt(
@@ -10089,12 +10561,20 @@ public final class ModGameTests {
         }
 
         private void waitForIndexAndPrepare() {
-            boolean allIndexed = this.vehicles.stream().allMatch(
-                    vehicle -> this.helper.getLevel().getEntity(vehicle.getUUID()) == vehicle);
-            if (!allIndexed) {
-                if (this.helper.getTick() - this.indexWaitStartedTick >= 120L) {
+            long indexedVehicles = this.vehicles.stream()
+                    .filter(vehicle -> this.helper.getLevel().getEntity(vehicle.getUUID()) == vehicle)
+                    .count();
+            long tickingVehicles = this.vehicles.stream()
+                    .filter(vehicle -> this.helper.getLevel().areEntitiesActuallyLoadedAndTicking(
+                            ChunkPos.containing(vehicle.blockPosition())))
+                    .count();
+            if (indexedVehicles != this.vehicles.size() || tickingVehicles != this.vehicles.size()) {
+                if (this.helper.getTick() - this.indexWaitStartedTick
+                        >= SMART_BRAIN_CHUNK_READY_TIMEOUT) {
                     this.phase = 3;
-                    this.helper.fail("Vehicle chassis never entered the server entity index");
+                    this.helper.fail("Vehicle chassis never became ready: indexed="
+                            + indexedVehicles + "/" + this.vehicles.size()
+                            + ", ticking=" + tickingVehicles + "/" + this.vehicles.size());
                 }
                 return;
             }
@@ -10487,7 +10967,9 @@ public final class ModGameTests {
         private final GameTestHelper helper;
         private final SmartBrainTestArea area;
         private final List<GalacticRecruitEntity> responders = new ArrayList<>();
+        private final long chunkWaitStartedTick;
         private boolean started;
+        private boolean fixturesReady;
         private boolean complete;
         private boolean alertPrecedenceVerified;
         private boolean warningCooldownVerified;
@@ -10508,6 +10990,7 @@ public final class ModGameTests {
         ) {
             this.helper = helper;
             this.area = area;
+            this.chunkWaitStartedTick = helper.getTick();
         }
 
         private void tick() {
@@ -10515,10 +10998,45 @@ public final class ModGameTests {
                 return;
             }
             if (!this.started) {
+                if (!areSmartBrainAreaChunksTicking(
+                        this.helper, this.area, -2, 50, -2, 12)) {
+                    if (this.helper.getTick() - this.chunkWaitStartedTick
+                            >= SMART_BRAIN_CHUNK_READY_TIMEOUT) {
+                        this.fail("Faction AI reaction area never became entity-ticking");
+                    }
+                    return;
+                }
                 this.start();
                 if (this.complete) {
                     return;
                 }
+            }
+
+            if (!this.fixturesReady) {
+                List<GalacticRecruitEntity> fixtures = new ArrayList<>(this.responders);
+                fixtures.add(this.commander);
+                fixtures.add(this.trader);
+                fixtures.add(this.civilian);
+                fixtures.add(this.fallbackTrooper);
+                fixtures.add(this.foreignOutpostTrooper);
+                long indexedFixtures = fixtures.stream()
+                        .filter(recruit -> this.helper.getLevel().getEntity(recruit.getUUID()) == recruit)
+                        .count();
+                long tickingFixtures = fixtures.stream()
+                        .filter(recruit -> this.helper.getLevel().areEntitiesActuallyLoadedAndTicking(
+                                ChunkPos.containing(recruit.blockPosition())))
+                        .count();
+                if (indexedFixtures != fixtures.size() || tickingFixtures != fixtures.size()) {
+                    if (this.helper.getTick() - this.startTick
+                            >= SMART_BRAIN_CHUNK_READY_TIMEOUT) {
+                        this.fail("Faction AI reaction fixtures never became ready: indexed="
+                                + indexedFixtures + "/" + fixtures.size()
+                                + ", ticking=" + tickingFixtures + "/" + fixtures.size());
+                    }
+                    return;
+                }
+                this.fixturesReady = true;
+                this.startTick = this.helper.getTick();
             }
 
             ServerLevel level = this.helper.getLevel();

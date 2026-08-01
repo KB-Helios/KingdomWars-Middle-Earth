@@ -119,6 +119,23 @@
 - [x] Free exactly one requester slot and prove the reloaded courier completes the same lease with exact physical conservation and no stale cargo. No production repair was required; the existing Minecraft 26.2 runtime already preserved the cargo and lease invariants.
 - [x] Run the focused GameTest twice, then run the full harness, two full GameTest passes, `buildAll`, and `git diff --check` before committing. Both focused runs passed 1/1, `runHarnesses` passed 176 actionable tasks, both fresh full runs passed all 80 required GameTests, and `buildAll` passed 186 actionable tasks for Fabric and NeoForge.
 
+## Task 8: Command Center removal during active courier work
+
+**Files:**
+
+- Modify: `src/main/java/galacticwars/clonewars/workforce/SettlementSupplyLedger.java`
+- Modify: `src/main/java/galacticwars/clonewars/kingdom/KingdomSavedData.java`
+- Modify: `src/test/java/galacticwars/clonewars/kingdom/SettlementSupplyPersistenceTest.java`
+- Modify: `src/main/java/galacticwars/clonewars/gametest/ModGameTests.java`
+- Modify: `README.md`
+- Modify: `docs/authorized-source-intake.md`
+
+- [x] Add a RED persistence harness proving authoritative Command Center deactivation releases all active settlement leases and rejects new reservations while inactive without completing or deleting their demands. RED failed because the original reservation remained `ACTIVE`; the repaired harness passes with an explicit `settlement_inactive` retry rejection.
+- [x] Add an ordinary owner-removal GameTest with two HYBRID couriers sharing a worksite: one holds an exact automatic batch while the other executes the configured-route fallback. Do not mutate private worker phases, invoke the controller, or move either courier after assignment.
+- [x] Prove removal through the owner's real `destroyBlock` path pauses both couriers, releases the live lease, preserves the full carried batch and outstanding demand, performs no ghost delivery, and freezes the configured route until authority returns.
+- [x] Re-place and reactivate the same Command Center, then prove the configured route resumes from durable state while the released automatic lease remains terminal and its cargo remains conserved for player recovery.
+- [x] Run focused harnesses and the focused GameTest twice, then run the full harness, two full GameTest passes, `buildAll`, and `git diff --check` before committing. `SettlementSupplyLedgerTest` and `SettlementSupplyPersistenceTest` passed, both focused `courier_hall_removal` runs passed 1/1, the final `runHarnesses` gate passed 176 actionable tasks, two fresh aggregate NeoForge runs passed all 81 required GameTests, and `buildAll` passed 186 actionable tasks for Fabric and NeoForge. Aggregate verification also exposed and fixed the cook's false second-fuel request for an already-lit furnace and replaced premature distant-fixture clocks with entity-index and entity-ticking readiness gates.
+
 ## Completion gate
 
-This slice is complete when courier contention and expiry are conservation-proven, an exact automatic transfer survives a live-lease reload, concurrent role/revision/replay cases are rejected server-side, follow/hold/patrol/work commands survive real door traversal, self-care retains ordinary commands while yielding to danger and combat, tamed recruit bolts consume physical Energy Cells with no empty-gun melee fallback, collision-level friendly-fire proof passes, provenance is current, and all four verification gates are green.
+This slice is complete when courier contention and expiry are conservation-proven, an exact automatic transfer survives a live-lease reload, owner removal of settlement authority releases leases and pauses/resumes configured routes without physical loss or ghost delivery, concurrent role/revision/replay cases are rejected server-side, follow/hold/patrol/work commands survive real door traversal, self-care retains ordinary commands while yielding to danger and combat, tamed recruit bolts consume physical Energy Cells with no empty-gun melee fallback, collision-level friendly-fire proof passes, provenance is current, and all four verification gates are green.

@@ -17,6 +17,7 @@ public final class SettlementSupplyPersistenceTest {
         reservationRequiresTargetSettlementMembership();
         completionRevalidatesWorkerMembership();
         completionRevalidatesPersistedStorageEndpoint();
+        deactivationReleasesActiveReservations();
         System.out.println("SettlementSupplyPersistenceTest passed");
     }
 
@@ -130,6 +131,40 @@ public final class SettlementSupplyPersistenceTest {
                         4,
                         120L),
                 "deregistered endpoint completion rejected");
+    }
+
+    private static void deactivationReleasesActiveReservations() {
+        UUID ownerId = UUID.randomUUID();
+        UUID workerId = UUID.randomUUID();
+        BlockPos hall = new BlockPos(0, 64, 0);
+        KingdomSavedData data = KingdomTestFixtures.withCivilianRecruit(
+                ownerId, workerId, "galacticwars:republic", "minecraft:overworld", hall);
+        KingdomRecord kingdom = data.kingdomForOwner(ownerId).orElseThrow();
+        UUID settlementId = kingdom.settlement().id();
+        SupplyDemand demand = demand(workerId);
+        assertTrue(data.requestSupply(ownerId, settlementId, demand), "demand accepted");
+        StorageEndpoint endpoint = data.registeredStorageEndpoints(ownerId).getFirst();
+        SettlementSupplyLedger.ReservationDecision reserved = data.reserveSupply(
+                ownerId, settlementId, demand.id(), workerId,
+                endpoint, 4, 8, 100L, 1_200L);
+        assertTrue(reserved.accepted(), "reservation accepted before deactivation");
+
+        assertTrue(data.deactivateHall(ownerId, "minecraft:overworld", hall),
+                "active hall deactivated");
+        SettlementSupplyLedger deactivated = data.supplyLedger(settlementId).orElseThrow();
+        assertTrue(deactivated.reservation(reserved.reservation().orElseThrow().id())
+                        .orElseThrow().state()
+                        == galacticwars.clonewars.workforce.SupplyReservation.State.RELEASED,
+                "deactivation releases the active reservation");
+        assertEquals(8, deactivated.demands().getFirst().outstandingQuantity(),
+                "deactivation preserves outstanding demand");
+
+        SettlementSupplyLedger.ReservationDecision inactiveRetry = data.reserveSupply(
+                ownerId, settlementId, demand.id(), workerId,
+                endpoint, 4, 8, 101L, 1_200L);
+        assertTrue(!inactiveRetry.accepted(), "inactive settlement rejects a new reservation");
+        assertEquals("settlement_inactive", inactiveRetry.reason(),
+                "inactive reservation rejection reason");
     }
 
     private static SupplyDemand demand(UUID workerId) {

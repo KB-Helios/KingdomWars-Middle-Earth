@@ -195,6 +195,17 @@ public record SettlementSupplyLedger(
         return changed ? copy(demands, updated) : this;
     }
 
+    public SettlementSupplyLedger releaseAllActive() {
+        boolean changed = false;
+        ArrayList<SupplyReservation> updated = new ArrayList<>(reservations.size());
+        for (SupplyReservation reservation : reservations) {
+            SupplyReservation next = reservation.release();
+            changed |= next != reservation;
+            updated.add(next);
+        }
+        return changed ? copy(demands, updated) : this;
+    }
+
     public SettlementSupplyLedger release(UUID reservationId, UUID workerId) {
         Objects.requireNonNull(reservationId, "reservationId");
         Objects.requireNonNull(workerId, "workerId");

@@ -320,6 +320,11 @@ public final class KingdomSavedData extends SavedData {
         SettlementRecord settlement = kingdom == null ? null : kingdom.settlements().stream()
                 .filter(candidate -> candidate.id().equals(settlementId)).findFirst().orElse(null);
         SettlementSupplyLedger current = supplyLedgersBySettlement.get(settlementId);
+        if (kingdom != null && !isHallActive(ownerId)) {
+            return SettlementSupplyLedger.ReservationDecision.rejected(
+                    "settlement_inactive",
+                    current == null ? SettlementSupplyLedger.create(settlementId) : current);
+        }
         if (settlement == null || current == null) {
             return SettlementSupplyLedger.ReservationDecision.rejected("endpoint_unavailable", current == null
                     ? SettlementSupplyLedger.create(settlementId) : current);
@@ -351,7 +356,8 @@ public final class KingdomSavedData extends SavedData {
         SettlementRecord settlement = kingdom == null ? null : kingdom.settlements().stream()
                 .filter(candidate -> candidate.id().equals(settlementId)).findFirst().orElse(null);
         SettlementSupplyLedger current = supplyLedgersBySettlement.get(settlementId);
-        if (settlement == null || current == null || !settlement.containsRecruit(workerId)) {
+        if (settlement == null || current == null || !isHallActive(ownerId)
+                || !settlement.containsRecruit(workerId)) {
             return false;
         }
         StorageEndpoint reservedEndpoint = current.reservations().stream()
@@ -707,6 +713,16 @@ public final class KingdomSavedData extends SavedData {
                 || settlement.hallY() != hallPos.getY()
                 || settlement.hallZ() != hallPos.getZ()) {
             return false;
+        }
+        for (SettlementRecord candidate : kingdom.settlements()) {
+            SettlementSupplyLedger current = supplyLedgersBySettlement.get(candidate.id());
+            if (current == null) {
+                continue;
+            }
+            SettlementSupplyLedger released = current.releaseAllActive();
+            if (released != current) {
+                supplyLedgersBySettlement.put(candidate.id(), released);
+            }
         }
         inactiveHallOwners.add(ownerId);
         this.setDirty();
