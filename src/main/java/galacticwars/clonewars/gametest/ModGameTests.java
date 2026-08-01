@@ -139,7 +139,10 @@ import galacticwars.clonewars.workforce.CourierDispatchMode;
 import galacticwars.clonewars.workforce.CourierRouteMode;
 import galacticwars.clonewars.workforce.CourierTransferAction;
 import galacticwars.clonewars.workforce.CourierWaypoint;
+import galacticwars.clonewars.workforce.SupplyCategory;
+import galacticwars.clonewars.workforce.SupplyDemand;
 import galacticwars.clonewars.workforce.WorkAreaBounds;
+import galacticwars.clonewars.workforce.WorkerExecutionState;
 import galacticwars.clonewars.world.PlanetTravelService;
 import galacticwars.clonewars.world.PlanetTravelGameTests;
 import galacticwars.clonewars.world.BlueprintSiteAnchorBlockEntity;
@@ -295,6 +298,9 @@ public final class ModGameTests {
                         new TestEnvironmentDefinition.AllOf(List.of())));
         isolatedEnvironments.put(id("specialist_worker_loops"), event.registerEnvironment(
                         id("specialist_worker_loops_environment"),
+                        new TestEnvironmentDefinition.AllOf(List.of())));
+        isolatedEnvironments.put(id("hybrid_courier_dispatch"), event.registerEnvironment(
+                        id("hybrid_courier_dispatch_environment"),
                         new TestEnvironmentDefinition.AllOf(List.of())));
         isolatedEnvironments.put(id("commander_center_replay_runtime"), event.registerEnvironment(
                         id("commander_center_replay_runtime_environment"),
@@ -456,6 +462,7 @@ public final class ModGameTests {
         tests.put(id("enabled_worker_loops"), ModGameTests::enabledWorkerLoops);
         tests.put(id("specialist_worker_loops"), ModGameTests::specialistWorkerLoops);
         tests.put(id("bounded_worker_scans"), ModGameTests::boundedWorkerScans);
+        tests.put(id("hybrid_courier_dispatch"), ModGameTests::hybridCourierDispatch);
         tests.put(id("animal_farmer_species_pairing"), ModGameTests::animalFarmerSpeciesPairing);
         tests.put(id("workforce_saved_data_authority"), ModGameTests::workforceSavedDataAuthority);
         tests.put(id("recruit_spawn_eggs"), ModGameTests::recruitSpawnEggs);
@@ -7342,6 +7349,190 @@ public final class ModGameTests {
         helper.onEachTick(scenario::tick);
     }
 
+    private static void hybridCourierDispatch(GameTestHelper helper) {
+        ServerLevel level = helper.getLevel();
+        ServerPlayer owner = makeConnectedMockPlayer(helper, GameType.CREATIVE);
+        BlockPos hallPos = isolatedCapital(helper, 214);
+        ChunkPos fixtureChunk = new ChunkPos(hallPos.getX() >> 4, hallPos.getZ() >> 4);
+        level.getChunkSource().updateChunkForced(fixtureChunk, true);
+        level.getChunk(fixtureChunk.x(), fixtureChunk.z());
+        owner.setPos(hallPos.getX() + 0.5D, hallPos.getY(), hallPos.getZ() + 0.5D);
+        CommandCenterBlockEntity hall = placeCommandCenter(helper, hallPos);
+        hall.claim(owner);
+        hall.setFaction("galacticwars:republic");
+
+        KingdomSavedData data = KingdomSavedData.get(level);
+        KingdomRecord kingdom = data.activateHall(
+                owner.getUUID(),
+                hall.factionId(),
+                level.dimension().identifier().toString(),
+                hallPos).orElse(null);
+        if (kingdom == null) {
+            helper.fail("Hybrid courier fixture could not activate its isolated kingdom");
+            return;
+        }
+
+        GalacticRecruitEntity courier = spawnRecruitAt(
+                helper, ModEntityTypes.CLONE_TROOPER.get(), hallPos.offset(2, 0, 0));
+        GalacticRecruitEntity requester = helper.spawn(
+                ModEntityTypes.CLONE_TROOPER.get(), new BlockPos(3, 1, 3));
+        courier.initializeFromSpawnEgg();
+        requester.initializeFromSpawnEgg();
+        courier.setNoAi(true);
+        requester.setNoAi(true);
+        courier.tame(owner);
+        requester.tame(owner);
+        if (!data.registerRecruit(
+                        owner.getUUID(), courier.getUUID(), NpcServiceBranch.CIVILIAN)
+                || !data.registerRecruit(
+                        owner.getUUID(), requester.getUUID(), NpcServiceBranch.CIVILIAN)
+                || !data.reserveWorksite(
+                        owner.getUUID(), courier.getUUID(), WorkerProfession.COURIER)) {
+            helper.fail("Hybrid courier fixture could not register its recruits and worksite");
+            return;
+        }
+        courier.setWorkerProfession(WorkerProfession.COURIER);
+
+        WorksiteRecord worksite = data.assignedWorksite(
+                owner.getUUID(), courier.getUUID()).orElseThrow();
+        var configuration = worksite.configuration();
+        WorksiteUpdateResult dispatchConfigured = data.configureWorksite(
+                owner.getUUID(),
+                worksite.id(),
+                configuration.revision(),
+                configuration.bounds(),
+                configuration.kingdomAccess(),
+                configuration.priority(),
+                configuration.overlayVisible(),
+                configuration.itemFilters(),
+                CourierDispatchMode.HYBRID);
+        if (!dispatchConfigured.accepted()) {
+            helper.fail("Hybrid courier dispatch mode was rejected: "
+                    + dispatchConfigured.reasonCode());
+            return;
+        }
+
+        BlockPos firstRouteWaypoint = hallPos.offset(1, 0, 0);
+        BlockPos secondRouteWaypoint = hallPos.offset(2, 0, 0);
+        String dimensionId = level.dimension().identifier().toString();
+        List<CourierWaypoint> route = List.of(
+                new CourierWaypoint(
+                        dimensionId,
+                        firstRouteWaypoint.getX(),
+                        firstRouteWaypoint.getY(),
+                        firstRouteWaypoint.getZ(),
+                        List.of(CourierTransferAction.waitTicks(1))),
+                new CourierWaypoint(
+                        dimensionId,
+                        secondRouteWaypoint.getX(),
+                        secondRouteWaypoint.getY(),
+                        secondRouteWaypoint.getZ(),
+                        List.of(CourierTransferAction.waitTicks(1))));
+        WorksiteRecord hybridWorksite = dispatchConfigured.worksite().orElseThrow();
+        WorksiteUpdateResult routeConfigured = data.configureWorksiteRoute(
+                owner.getUUID(),
+                hybridWorksite.id(),
+                hybridWorksite.configuration().revision(),
+                route,
+                CourierRouteMode.LOOP);
+        if (!routeConfigured.accepted()) {
+            helper.fail("Hybrid courier route was rejected: " + routeConfigured.reasonCode());
+            return;
+        }
+
+        putContainerItem(hall, new ItemStack(Items.BREAD, 8));
+        SupplyDemand sustainedDemand = new SupplyDemand(
+                UUID.randomUUID(),
+                SupplyCategory.FOOD,
+                "minecraft:bread",
+                4,
+                0,
+                100,
+                "recruit/" + requester.getUUID() + "/hybrid_dispatch");
+        if (!data.requestSupply(
+                owner.getUUID(), kingdom.settlement().id(), sustainedDemand)) {
+            helper.fail("Hybrid courier sustained demand was rejected");
+            return;
+        }
+        StorageEndpoint hallStorage = data.registeredStorageEndpoint(
+                owner.getUUID(), dimensionId, hallPos).orElseThrow();
+        var reserved = data.reserveSupply(
+                owner.getUUID(),
+                kingdom.settlement().id(),
+                sustainedDemand.id(),
+                courier.getUUID(),
+                hallStorage,
+                sustainedDemand.outstandingQuantity(),
+                8,
+                level.getGameTime(),
+                1_200L);
+        if (!reserved.accepted()) {
+            helper.fail("Hybrid courier automatic reservation was rejected: "
+                    + reserved.reason());
+            return;
+        }
+        setActiveSupplyReservation(
+                courier, reserved.reservation().orElseThrow().id());
+
+        helper.runAfterDelay(2, () -> verifyHybridCourierDispatch(
+                helper, level, courier, firstRouteWaypoint, fixtureChunk));
+    }
+
+    private static void verifyHybridCourierDispatch(
+            GameTestHelper helper,
+            ServerLevel level,
+            GalacticRecruitEntity courier,
+            BlockPos firstRouteWaypoint,
+            ChunkPos fixtureChunk
+    ) {
+        invokeAcquireCourierOrder(courier);
+        if (!courier.getWorkerStatus().reasonCode().equals("automatic_supply_withdraw")) {
+            helper.fail("Automatic-first hybrid courier did not acquire sustained demand: "
+                    + courier.getWorkerStatus());
+            return;
+        }
+        if (!invokeReleaseActiveSupplyReservation(courier)) {
+            helper.fail("Hybrid courier could not release its first source reservation");
+            return;
+        }
+
+        CompoundTag persisted = saveRecruit(courier, level);
+        String persistedTurn = persisted.getString("CourierHybridTurn").orElse("");
+        if (!persistedTurn.equals("route")) {
+            helper.fail("Automatic hybrid acquisition did not persist the route turn: "
+                    + persistedTurn);
+            return;
+        }
+
+        GalacticRecruitEntity reloaded = loadRecruit(persisted, level);
+        invokeAcquireCourierOrder(reloaded);
+        if (!reloaded.getWorkerStatus().reasonCode().equals("courier_route_action")
+                || reloaded.getWorkerStatus().target().filter(target ->
+                        target.x() == firstRouteWaypoint.getX()
+                                && target.y() == firstRouteWaypoint.getY()
+                                && target.z() == firstRouteWaypoint.getZ()).isEmpty()) {
+            helper.fail("Reloaded hybrid courier starved its configured route: "
+                    + reloaded.getWorkerStatus());
+            return;
+        }
+        CompoundTag afterRoute = saveRecruit(reloaded, level);
+        if (!afterRoute.getString("CourierHybridTurn").orElse("").equals("automatic")) {
+            helper.fail("Successful route acquisition did not persist the next automatic turn");
+            return;
+        }
+
+        CompoundTag legacy = persisted.copy();
+        legacy.remove("CourierHybridTurn");
+        GalacticRecruitEntity legacyReload = loadRecruit(legacy, level);
+        CompoundTag migratedLegacy = saveRecruit(legacyReload, level);
+        if (!migratedLegacy.getString("CourierHybridTurn").orElse("").equals("automatic")) {
+            helper.fail("A legacy courier without a persisted turn was not migrated automatic-first");
+            return;
+        }
+        level.getChunkSource().updateChunkForced(fixtureChunk, false);
+        helper.succeed();
+    }
+
     private static void boundedWorkerScans(GameTestHelper helper) {
         BlockPos hallPos = isolatedCapital(helper, 20);
         CommandCenterBlockEntity hall = placeCommandCenter(helper, hallPos);
@@ -9272,6 +9463,41 @@ public final class ModGameTests {
                     workstation.getZ() + 0.5D);
             this.worker.getNavigation().stop();
             this.workStartTick = this.helper.getTick();
+        }
+    }
+
+    private static void setActiveSupplyReservation(
+            GalacticRecruitEntity recruit,
+            UUID reservationId
+    ) {
+        WorkerExecutionState execution = (WorkerExecutionState) getRecruitField(
+                recruit, "workerExecutionState");
+        setRecruitField(
+                recruit,
+                "workerExecutionState",
+                execution.withSupplyReservation(Optional.of(reservationId)));
+    }
+
+    private static void invokeAcquireCourierOrder(GalacticRecruitEntity recruit) {
+        try {
+            Method method = GalacticRecruitEntity.class.getDeclaredMethod("acquireCourierOrder");
+            method.setAccessible(true);
+            method.invoke(recruit);
+        } catch (ReflectiveOperationException exception) {
+            throw new IllegalStateException("Could not acquire courier work", exception);
+        }
+    }
+
+    private static boolean invokeReleaseActiveSupplyReservation(
+            GalacticRecruitEntity recruit
+    ) {
+        try {
+            Method method = GalacticRecruitEntity.class.getDeclaredMethod(
+                    "releaseActiveSupplyReservation");
+            method.setAccessible(true);
+            return (boolean) method.invoke(recruit);
+        } catch (ReflectiveOperationException exception) {
+            throw new IllegalStateException("Could not release courier supply reservation", exception);
         }
     }
 

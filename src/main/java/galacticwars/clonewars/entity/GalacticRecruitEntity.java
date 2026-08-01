@@ -103,6 +103,7 @@ import galacticwars.clonewars.workforce.SupplyDemand;
 import galacticwars.clonewars.workforce.SupplyReservation;
 import galacticwars.clonewars.workforce.SettlementSupplyLedger;
 import galacticwars.clonewars.workforce.CourierDispatchMode;
+import galacticwars.clonewars.workforce.CourierDispatchTurn;
 import galacticwars.clonewars.workforce.CourierTransferAction;
 import galacticwars.clonewars.workforce.CourierTransferType;
 import galacticwars.clonewars.workforce.CourierRouteExecutionState;
@@ -311,6 +312,7 @@ public class GalacticRecruitEntity extends TamableAnimal
     private ItemStack inactiveDutyMainHand = ItemStack.EMPTY;
     private boolean defaultLoadoutInitialized;
     private CourierRouteExecutionState courierRouteState = CourierRouteExecutionState.start(0L);
+    private CourierDispatchTurn courierHybridTurn = CourierDispatchTurn.AUTOMATIC;
     private WorkerPhase workerPhase = WorkerPhase.ACQUIRE_ORDER;
     private String workerReason = "ready";
     private String workerRequiredItemId = "";
@@ -460,6 +462,7 @@ public class GalacticRecruitEntity extends TamableAnimal
         ContainerHelper.saveAllItems(workerInventoryOutput, this.workerInventory);
         output.store("CourierRouteState", WorkforceCodecs.COURIER_ROUTE_EXECUTION_STATE,
                 this.courierRouteState);
+        output.putString("CourierHybridTurn", this.courierHybridTurn.id());
         output.store("WorkerExecutionState", WorkforceCodecs.WORKER_EXECUTION_STATE,
                 this.workerExecutionSnapshot());
         output.putString("WorkerPhase", this.workerPhase.id());
@@ -584,6 +587,8 @@ public class GalacticRecruitEntity extends TamableAnimal
         this.courierRouteState = input.read(
                         "CourierRouteState", WorkforceCodecs.COURIER_ROUTE_EXECUTION_STATE)
                 .orElseGet(() -> CourierRouteExecutionState.start(0L));
+        this.courierHybridTurn = CourierDispatchTurn.byId(input.getStringOr(
+                "CourierHybridTurn", CourierDispatchTurn.AUTOMATIC.id()));
         this.workerPhase = WorkerPhase.byId(input.getStringOr("WorkerPhase", WorkerPhase.ACQUIRE_ORDER.id()));
         this.workerReason = input.getStringOr("WorkerReason", "ready");
         this.workerRequiredItemId = input.getStringOr("WorkerRequiredItem", "")
@@ -4321,39 +4326,29 @@ public class GalacticRecruitEntity extends TamableAnimal
 
     private void acquireCourierOrder() {
         CourierDispatchMode dispatchMode = this.authoritativeCourierDispatchMode();
-        if (dispatchMode != CourierDispatchMode.MANUAL
-                && this.acquireAutomaticSupplyDelivery()) {
-            return;
+        CourierRoutePlan configuredRoute = this.authoritativeCourierRoute().orElse(null);
+        boolean activeReservation = this.automaticSupplyContext().isPresent();
+        List<CourierDispatchTurn.Source> preferredSources =
+                this.courierHybridTurn.preferredSources(
+                        dispatchMode, activeReservation, configuredRoute != null);
+        for (CourierDispatchTurn.Source source : preferredSources) {
+            boolean selected = switch (source) {
+                case AUTOMATIC -> this.acquireAutomaticSupplyDelivery();
+                case ROUTE -> configuredRoute != null
+                        && this.acquireConfiguredCourierRoute(configuredRoute);
+            };
+            if (selected) {
+                this.recordCourierSourceSelection(dispatchMode, source);
+                return;
+            }
+            if (source == CourierDispatchTurn.Source.ROUTE
+                    && this.workerPhase == WorkerPhase.BLOCKED) {
+                return;
+            }
         }
         if (dispatchMode == CourierDispatchMode.AUTOMATIC) {
             this.workerCooldownTicks = 40;
             this.transitionWorker(WorkerPhase.COOLDOWN, "awaiting_supply_demand", null);
-            return;
-        }
-        Optional<CourierRoutePlan> configuredRoute = this.authoritativeCourierRoute();
-        if (configuredRoute.isPresent()) {
-            CourierRoutePlan route = configuredRoute.orElseThrow();
-            this.courierRouteState = CourierRoutePlanner.reconcile(route, this.courierRouteState);
-            CourierWaypoint waypoint = CourierRoutePlanner.currentWaypoint(route, this.courierRouteState);
-            if (!waypoint.dimensionId().equals(this.level().dimension().identifier().toString())) {
-                this.blockWorker("courier_waypoint_wrong_dimension");
-                return;
-            }
-            BlockPos target = new BlockPos(waypoint.x(), waypoint.y(), waypoint.z());
-            if (!this.level().isLoaded(target)) {
-                this.blockWorker("courier_waypoint_unloaded");
-                return;
-            }
-            if (CourierRoutePlanner.currentAction(route, this.courierRouteState).isEmpty()) {
-                CourierRouteExecutionState previous = this.courierRouteState;
-                this.courierRouteState = CourierRoutePlanner.completeEmptyWaypoint(
-                        route, this.courierRouteState);
-                this.completeCourierRouteCycle(previous, this.courierRouteState);
-                this.workerCooldownTicks = 5;
-                this.transitionWorker(WorkerPhase.COOLDOWN, "courier_waypoint_complete", null);
-                return;
-            }
-            this.transitionWorker(WorkerPhase.NAVIGATE_SOURCE, "courier_route_action", target);
             return;
         }
         if (this.storageTarget == null || this.workTarget == null
@@ -4368,6 +4363,43 @@ public class GalacticRecruitEntity extends TamableAnimal
         } else {
             this.transitionWorker(WorkerPhase.NAVIGATE_STORAGE, "courier_deliver", this.workTarget);
         }
+    }
+
+    private boolean acquireConfiguredCourierRoute(CourierRoutePlan route) {
+        this.courierRouteState = CourierRoutePlanner.reconcile(route, this.courierRouteState);
+        CourierWaypoint waypoint = CourierRoutePlanner.currentWaypoint(route, this.courierRouteState);
+        if (!waypoint.dimensionId().equals(this.level().dimension().identifier().toString())) {
+            this.blockWorker("courier_waypoint_wrong_dimension");
+            return false;
+        }
+        BlockPos target = new BlockPos(waypoint.x(), waypoint.y(), waypoint.z());
+        if (!this.level().isLoaded(target)) {
+            this.blockWorker("courier_waypoint_unloaded");
+            return false;
+        }
+        if (CourierRoutePlanner.currentAction(route, this.courierRouteState).isEmpty()) {
+            CourierRouteExecutionState previous = this.courierRouteState;
+            this.courierRouteState = CourierRoutePlanner.completeEmptyWaypoint(
+                    route, this.courierRouteState);
+            this.completeCourierRouteCycle(previous, this.courierRouteState);
+            this.workerCooldownTicks = 5;
+            this.transitionWorker(WorkerPhase.COOLDOWN, "courier_waypoint_complete", null);
+            return true;
+        }
+        this.transitionWorker(WorkerPhase.NAVIGATE_SOURCE, "courier_route_action", target);
+        return true;
+    }
+
+    private void recordCourierSourceSelection(
+            CourierDispatchMode dispatchMode,
+            CourierDispatchTurn.Source source
+    ) {
+        if (dispatchMode != CourierDispatchMode.HYBRID) {
+            return;
+        }
+        this.courierHybridTurn = source == CourierDispatchTurn.Source.AUTOMATIC
+                ? this.courierHybridTurn.afterAutomatic()
+                : this.courierHybridTurn.afterRoute();
     }
 
     private void executeCourierRouteAction() {

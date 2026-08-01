@@ -347,19 +347,19 @@ git commit -m "Bound worker storage and overlay scans"
 - Produces: `CourierDispatchTurn.preferredSources(CourierDispatchMode mode, boolean activeReservation, boolean routeAvailable): List<Source>` and next-turn methods after a source is actually selected.
 - Produces: automatic reservation resumption before new hybrid source selection.
 
-- [ ] **Step 1: Write the failing dispatch harness and GameTest**
+- [x] **Step 1: Write the failing dispatch harness and GameTest**
 
 The pure harness enumerates manual, automatic, and hybrid source orders for `(hasActiveReservation, routeAvailable, turn)`. It asserts active reservations yield only `AUTOMATIC`, automatic-first hybrid yields `[AUTOMATIC, ROUTE]`, route-first hybrid yields `[ROUTE, AUTOMATIC]`, and successful selection flips to the other turn. Add an isolated `hybrid_courier_dispatch` GameTest with a sustained demand and a valid two-waypoint route; observe one automatic acquisition and one route acquisition, save/reload the recruit between selections, and assert the persisted turn prevents automatic starvation.
 
-- [ ] **Step 2: Run tests and verify RED**
+- [x] **Step 2: Run tests and verify RED**
 
 Run the focused dispatch harness and full GameTests. Expected: missing policy API and hybrid remains automatic-only while demand persists.
 
-- [ ] **Step 3: Implement policy and entity persistence**
+- [x] **Step 3: Implement policy and entity persistence**
 
 Define `CourierDispatchTurn` with `AUTOMATIC` and `ROUTE`, a nested `Source`, `preferredSources`, `afterAutomatic`, and `afterRoute`. In `acquireCourierOrder`, resume a valid active supply reservation first. Otherwise, iterate the preferred sources for HYBRID, let the existing automatic acquisition report whether it selected work, select a configured route only when present, and store the next turn only after one source succeeds. Write/read `CourierHybridTurn` with `AUTOMATIC` as the missing-key default; do not bump Kingdom schema 11.
 
-- [ ] **Step 4: Verify GREEN across save/reload and commit**
+- [x] **Step 4: Verify GREEN across save/reload and commit**
 
 Run the harness and GameTests twice, then commit:
 
