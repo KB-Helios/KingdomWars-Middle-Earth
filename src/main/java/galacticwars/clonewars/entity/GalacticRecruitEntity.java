@@ -237,6 +237,7 @@ import java.util.HashSet;
 import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -582,7 +583,7 @@ public class GalacticRecruitEntity extends TamableAnimal
         this.workerReason = input.getStringOr("WorkerReason", "ready");
         this.workerRequiredItemId = input.getStringOr("WorkerRequiredItem", "")
                 .trim()
-                .toLowerCase();
+                .toLowerCase(Locale.ROOT);
         this.workerCooldownTicks = Math.max(0, input.getIntOr("WorkerCooldown", 0));
         this.lastCommanderCampaignGameTime = Math.max(0L, input.getLongOr("LastCommanderCampaignGameTime", 0L));
         if (input.getInt("ActiveWorkTargetX").isPresent()
@@ -5409,16 +5410,13 @@ public class GalacticRecruitEntity extends TamableAnimal
         if (!worksite.dimensionId().equals(this.level().dimension().identifier().toString())) {
             return false;
         }
-        WorkAreaConfiguration configuration = worksite.configuration();
-        int minX = worksite.x() - (configuration.bounds().width() - 1) / 2;
-        int maxX = worksite.x() + configuration.bounds().width() / 2;
-        int minY = worksite.y() - (configuration.bounds().height() - 1) / 2;
-        int maxY = worksite.y() + configuration.bounds().height() / 2;
-        int minZ = worksite.z() - (configuration.bounds().depth() - 1) / 2;
-        int maxZ = worksite.z() + configuration.bounds().depth() / 2;
-        return target.getX() >= minX && target.getX() <= maxX
-                && target.getY() >= minY && target.getY() <= maxY
-                && target.getZ() >= minZ && target.getZ() <= maxZ;
+        return worksite.configuration().bounds().containsCenteredAt(
+                worksite.x(),
+                worksite.y(),
+                worksite.z(),
+                target.getX(),
+                target.getY(),
+                target.getZ());
     }
 
     private net.minecraft.world.item.Item availableCarriedFarmerSeed() {

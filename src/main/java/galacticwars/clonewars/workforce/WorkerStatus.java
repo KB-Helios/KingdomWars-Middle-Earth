@@ -1,5 +1,6 @@
 package galacticwars.clonewars.workforce;
 
+import java.util.Locale;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
@@ -27,7 +28,7 @@ public record WorkerStatus(
         if (completedQuantity < 0 || totalQuantity < 0 || completedQuantity > totalQuantity) {
             throw new IllegalArgumentException("invalid worker progress");
         }
-        requiredResource = requiredResource == null ? "" : requiredResource.trim().toLowerCase();
+        requiredResource = requiredResource == null ? "" : requiredResource.trim().toLowerCase(Locale.ROOT);
     }
 
     public WorkerStatus(WorkerPhase phase, String reasonCode, Optional<WorkerTarget> target) {

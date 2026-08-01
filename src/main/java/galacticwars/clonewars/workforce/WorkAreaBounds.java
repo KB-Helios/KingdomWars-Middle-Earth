@@ -12,4 +12,23 @@ public record WorkAreaBounds(int width, int height, int depth) {
         int bounded = Math.min(64, diameter);
         return new WorkAreaBounds(bounded, bounded, bounded);
     }
+
+    public boolean containsCenteredAt(
+            int centerX,
+            int centerY,
+            int centerZ,
+            int x,
+            int y,
+            int z
+    ) {
+        int minX = centerX - (width - 1) / 2;
+        int maxX = centerX + width / 2;
+        int minY = centerY - (height - 1) / 2;
+        int maxY = centerY + height / 2;
+        int minZ = centerZ - (depth - 1) / 2;
+        int maxZ = centerZ + depth / 2;
+        return x >= minX && x <= maxX
+                && y >= minY && y <= maxY
+                && z >= minZ && z <= maxZ;
+    }
 }

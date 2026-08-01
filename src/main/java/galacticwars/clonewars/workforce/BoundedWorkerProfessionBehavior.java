@@ -92,15 +92,12 @@ final class BoundedWorkerProfessionBehavior implements WorkerProfessionBehavior 
         if (!worksite.dimensionId().equals(target.dimensionId())) {
             return false;
         }
-        WorkAreaBounds bounds = worksite.configuration().bounds();
-        int minX = worksite.x() - (bounds.width() - 1) / 2;
-        int maxX = worksite.x() + bounds.width() / 2;
-        int minY = worksite.y() - (bounds.height() - 1) / 2;
-        int maxY = worksite.y() + bounds.height() / 2;
-        int minZ = worksite.z() - (bounds.depth() - 1) / 2;
-        int maxZ = worksite.z() + bounds.depth() / 2;
-        return target.x() >= minX && target.x() <= maxX
-                && target.y() >= minY && target.y() <= maxY
-                && target.z() >= minZ && target.z() <= maxZ;
+        return worksite.configuration().bounds().containsCenteredAt(
+                worksite.x(),
+                worksite.y(),
+                worksite.z(),
+                target.x(),
+                target.y(),
+                target.z());
     }
 }

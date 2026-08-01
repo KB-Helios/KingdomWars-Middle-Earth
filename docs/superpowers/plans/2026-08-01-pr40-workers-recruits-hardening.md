@@ -39,15 +39,15 @@
 - Produces: `WorkAreaBounds.containsCenteredAt(int centerX, int centerY, int centerZ, int x, int y, int z): boolean`.
 - Produces: locale-independent normalization for every worker item/resource/dimension identifier touched by this port.
 
-- [ ] **Step 1: Write the failing value-object harness**
+- [x] **Step 1: Write the failing value-object harness**
 
 Add a `main` harness that temporarily sets `Locale.setDefault(Locale.forLanguageTag("tr-TR"))`, constructs `WorkerAction`, `WorkerStatus`, `WorkerResourceDecision`, `ResourceInventory`, and `WorkerAssignment` with uppercase `I`, and asserts literal ASCII-lowercase values. Add centered-bound assertions for odd and even dimensions:
 
 ```java
 WorkAreaBounds bounds = new WorkAreaBounds(4, 3, 2);
-assertTrue(bounds.containsCenteredAt(10, 20, 30, 8, 19, 29), "inclusive minimum");
+assertTrue(bounds.containsCenteredAt(10, 20, 30, 9, 19, 30), "inclusive minimum");
 assertTrue(bounds.containsCenteredAt(10, 20, 30, 12, 21, 31), "inclusive maximum");
-assertFalse(bounds.containsCenteredAt(10, 20, 30, 7, 20, 30), "outside x");
+assertFalse(bounds.containsCenteredAt(10, 20, 30, 8, 20, 30), "outside x");
 assertEquals("minecraft:iron_ingot",
         new WorkerAction(WorkerAction.Type.WITHDRAW, Optional.empty(),
                 "minecraft:IRON_INGOT", 1, "test").itemId(),
@@ -56,13 +56,13 @@ assertEquals("minecraft:iron_ingot",
 
 Restore the original default locale in `finally` and print `WorkforceValueObjectsTest passed`.
 
-- [ ] **Step 2: Run the harness and verify RED**
+- [x] **Step 2: Run the harness and verify RED**
 
 Run: `rtk .\gradlew.bat :neoforge:runGalacticwarsClonewarsWorkforceWorkforceValueObjectsTest --no-daemon --console=plain`
 
 Expected: FAIL because `containsCenteredAt` does not exist; after adding only its test compile seam, the Turkish-locale assertions must fail on at least one existing `toLowerCase()` site.
 
-- [ ] **Step 3: Implement the shared predicate and locale fixes**
+- [x] **Step 3: Implement the shared predicate and locale fixes**
 
 Add to `WorkAreaBounds`:
 
@@ -85,11 +85,11 @@ public boolean containsCenteredAt(
 
 Replace the duplicated arithmetic in `BoundedWorkerProfessionBehavior.insideWorksite` and `GalacticRecruitEntity.isInsideWorksiteBounds` with this method. Import `java.util.Locale` and use `toLowerCase(Locale.ROOT)` in the five workforce value objects; use `java.util.Locale.ROOT` when loading `WorkerRequiredItem`.
 
-- [ ] **Step 4: Run the harness and verify GREEN**
+- [x] **Step 4: Run the harness and verify GREEN**
 
 Run the same focused Gradle task. Expected: PASS with `WorkforceValueObjectsTest passed`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```powershell
 git add src/main/java/galacticwars/clonewars/workforce src/main/java/galacticwars/clonewars/entity/GalacticRecruitEntity.java src/test/java/galacticwars/clonewars/workforce/WorkforceValueObjectsTest.java
