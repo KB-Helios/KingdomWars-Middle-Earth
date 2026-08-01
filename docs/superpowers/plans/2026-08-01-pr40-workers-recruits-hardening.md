@@ -383,7 +383,7 @@ git commit -m "Alternate persisted hybrid courier work"
 - Produces: progression preflight before physical stock reservation.
 - Produces: `configureWorkerStorageFromMenu` commits through `KingdomSavedData.configureWorksiteStorage` before mirroring the loaded entity target.
 
-- [ ] **Step 1: Add failing trade and storage assertions**
+- [x] **Step 1: Add failing trade and storage assertions**
 
 Extend `faction_trader_disposition_runtime` to close the merchant market after capturing a quote and assert preview and purchase return `merchant_unavailable`, stock count is unchanged, and `MerchantTradeMenu.stillValid` is false. Inject a valid progression state whose `TRADE_COMPLETED` total is `Integer.MAX_VALUE`, attempt a purchase, and assert `progression_limit_reached` with unchanged physical stock and credits. Extend worksite authority coverage to choose registered storage B for a worksite using A, run authority reconciliation, and assert both durable worksite and loaded recruit remain on B.
 
@@ -419,19 +419,19 @@ private static void setSavedDataState(
 }
 ```
 
-- [ ] **Step 2: Run GameTests and verify RED**
+- [x] **Step 2: Run GameTests and verify RED**
 
 Run the full GameTest command. Expected: closed merchant purchase falls through to synthetic stock and/or progression rejection removes stock; storage reconciliation restores A over the entity-only B selection.
 
-- [ ] **Step 3: Implement physical-market and progression ordering**
+- [x] **Step 3: Implement physical-market and progression ordering**
 
 Reject any supplied merchant that fails `isMarketAvailable()` in preview. Make menu validity require the same predicate. Build and evaluate the `ProgressionEvent` after eligibility and item resolution but before `takeMerchantStock`; return rejection/duplicate before inventory mutation. Keep existing credit and progression-commit compensation after reservation.
 
-- [ ] **Step 4: Implement revisioned storage selection**
+- [x] **Step 4: Implement revisioned storage selection**
 
 Resolve the exact registered `StorageEndpoint` and assigned `WorksiteRecord`, call `configureWorksiteStorage(actorId, worksite.id(), worksite.configuration().revision(), endpoint)`, and only after an accepted result release the active work order, update the entity target, and transition to `storage_assigned`. Route the legacy `SET_STORAGE` case through this method.
 
-- [ ] **Step 5: Verify GREEN and commit**
+- [x] **Step 5: Verify GREEN and commit**
 
 Run GameTests twice, then commit:
 
@@ -453,11 +453,11 @@ git commit -m "Preserve physical trade and storage authority"
 - Produces: current donor provenance and truthful automated/runtime evidence.
 - Produces: exact review replies for all 24 comments without speculative changes.
 
-- [ ] **Step 1: Record donor derivations**
+- [x] **Step 1: Record donor derivations**
 
 Add a ledger row naming both pinned commits and the exact safety/self-care/courier paths. State that cadence, attacker retention, bounded escape arbitration, and persisted route turn were selectively adapted into SmartBrain/Kingdom architecture; list the focused harnesses and GameTests.
 
-- [ ] **Step 2: Confirm the three evidence-only invariants in current code**
+- [x] **Step 2: Confirm the three evidence-only invariants in current code**
 
 Run:
 
@@ -469,7 +469,7 @@ rg -n "\.cancel\(|cancel\(" src/main/java/galacticwars/clonewars -g '*.java'
 
 Expected: pickup reaches the hazard gate; exact transfer failures leave both inventories unchanged; `WorkerProfessionBehavior.cancel` still has no runtime caller or ledger authority.
 
-- [ ] **Step 3: Run focused and full verification**
+- [x] **Step 3: Run focused and full verification**
 
 Run, in order:
 
@@ -483,11 +483,42 @@ rtk git diff --check
 
 Read every exit code and the GameTest required/pass/fail totals. Update `README.md` only with these fresh counts; retain explicit unverified labels for Survival, visual client, and two-client dedicated-server gates.
 
-- [ ] **Step 4: Audit plan and review coverage**
+- [x] **Step 4: Audit plan and review coverage**
 
 Create a local checklist mapping all 24 IDs to a commit/test or evidence reply. Confirm no code-changing finding lacks regression proof, no evidence-only finding gained speculative code, and the worktree diff contains only intended PR repairs, tests, provenance, and truthful docs.
 
-- [ ] **Step 5: Commit verified repairs**
+Final review coverage checklist:
+
+| Comment | Repair or evidence | Focused proof |
+| --- | --- | --- |
+| `3695614048` | `072495a` bounded ranged recomputation | `RecruitCombatMovementTest`, `ungrouped_recruit_ranged_brain` |
+| `3695614051` | `e08d0ce` hazard arbitration | `recruit_hazard_and_self_care`, `worker_safety_and_upkeep` |
+| `3695614052` | `072495a` cached unique-candidate ranking | `RecruitCombatMovementTest` |
+| `3695614054` | Evidence only: both pickup entry points call `canStartRecruitItemPickup`, which rejects active hazard escape | Source call-chain audit, `recruit_hazard_and_self_care` |
+| `3695614056` | `e08d0ce` 20-tick self-care cadence | `RecruitCombatMovementTest`, `recruit_hazard_and_self_care` |
+| `3695614058` | `e08d0ce` lit-campfire classification | `recruit_hazard_and_self_care` |
+| `3695614061` | Evidence only: delivery and rollback use failure-atomic `REQUIRE_EXACT` | `PhysicalLogisticsGameTests.exactTransferDoesNotPartiallyMutate`, `physical_logistics_transaction` |
+| `3695614064` | `03bd8c5` tag-holder cooking resolution | `specialist_worker_loops`, `bounded_worker_scans` |
+| `3695614069` | `b0c3fb1` split worksite/logistics permission authority | `WorkAreaConfigurationTest`, `workforce_saved_data_authority` |
+| `3695614073` | `b0c3fb1` identical-route equality short-circuit | `WorkAreaConfigurationTest`, `workforce_saved_data_authority` |
+| `3695614075` | `b0c3fb1` worksite-menu snapshot preflight | `CommandCenterActionAvailabilityTest`, `command_center_workforce_control` |
+| `3695614077` | `28c5f93` shared inclusive worksite bounds | `WorkAreaConfigurationTest`, `WorkforceValueObjectsTest` |
+| `3695614078` | `28c5f93` `Locale.ROOT` persisted identifier normalization | `WorkforceValueObjectsTest` |
+| `3695614079` | Evidence only: `WorkerProfessionBehavior.cancel` has no runtime caller or Kingdom ledger authority | Production call-site audit |
+| `3695614081` | `03bd8c5` nearest-first bounded overlay selection | `WorksiteOverlaySelectorTest`, `bounded_worker_scans` |
+| `3695619028` | `eb42b6e` closed physical-market rejection and menu invalidation | `faction_trader_disposition_runtime` |
+| `3695619032` | `03bd8c5` endpoint-authorized food-slot scan | `specialist_worker_loops`, `bounded_worker_scans` |
+| `3695619034` | `15709e0` entity-persisted hybrid dispatch turn | `CourierDispatchTurnTest`, `hybrid_courier_dispatch` |
+| `3695619038` | `eb42b6e` progression preflight before stock reservation | `faction_trader_disposition_runtime` |
+| `3695619040` | `eb42b6e` revisioned durable storage selection | `workforce_saved_data_authority` |
+| `3695642790` | `b0c3fb1` selected-worker worksite action availability | `CommandCenterActionAvailabilityTest` |
+| `3695642795` | Duplicate resolved by `e08d0ce` | Same cadence harness and GameTest as `3695614056` |
+| `3695642796` | Duplicate resolved by `b0c3fb1` | Same revision-stability proof as `3695614073` |
+| `3695642797` | `b0c3fb1` one-waypoint route rejection | `WorkAreaConfigurationTest`, `workforce_saved_data_authority` |
+
+Final automated evidence: `runHarnesses` completed 175 actionable tasks; two fresh NeoForge servers each passed all 76 required GameTests; `buildAll` completed 185 actionable tasks and built Fabric plus NeoForge for Minecraft 26.2. Manual Survival, visual-client, and two-client dedicated-server acceptance remain explicitly unverified.
+
+- [x] **Step 5: Commit verified repairs**
 
 ```powershell
 git add README.md docs/authorized-source-intake.md docs/superpowers/plans/2026-08-01-pr40-workers-recruits-hardening.md src

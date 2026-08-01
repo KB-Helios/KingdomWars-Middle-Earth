@@ -82,15 +82,15 @@ Implemented on the current development branch:
 - [x] Worksites have revisioned bounds, priorities, item/tag filters, overlay state, storage links, status, and manual/automatic/hybrid courier configuration. The dedicated worksite screen is reachable from recruit and Command Center interfaces, validates owner/officer permission server-side, rejects stale revisions, and resolves selected blocks or containers with server ray-casting.
 - [x] Farmer, lumberjack, miner, courier, builder, cook, animal-farmer, fisher, merchant, and technician handlers are connected to the shared controller and physical inventory paths. Farmer, door traversal, crop conservation, storage deposit, and repeat work have a no-shortcut black-box GameTest.
 - [x] Recruit scheduling now includes wooden-door/fence-gate interaction, item pickup, self-care and supply demand, hazard avoidance, commander status alerts, and ranged cover/dodge while preserving Galactic squad orders, formations, stances, target policy, blaster/melee combat, virtual travel, and dual-duty loadouts.
+- [x] Fresh automated verification on 2026-08-01 passed `runHarnesses` (175 actionable tasks), two consecutive NeoForge runs with all 76 required GameTests passing, `buildAll` for both Fabric and NeoForge (185 actionable tasks), and `git diff --check`.
 
 Remaining before this port can be called complete:
 
-- [ ] Fix the two reproducible full-suite failures: `specialist_worker_loops` stalls the cook in `cook_station_wait` before withdrawing physical beef/fuel, and `worker_safety_and_upkeep` does not always enter `threat_retreat` when damage arrives before SmartBrain's hurt sensor memory is populated. The latest full run completed 71 of 73 required GameTests.
 - [ ] Add ordinary-player-path black-box coverage for lumberjack, miner, courier, builder, cook, animal farmer, fisher, merchant, and technician. Fixtures may place the initial recruit and world objects, but may not mutate private phases, invoke the worker controller directly, or teleport the recruit after assignment.
 - [ ] Complete the profession acceptance matrix: missing/broken tools, missing seed/sapling/fuel/feed/fill material, full storage, changed and unreachable targets, multi-worker contention, cancellation, death, threat interruption/resume, chunk unload/reload, and exact input/output conservation.
 - [ ] Complete courier and multiplayer authority coverage for competing couriers, partial stock, expired leases, exact-transfer rollback, manual/automatic/hybrid routes, settlement removal, owner/officer/member permissions, concurrent edits, and stale or replayed payload rejection.
 - [ ] Validate follow/hold/patrol and work resumption through doors, self-care, friendly-fire policy, and zero-ammunition blaster behavior without silent melee fallback.
-- [ ] Once the runtime suite is green, rerun `runHarnesses`, `runGameTestServer`, `buildAll`, and `git diff --check`; then complete a fresh-Survival and dedicated-server two-client playthrough, unload/rejoin checks, GUI-scale/accessibility review, and worksite UI screenshots.
+- [ ] Complete a fresh-Survival and dedicated-server two-client playthrough, unload/rejoin checks, GUI-scale/accessibility review, and worksite UI screenshots; green automation does not replace these manual acceptance gates.
 
 ### Needs work before 1.0
 
