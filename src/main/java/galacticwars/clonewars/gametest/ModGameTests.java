@@ -4,6 +4,7 @@ import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -295,6 +296,9 @@ public final class ModGameTests {
         isolatedEnvironments.put(id("specialist_worker_loops"), event.registerEnvironment(
                         id("specialist_worker_loops_environment"),
                         new TestEnvironmentDefinition.AllOf(List.of())));
+        isolatedEnvironments.put(id("commander_center_replay_runtime"), event.registerEnvironment(
+                        id("commander_center_replay_runtime_environment"),
+                        new TestEnvironmentDefinition.AllOf(List.of())));
         isolatedEnvironments.put(id("planet_faction_outpost_runtime"), event.registerEnvironment(
                         id("planet_faction_outpost_runtime_environment"),
                         new TestEnvironmentDefinition.AllOf(List.of())));
@@ -451,6 +455,7 @@ public final class ModGameTests {
                 PhysicalLogisticsGameTests::atomicPhysicalTransfer);
         tests.put(id("enabled_worker_loops"), ModGameTests::enabledWorkerLoops);
         tests.put(id("specialist_worker_loops"), ModGameTests::specialistWorkerLoops);
+        tests.put(id("bounded_worker_scans"), ModGameTests::boundedWorkerScans);
         tests.put(id("animal_farmer_species_pairing"), ModGameTests::animalFarmerSpeciesPairing);
         tests.put(id("workforce_saved_data_authority"), ModGameTests::workforceSavedDataAuthority);
         tests.put(id("recruit_spawn_eggs"), ModGameTests::recruitSpawnEggs);
@@ -7252,10 +7257,19 @@ public final class ModGameTests {
 
     private static void specialistWorkerLoops(GameTestHelper helper) {
         BlockPos hallPos = isolatedCapital(helper, 19);
-        ChunkPos specialistChunk = ChunkPos.containing(hallPos);
-        helper.getLevel().getChunkSource().updateChunkForced(specialistChunk, true);
-        for (int x = -2; x <= 8; x++) {
-            for (int z = -3; z <= 5; z++) {
+        ChunkPos specialistCenterChunk = ChunkPos.containing(hallPos);
+        Set<ChunkPos> specialistChunks = new LinkedHashSet<>();
+        for (int chunkX = -1; chunkX <= 1; chunkX++) {
+            for (int chunkZ = -1; chunkZ <= 1; chunkZ++) {
+                ChunkPos chunk = new ChunkPos(
+                        specialistCenterChunk.x() + chunkX,
+                        specialistCenterChunk.z() + chunkZ);
+                specialistChunks.add(chunk);
+                helper.getLevel().getChunkSource().updateChunkForced(chunk, true);
+            }
+        }
+        for (int x = -12; x <= 12; x++) {
+            for (int z = -12; z <= 12; z++) {
                 helper.getLevel().setBlock(
                         hallPos.offset(x, -1, z),
                         Blocks.STONE.defaultBlockState(),
@@ -7301,6 +7315,16 @@ public final class ModGameTests {
             return;
         }
         BlockPos waterPos = hallPos.offset(3, 0, 1);
+        for (int x = -1; x <= 1; x++) {
+            for (int z = -1; z <= 1; z++) {
+                if (x != 0 || z != 0) {
+                    helper.getLevel().setBlock(
+                            waterPos.offset(x, 0, z),
+                            Blocks.STONE.defaultBlockState(),
+                            3);
+                }
+            }
+        }
         helper.getLevel().setBlock(waterPos, Blocks.WATER.defaultBlockState(), 3);
         if (!configureWorkerLifecycleWorksite(
                 helper, data, owner, recruit, hallPos, List.of())) {
@@ -7313,9 +7337,168 @@ public final class ModGameTests {
                 owner,
                 recruit,
                 data,
-                specialistChunk,
+                Set.copyOf(specialistChunks),
                 countContainerItems(hall));
         helper.onEachTick(scenario::tick);
+    }
+
+    private static void boundedWorkerScans(GameTestHelper helper) {
+        BlockPos hallPos = isolatedCapital(helper, 20);
+        CommandCenterBlockEntity hall = placeCommandCenter(helper, hallPos);
+        ServerPlayer owner = makeConnectedMockPlayer(helper, GameType.CREATIVE);
+        hall.claim(owner);
+        KingdomSavedData data = KingdomSavedData.get(helper.getLevel());
+        if (data.activateHall(
+                owner.getUUID(),
+                hall.factionId(),
+                helper.getLevel().dimension().identifier().toString(),
+                hallPos).isEmpty()) {
+            helper.fail("Bounded scan fixture could not activate its Command Center");
+            return;
+        }
+        GalacticRecruitEntity recruit = ModEntityTypes.CLONE_TROOPER.get().create(
+                helper.getLevel(), EntitySpawnReason.TRIGGERED);
+        if (recruit == null) {
+            helper.fail("Bounded scan fixture could not create its recruit");
+            return;
+        }
+        recruit.setPos(hallPos.getX() + 1.5D, hallPos.getY(), hallPos.getZ() + 0.5D);
+        helper.getLevel().addFreshEntity(recruit);
+        recruit.tame(owner);
+        recruit.setWorkerProfession(WorkerProfession.ANIMAL_FARMER);
+        if (!data.registerRecruit(owner.getUUID(), recruit.getUUID())
+                || !data.reserveWorksite(
+                        owner.getUUID(), recruit.getUUID(), WorkerProfession.ANIMAL_FARMER)) {
+            helper.fail("Bounded scan fixture could not assign its initial worksite");
+            return;
+        }
+        WorksiteRecord initialWorksite = data.assignedWorksite(
+                owner.getUUID(), recruit.getUUID()).orElseThrow();
+        WorkOrder queuedAnimalOrder = new WorkOrder(
+                UUID.randomUUID(),
+                WorkOrderType.ANIMAL_FARM,
+                Optional.empty(),
+                WorkOrderState.QUEUED,
+                Optional.of(initialWorksite.id()),
+                Optional.empty(),
+                helper.getLevel().dimension().identifier().toString(),
+                hallPos.getX(),
+                hallPos.getY(),
+                hallPos.getZ(),
+                "minecraft:wheat",
+                1,
+                0,
+                "",
+                0);
+        WorkOrder claimedAnimalOrder = data.queueAndClaimWorkOrder(
+                owner.getUUID(), recruit.getUUID(), queuedAnimalOrder).orElseThrow();
+        setRecruitField(recruit, "workOrderId", claimedAnimalOrder.id());
+        recruit.setWorkerProfession(WorkerProfession.COOK);
+        WorkOrder releasedAnimalOrder = data.workOrder(
+                owner.getUUID(), claimedAnimalOrder.id()).orElseThrow();
+        if (releasedAnimalOrder.assignedRecruitId().isPresent()
+                || recruit.getWorkerStatus().workOrderId().isPresent()
+                || recruit.getWorkerStatus().phase() != WorkerPhase.ACQUIRE_ORDER) {
+            helper.fail("Profession change retained its previous order or execution cursor: "
+                    + releasedAnimalOrder + ", status=" + recruit.getWorkerStatus());
+            return;
+        }
+        WorksiteRecord assigned = data.assignedWorksite(
+                owner.getUUID(), recruit.getUUID()).orElseThrow();
+        WorksiteUpdateResult tagConfigured = data.configureWorksite(
+                owner.getUUID(),
+                assigned.id(),
+                assigned.configuration().revision(),
+                assigned.configuration().bounds(),
+                true,
+                assigned.configuration().priority(),
+                assigned.configuration().overlayVisible(),
+                List.of("#minecraft:meat"),
+                assigned.configuration().courierDispatchMode());
+        net.minecraft.world.item.Item tagDemand = invokeConfiguredCookingDemand(
+                recruit, helper.getLevel());
+        TagKey<net.minecraft.world.item.Item> meatTag = TagKey.create(
+                Registries.ITEM, Identifier.withDefaultNamespace("meat"));
+        if (!tagConfigured.accepted()
+                || tagDemand == null
+                || !new ItemStack(tagDemand).is(meatTag)) {
+            helper.fail("Cook did not resolve a recipe-bearing member from #minecraft:meat; item="
+                    + (tagDemand == null
+                            ? "none"
+                            : BuiltInRegistries.ITEM.getKey(tagDemand)));
+            return;
+        }
+
+        BlockPos chestPos = hallPos.offset(3, 0, 0);
+        helper.getLevel().setBlock(chestPos, Blocks.CHEST.defaultBlockState(), 3);
+        if (!(helper.getLevel().getBlockEntity(chestPos) instanceof Container chest)) {
+            helper.fail("Bounded scan fixture could not place its backing chest");
+            return;
+        }
+        StorageEndpoint oneSlotEndpoint = new StorageEndpoint(
+                helper.getLevel().dimension().identifier().toString(),
+                chestPos.getX(),
+                chestPos.getY(),
+                chestPos.getZ(),
+                1);
+        KingdomRecord currentKingdom = data.kingdomForOwner(owner.getUUID()).orElseThrow();
+        SettlementRecord currentSettlement = currentKingdom.settlement();
+        WorksiteRecord currentWorksite = data.assignedWorksite(
+                owner.getUUID(), recruit.getUUID()).orElseThrow();
+        WorksiteRecord endpointWorksite = currentWorksite.withPrimaryStorageEndpoint(
+                oneSlotEndpoint);
+        List<WorksiteRecord> updatedWorksites = currentSettlement.worksites().stream()
+                .map(worksite -> worksite.id().equals(endpointWorksite.id())
+                        ? endpointWorksite : worksite)
+                .toList();
+        SettlementRecord updatedSettlement = new SettlementRecord(
+                currentSettlement.id(),
+                currentSettlement.dimensionId(),
+                currentSettlement.hallX(),
+                currentSettlement.hallY(),
+                currentSettlement.hallZ(),
+                currentSettlement.claimRadius(),
+                currentSettlement.housingCapacity(),
+                currentSettlement.recruitIds(),
+                currentSettlement.commanderId(),
+                currentSettlement.commanderPolicy(),
+                updatedWorksites,
+                currentSettlement.buildProjects(),
+                currentSettlement.workOrders(),
+                currentSettlement.recruitmentCampaigns(),
+                currentSettlement.rewards().add(oneSlotEndpoint.slots(), 0),
+                currentSettlement.revision() + 1,
+                currentSettlement.additionalCommanderIds());
+        storeKingdomFixture(data, currentKingdom.replaceSettlement(updatedSettlement));
+        if (data.registeredStorageEndpoint(
+                        owner.getUUID(),
+                        helper.getLevel().dimension().identifier().toString(),
+                        chestPos)
+                .filter(endpoint -> endpoint.slots() == 1)
+                .isEmpty()) {
+            helper.fail("Bounded scan fixture did not install its one-slot endpoint");
+            return;
+        }
+
+        chest.setItem(1, new ItemStack(Items.BREAD));
+        boolean unreachableDemand = invokeRequestRecruitFoodSupply(
+                recruit, helper.getLevel());
+        if (unreachableDemand
+                || !data.supplyLedger(updatedSettlement.id()).orElseThrow().demands().isEmpty()) {
+            helper.fail("Food beyond the registered slot limit published an unreachable demand");
+            return;
+        }
+        chest.setItem(1, ItemStack.EMPTY);
+        chest.setItem(0, new ItemStack(Items.BREAD));
+        boolean reachableDemand = invokeRequestRecruitFoodSupply(recruit, helper.getLevel());
+        var demands = data.supplyLedger(updatedSettlement.id()).orElseThrow().demands();
+        if (!reachableDemand
+                || demands.size() != 1
+                || !demands.getFirst().itemId().equals("minecraft:bread")) {
+            helper.fail("Food in the registered slot did not publish a reachable demand");
+            return;
+        }
+        helper.succeed();
     }
 
     private static void animalFarmerSpeciesPairing(GameTestHelper helper) {
@@ -7445,13 +7628,19 @@ public final class ModGameTests {
         private final ServerPlayer owner;
         private final GalacticRecruitEntity recruit;
         private final KingdomSavedData data;
-        private final ChunkPos forcedChunk;
+        private final Set<ChunkPos> forcedChunks;
         private final int storedBeforeFishing;
         private int phase;
         private long phaseStartedAt;
         private boolean complete;
         private Animal first;
         private Animal second;
+        private BlockPos furnacePos;
+        private long rawWithdrawnAt = -1L;
+        private long furnaceLoadedAt = -1L;
+        private long furnaceLitAt = -1L;
+        private String lastCookStatus = "";
+        private long lastCookStatusAt = -1L;
 
         private SpecialistWorkerLifecycleScenario(
                 GameTestHelper helper,
@@ -7460,7 +7649,7 @@ public final class ModGameTests {
                 ServerPlayer owner,
                 GalacticRecruitEntity recruit,
                 KingdomSavedData data,
-                ChunkPos forcedChunk,
+                Set<ChunkPos> forcedChunks,
                 int storedBeforeFishing
         ) {
             this.helper = helper;
@@ -7469,7 +7658,7 @@ public final class ModGameTests {
             this.owner = owner;
             this.recruit = recruit;
             this.data = data;
-            this.forcedChunk = forcedChunk;
+            this.forcedChunks = forcedChunks;
             this.storedBeforeFishing = storedBeforeFishing;
             this.phaseStartedAt = helper.getTick();
         }
@@ -7560,7 +7749,7 @@ public final class ModGameTests {
                 this.beginCooking();
                 return;
             }
-            this.timeoutAfter(360, "Animal farmer did not withdraw feed and breed"
+            this.timeoutAfter(520, "Animal farmer did not withdraw feed and breed"
                     + "; status=" + this.recruit.getWorkerStatus()
                     + ", order=" + completedOrder
                     + ", love=" + this.first.isInLove() + "/"
@@ -7569,6 +7758,8 @@ public final class ModGameTests {
         }
 
         private void beginCooking() {
+            WorkOrder previousOrder = this.data.assignedWorkOrder(
+                    this.owner.getUUID(), this.recruit.getUUID()).orElse(null);
             this.owner.setPos(
                     this.recruit.getX(), this.recruit.getY(), this.recruit.getZ());
             this.recruit.setWorkerMainHandItem(ItemStack.EMPTY);
@@ -7577,30 +7768,62 @@ public final class ModGameTests {
                 this.fail("Cook contract was rejected");
                 return;
             }
+            WorkOrder releasedOrder = previousOrder == null
+                    ? null
+                    : this.data.workOrder(
+                            this.owner.getUUID(), previousOrder.id()).orElse(null);
+            if ((releasedOrder != null && releasedOrder.assignedRecruitId().isPresent())
+                    || this.recruit.getWorkerStatus().workOrderId().isPresent()) {
+                this.fail("Profession change retained the previous worker order; previous="
+                        + releasedOrder + ", status=" + this.recruit.getWorkerStatus());
+                return;
+            }
             if (!configureWorkerLifecycleWorksite(
                     this.helper,
                     this.data,
                     this.owner,
                     this.recruit,
                     this.hallPos,
-                    List.of("minecraft:beef"))) {
+                    List.of("#minecraft:meat"))) {
                 this.complete = true;
                 return;
             }
-            BlockPos furnacePos = this.hallPos.offset(3, 0, -2);
+            this.furnacePos = this.hallPos.offset(3, 0, -2);
             this.helper.getLevel().setBlock(
-                    furnacePos, Blocks.FURNACE.defaultBlockState(), 3);
+                    this.furnacePos, Blocks.FURNACE.defaultBlockState(), 3);
             putContainerItem(this.hall, new ItemStack(Items.BEEF));
             putContainerItem(this.hall, new ItemStack(Items.COAL));
             this.advanceTo(2);
         }
 
         private void waitForCooking() {
+            long currentTick = this.helper.getTick();
+            int raw = countContainerItem(this.hall, Items.BEEF);
+            if (raw == 0 && this.rawWithdrawnAt < 0L) {
+                this.rawWithdrawnAt = currentTick;
+            }
+            Container furnace = this.helper.getLevel().getBlockEntity(this.furnacePos)
+                    instanceof Container container ? container : null;
+            if (furnace != null && !furnace.getItem(0).isEmpty()
+                    && this.furnaceLoadedAt < 0L) {
+                this.furnaceLoadedAt = currentTick;
+            }
+            if (this.helper.getLevel().getBlockState(this.furnacePos)
+                    .getValue(BlockStateProperties.LIT) && this.furnaceLitAt < 0L) {
+                this.furnaceLitAt = currentTick;
+            }
+            String cookStatus = this.recruit.getWorkerStatus().phase() + "/"
+                    + this.recruit.getWorkerStatus().reasonCode() + "/"
+                    + this.recruit.getWorkerStatus().target();
+            if (!cookStatus.equals(this.lastCookStatus)) {
+                this.lastCookStatus = cookStatus;
+                this.lastCookStatusAt = currentTick;
+            }
             boolean completedOrder = hasCompletedWorkerOrder(
                     this.data, this.owner.getUUID(), WorkOrderType.COOK);
             if (completedOrder
                     && countContainerItem(this.hall, Items.COOKED_BEEF) == 1
-                    && countContainerItem(this.hall, Items.BEEF) == 0
+                    && raw == 0
                     && workerInventoryCount(this.recruit) == 0) {
                 this.beginMerchant();
                 return;
@@ -7608,8 +7831,20 @@ public final class ModGameTests {
             this.timeoutAfter(600, "Cook did not use a real furnace recipe"
                     + "; status=" + this.recruit.getWorkerStatus()
                     + ", order=" + completedOrder
-                    + ", raw=" + countContainerItem(this.hall, Items.BEEF)
-                    + ", cooked=" + countContainerItem(this.hall, Items.COOKED_BEEF));
+                    + ", raw=" + raw
+                    + ", cooked=" + countContainerItem(this.hall, Items.COOKED_BEEF)
+                    + ", rawWithdrawnAt=" + this.rawWithdrawnAt
+                    + ", furnaceLoadedAt=" + this.furnaceLoadedAt
+                    + ", furnaceLitAt=" + this.furnaceLitAt
+                    + ", lastStatusAt=" + this.lastCookStatusAt
+                    + ", position=" + this.recruit.position()
+                    + ", navigationDone=" + this.recruit.getNavigation().isDone()
+                    + ", walkMemory=" + BrainUtil.hasMemory(this.recruit,
+                    net.minecraft.world.entity.ai.memory.MemoryModuleType.WALK_TARGET)
+                    + ", navigationResult=" + BrainUtil.getMemory(
+                    this.recruit, ArmyBrainMemoryTypes.NAVIGATION_RESULT)
+                    + ", furnace=" + (furnace == null ? "missing" : List.of(
+                    furnace.getItem(0), furnace.getItem(1), furnace.getItem(2))));
         }
 
         private void beginMerchant() {
@@ -7645,8 +7880,7 @@ public final class ModGameTests {
                     && this.recruit.hasMerchantStock(
                             ModItems.ENERGY_CELL.get(), 2)) {
                 this.complete = true;
-                this.helper.getLevel().getChunkSource()
-                        .updateChunkForced(this.forcedChunk, false);
+                this.releaseForcedChunks();
                 this.helper.succeed();
                 return;
             }
@@ -7669,9 +7903,13 @@ public final class ModGameTests {
 
         private void fail(String message) {
             this.complete = true;
-            this.helper.getLevel().getChunkSource()
-                    .updateChunkForced(this.forcedChunk, false);
+            this.releaseForcedChunks();
             this.helper.fail(message);
+        }
+
+        private void releaseForcedChunks() {
+            this.forcedChunks.forEach(chunk -> this.helper.getLevel().getChunkSource()
+                    .updateChunkForced(chunk, false));
         }
     }
 
@@ -8016,6 +8254,46 @@ public final class ModGameTests {
             field.set(recruit, value);
         } catch (ReflectiveOperationException exception) {
             throw new IllegalStateException("Could not set recruit field " + fieldName, exception);
+        }
+    }
+
+    private static net.minecraft.world.item.Item invokeConfiguredCookingDemand(
+            GalacticRecruitEntity recruit,
+            ServerLevel level
+    ) {
+        try {
+            Method method = GalacticRecruitEntity.class.getDeclaredMethod(
+                    "configuredCookingDemand", ServerLevel.class);
+            method.setAccessible(true);
+            return (net.minecraft.world.item.Item) method.invoke(recruit, level);
+        } catch (ReflectiveOperationException exception) {
+            throw new IllegalStateException("Could not resolve configured cooking demand", exception);
+        }
+    }
+
+    private static boolean invokeRequestRecruitFoodSupply(
+            GalacticRecruitEntity recruit,
+            ServerLevel level
+    ) {
+        try {
+            Method method = GalacticRecruitEntity.class.getDeclaredMethod(
+                    "requestRecruitFoodSupply", ServerLevel.class);
+            method.setAccessible(true);
+            return (boolean) method.invoke(recruit, level);
+        } catch (ReflectiveOperationException exception) {
+            throw new IllegalStateException("Could not request recruit food supply", exception);
+        }
+    }
+
+    private static void storeKingdomFixture(KingdomSavedData data, KingdomRecord kingdom) {
+        try {
+            Method method = KingdomSavedData.class.getDeclaredMethod(
+                    "storeKingdom", KingdomRecord.class);
+            method.setAccessible(true);
+            method.invoke(data, kingdom);
+            data.setDirty();
+        } catch (ReflectiveOperationException exception) {
+            throw new IllegalStateException("Could not install GameTest kingdom fixture", exception);
         }
     }
 

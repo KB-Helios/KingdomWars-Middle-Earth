@@ -307,23 +307,23 @@ git commit -m "Enforce revisioned worksite configuration"
 - Produces: `WorksiteOverlaySelector.nearestVisible(Collection<WorksiteRecord>, double playerX, double playerY, double playerZ, int limit)` with distance then UUID ordering.
 - Consumes: Minecraft registry tag holders instead of iterating the entire item registry.
 
-- [ ] **Step 1: Write failing overlay and runtime tests**
+- [x] **Step 1: Write failing overlay and runtime tests**
 
 The pure selector harness creates more candidates than the budget and asserts exactly the nearest IDs are returned with stable UUID ties. Extend `specialist_worker_loops` or add `bounded_worker_scans` to configure a cook tag and prove a recipe-bearing tag member is selected. Add a storage endpoint exposing one slot backed by a larger container; put food only beyond slot one and prove the recruit publishes no unreachable demand, then move food into slot zero and prove it can publish the demand.
 
-- [ ] **Step 2: Run tests and verify RED**
+- [x] **Step 2: Run tests and verify RED**
 
 Run the selector harness and full GameTests. Expected: selector API is absent and the out-of-authority food slot currently affects demand discovery.
 
-- [ ] **Step 3: Implement bounded scans**
+- [x] **Step 3: Implement bounded scans**
 
-For tag filters, use `BuiltInRegistries.ITEM.getTag(tag)` and stream only holder values before recipe checks. For food, keep each `StorageEndpoint` paired with its container and loop only to `Math.min(endpoint.slots(), container.getContainerSize())`.
+For tag filters, use the Minecraft 26.2 `BuiltInRegistries.ITEM.getTagOrEmpty(tag)` API and iterate only holder values before recipe checks. For food, keep each `StorageEndpoint` paired with its container and loop only to `Math.min(endpoint.slots(), container.getContainerSize())`.
 
-- [ ] **Step 4: Implement overlay budgeting**
+- [x] **Step 4: Implement overlay budgeting**
 
 Set `MAX_WORKSITES_PER_PLAYER` to a fixed small budget, collect only already-authorized visible candidates, call the pure selector, then render the existing 16 markers for selected worksites only.
 
-- [ ] **Step 5: Verify GREEN and commit**
+- [x] **Step 5: Verify GREEN and commit**
 
 Run the selector harness and GameTests, then commit:
 

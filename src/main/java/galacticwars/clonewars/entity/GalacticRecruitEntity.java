@@ -219,6 +219,7 @@ import net.minecraft.world.level.storage.loot.LootParams;
 import net.minecraft.world.level.storage.loot.LootTable;
 import net.minecraft.world.level.storage.loot.parameters.LootContextParamSets;
 import net.minecraft.world.level.storage.loot.parameters.LootContextParams;
+import net.minecraft.world.item.crafting.RecipeManager;
 import net.minecraft.world.item.crafting.RecipeType;
 import net.minecraft.world.item.crafting.SingleRecipeInput;
 import net.minecraft.world.phys.BlockHitResult;
@@ -319,6 +320,10 @@ public class GalacticRecruitEntity extends TamableAnimal
     private int workerCooldownTicks;
     private int workerNavigationFailures;
     private int workerScanCursor;
+    private @Nullable WorkAreaConfiguration cachedCookingDemandConfiguration;
+    private @Nullable RecipeManager cachedCookingDemandRecipeManager;
+    private @Nullable Item cachedCookingDemandItem;
+    private boolean cookingDemandCacheResolved;
     private boolean hazardAvoidanceActive;
     private @Nullable BlockPos blacklistedWorkTarget;
     private int blacklistedWorkTargetTicks;
@@ -1632,16 +1637,13 @@ public class GalacticRecruitEntity extends TamableAnimal
         Item foodItem = data.registeredStorageEndpoints(kingdom.ownerId()).stream()
                 .filter(endpoint -> endpoint.dimensionId().equals(
                         level.dimension().identifier().toString()))
-                .map(endpoint -> new BlockPos(endpoint.x(), endpoint.y(), endpoint.z()))
-                .map(this::findContainer)
-                .flatMap(Optional::stream)
-                .flatMap(container -> {
-                    ArrayList<ItemStack> stacks = new ArrayList<>();
-                    for (int slot = 0; slot < container.getContainerSize(); slot++) {
-                        stacks.add(container.getItem(slot));
-                    }
-                    return stacks.stream();
-                })
+                .flatMap(endpoint -> this.findContainer(new BlockPos(
+                                endpoint.x(), endpoint.y(), endpoint.z()))
+                        .stream()
+                        .flatMap(container -> java.util.stream.IntStream.range(
+                                        0,
+                                        Math.min(endpoint.slots(), container.getContainerSize()))
+                                .mapToObj(container::getItem)))
                 .filter(stack -> !stack.isEmpty() && stack.get(DataComponents.FOOD) != null)
                 .map(ItemStack::getItem)
                 .findFirst()
@@ -2386,11 +2388,17 @@ public class GalacticRecruitEntity extends TamableAnimal
     }
 
     public void setWorkerProfession(WorkerProfession profession) {
+        boolean professionChanged = this.getWorkerProfession()
+                .filter(profession::equals)
+                .isEmpty();
         if (this.getWorkerMainHandItem().isEmpty()) {
             this.setWorkerMainHandItem(WorkerDutyLoadoutPolicy.defaultTool(profession));
         }
         this.switchDutyBranch(NpcServiceBranch.CIVILIAN);
         this.entityData.set(DATA_WORKER_PROFESSION, profession.ordinal());
+        if (professionChanged) {
+            this.resetWorkerRuntimeForProfessionChange();
+        }
         if (this.getRecruitDuty() != RecruitDuty.COMMANDER) {
             this.setRecruitDuty(RecruitDuty.WORKER);
         }
@@ -2401,6 +2409,19 @@ public class GalacticRecruitEntity extends TamableAnimal
             this.armyGroupId = null;
         }
         this.syncRecruitStatusState();
+    }
+
+    private void resetWorkerRuntimeForProfessionChange() {
+        this.releaseCurrentWorkOrder(false);
+        this.pauseWorkerNavigation();
+        BrainUtil.clearMemory(this, ArmyBrainMemoryTypes.NAVIGATION_RESULT);
+        this.workerNavigationFailures = 0;
+        this.workerCooldownTicks = 0;
+        this.workerScanCursor = 0;
+        this.workerRequiredItemId = "";
+        this.blacklistedWorkTarget = null;
+        this.blacklistedWorkTargetTicks = 0;
+        this.transitionWorker(WorkerPhase.ACQUIRE_ORDER, "profession_changed", null);
     }
 
     private void clearWorkerProfession() {
@@ -5781,9 +5802,27 @@ public class GalacticRecruitEntity extends TamableAnimal
         WorkAreaConfiguration configuration = this.authoritativeWorksite()
                 .map(WorksiteRecord::configuration)
                 .orElseGet(() -> WorkAreaConfiguration.defaults(this.workRadius));
+        RecipeManager recipeManager = level.getServer().getRecipeManager();
+        if (this.cookingDemandCacheResolved
+                && configuration.equals(this.cachedCookingDemandConfiguration)
+                && recipeManager == this.cachedCookingDemandRecipeManager) {
+            return this.cachedCookingDemandItem;
+        }
+        Item resolved = this.resolveConfiguredCookingDemand(level, configuration);
+        this.cachedCookingDemandConfiguration = configuration;
+        this.cachedCookingDemandRecipeManager = recipeManager;
+        this.cachedCookingDemandItem = resolved;
+        this.cookingDemandCacheResolved = true;
+        return resolved;
+    }
+
+    private Item resolveConfiguredCookingDemand(
+            ServerLevel level,
+            WorkAreaConfiguration configuration
+    ) {
         for (String filter : configuration.itemFilters()) {
             if (!filter.startsWith("#")) {
-                net.minecraft.world.item.Item item = resolveItem(filter);
+                Item item = resolveItem(filter);
                 if (item != null && this.hasAnyCookingRecipe(level, new ItemStack(item))) {
                     return item;
                 }
@@ -5793,14 +5832,11 @@ public class GalacticRecruitEntity extends TamableAnimal
                 TagKey<Item> tag = TagKey.create(
                         Registries.ITEM,
                         Identifier.parse(filter.substring(1)));
-                net.minecraft.world.item.Item item = BuiltInRegistries.ITEM.stream()
-                        .filter(candidate -> new ItemStack(candidate).is(tag))
-                        .filter(candidate -> this.hasAnyCookingRecipe(
-                                level, new ItemStack(candidate)))
-                        .findFirst()
-                        .orElse(null);
-                if (item != null) {
-                    return item;
+                for (var holder : BuiltInRegistries.ITEM.getTagOrEmpty(tag)) {
+                    Item candidate = holder.value();
+                    if (this.hasAnyCookingRecipe(level, new ItemStack(candidate))) {
+                        return candidate;
+                    }
                 }
             } catch (RuntimeException ignored) {
                 // Worksite input validation drops malformed tag filters.
