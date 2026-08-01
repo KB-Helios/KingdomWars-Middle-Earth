@@ -69,8 +69,9 @@ authoritative 26.2 architecture.
 
 ## Review disposition
 
-All 20 inline findings were checked against the exact PR head. Seventeen require code changes; three
-should receive evidence-backed replies without speculative production changes.
+All 24 inline findings were checked against the exact PR head. Twenty-one comments map to nineteen
+distinct code repairs because two late findings duplicate earlier reports; three should receive
+evidence-backed replies without speculative production changes.
 
 | Comment | Disposition | Designed response |
 | --- | --- | --- |
@@ -94,6 +95,10 @@ should receive evidence-backed replies without speculative production changes.
 | `3695619034` | Valid | Add a persisted hybrid-dispatch turn so sustained authoritative demand cannot starve a configured manual route. Resume active reservations first; otherwise alternate eligible automatic and route work. |
 | `3695619038` | Valid | Evaluate the pure progression decision before reserving physical merchant stock. Keep compensation for credit withdrawal or commit failures after reservation. |
 | `3695619040` | Valid | Resolve the assigned durable worksite and call revisioned `configureWorksiteStorage` before updating the loaded entity. Reject missing/stale authority and let reconciliation retain the persisted selection. |
+| `3695642790` | Valid | Enable the Command Center's Configure Worksite action only when the selected `WorkerSummary` carries an assigned worksite; retain the server preflight as authoritative. |
+| `3695642795` | Duplicate of `3695614056` | The designed 20-tick self-care cadence resolves both reports; reply to both with the same regression evidence. |
+| `3695642796` | Duplicate of `3695614073` | The designed equality short-circuit resolves both reports; reply to both with the same revision-stability evidence. |
+| `3695642797` | Valid | Reject a one-waypoint worksite route as `invalid_route`, matching the assigned-courier route validator and the two-waypoint `CourierRoutePlan` contract. |
 
 ## Runtime design
 
@@ -177,7 +182,8 @@ New coverage must include:
 - immediate damage-to-retreat and save/reload recovery;
 - lit versus unlit campfire hazard classification and idle movement non-interference;
 - bounded self-care and configured cooking-tag resolution;
-- route permission denial, no-op revision stability, menu preflight, and durable storage selection;
+- route permission denial, no-op revision stability, single-waypoint rejection, menu preflight,
+  durable storage selection, and disabled configuration UI for unassigned workers;
 - endpoint slot-limited food sourcing;
 - hybrid automatic/route alternation across entity save/reload;
 - closed physical markets and progression-rejected trades with unchanged stock;
@@ -205,7 +211,7 @@ explicitly unverified until actually executed.
    derivations.
 4. Refresh the README port status from fresh evidence; do not preserve the stale 71/73 statement.
 5. Run all verification gates, review the diff, and commit the repairs.
-6. Push the verified repair commit to `origin/codex/workers-recruits-runtime-port`, reply to all 20
+6. Push the verified repair commit to `origin/codex/workers-recruits-runtime-port`, reply to all 24
    inline findings, and compare local, remote, and PR-head SHAs.
 7. Reconcile PR metadata/body with the verified state. Keep it ready for review only if all automated
    gates are green; otherwise return it to draft with the exact blocker.
