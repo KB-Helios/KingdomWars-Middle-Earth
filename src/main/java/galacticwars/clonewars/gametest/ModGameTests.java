@@ -4213,6 +4213,7 @@ public final class ModGameTests {
         merchant.initializeFromSpawnEgg();
         merchant.tame(owner);
         merchant.setWorkerProfession(WorkerProfession.MERCHANT);
+        configurePhysicalMarket(helper, owner, merchant, hall, hallPos, 16);
         BlockPos beacon = area.at(10, 1, 10);
         helper.getLevel().setBlockAndUpdate(beacon, ModBlocks.CONTROL_BEACON.get().defaultBlockState());
         GalacticRecruitEntity escort = spawnRecruitAt(
@@ -4650,7 +4651,10 @@ public final class ModGameTests {
 
     private static void blueprintSiteRuntime(GameTestHelper helper) {
         ServerLevel level = helper.getLevel();
-        BlockPos anchorPos = helper.absolutePos(new BlockPos(2, 1, 2));
+        BlockPos anchorPos = isolatedCapital(helper, 96);
+        ChunkPos siteChunk = ChunkPos.containing(anchorPos);
+        level.getChunkSource().updateChunkForced(siteChunk, true);
+        level.getChunk(siteChunk.x(), siteChunk.z());
         BlockPos primaryLootPos = anchorPos.offset(2, 0, 0);
         BlockPos suppliesLootPos = anchorPos.offset(-2, 0, 0);
         level.setBlock(anchorPos.below(), Blocks.STONE.defaultBlockState(), 3);
@@ -4660,6 +4664,7 @@ public final class ModGameTests {
         level.removeBlockEntity(primaryLootPos);
         level.removeBlockEntity(suppliesLootPos);
         if (!(level.getBlockEntity(anchorPos) instanceof BlueprintSiteAnchorBlockEntity anchor)) {
+            level.getChunkSource().updateChunkForced(siteChunk, false);
             helper.fail("Blueprint site anchor block entity was not created");
             return;
         }
@@ -4672,6 +4677,7 @@ public final class ModGameTests {
                 .findFirst().orElse(null);
         if (outpost == null || !outpost.factionId().equals("galacticwars:hutt_cartel")
                 || !data.siteGenerated(outpost.id())) {
+            level.getChunkSource().updateChunkForced(siteChunk, false);
             helper.fail("Blueprint site did not atomically register its faction outpost"
                     + " [record=" + (outpost != null)
                     + ", generated=" + (outpost != null && data.siteGenerated(outpost.id()))
@@ -4680,27 +4686,41 @@ public final class ModGameTests {
                     + ", supplies=" + hasLazyLoot(level, suppliesLootPos) + "]");
             return;
         }
-        int expectedResidents = outpost.militaryNpcIds().size() + outpost.civilianNpcIds().size();
-        int loadedResidents = level.getEntitiesOfClass(GalacticRecruitEntity.class,
-                new AABB(anchorPos).inflate(12.0D), recruit -> outpost.contains(recruit.getUUID())).size();
-        if (expectedResidents < 3 || loadedResidents != expectedResidents
-                || !hasLazyLoot(level, primaryLootPos)
-                || !hasLazyLoot(level, suppliesLootPos)
-                || !anchor.isInitialized()) {
-            helper.fail("Blueprint site residents or lazy loot were incomplete");
-            return;
-        }
-        BlueprintSiteAnchorBlockEntity.serverTick(level, anchorPos, level.getBlockState(anchorPos), anchor);
-        int afterReplay = level.getEntitiesOfClass(GalacticRecruitEntity.class,
-                new AABB(anchorPos).inflate(12.0D), recruit -> outpost.contains(recruit.getUUID())).size();
-        Tag encoded = FactionOutpostSavedData.CODEC.encodeStart(NbtOps.INSTANCE, data).getOrThrow();
-        FactionOutpostSavedData restored = FactionOutpostSavedData.CODEC.parse(NbtOps.INSTANCE, encoded).getOrThrow();
-        if (afterReplay != loadedResidents || restored.outpost(outpost.id()).isEmpty()
-                || !restored.siteGenerated(outpost.id())) {
-            helper.fail("Blueprint site initialization was not reload-idempotent");
-            return;
-        }
-        helper.succeed();
+        helper.runAfterDelay(2, () -> {
+            int expectedResidents = outpost.militaryNpcIds().size() + outpost.civilianNpcIds().size();
+            int loadedResidents = (int) java.util.stream.Stream.concat(
+                            outpost.militaryNpcIds().stream(), outpost.civilianNpcIds().stream())
+                    .filter(residentId -> level.getEntity(residentId) instanceof GalacticRecruitEntity)
+                    .count();
+            if (expectedResidents < 3 || loadedResidents != expectedResidents
+                    || !hasLazyLoot(level, primaryLootPos)
+                    || !hasLazyLoot(level, suppliesLootPos)
+                    || !anchor.isInitialized()) {
+                level.getChunkSource().updateChunkForced(siteChunk, false);
+                helper.fail("Blueprint site residents or lazy loot were incomplete"
+                        + " [residents=" + loadedResidents + "/" + expectedResidents
+                        + ", primary=" + hasLazyLoot(level, primaryLootPos)
+                        + ", supplies=" + hasLazyLoot(level, suppliesLootPos)
+                        + ", initialized=" + anchor.isInitialized() + "]");
+                return;
+            }
+            BlueprintSiteAnchorBlockEntity.serverTick(level, anchorPos, level.getBlockState(anchorPos), anchor);
+            int afterReplay = (int) java.util.stream.Stream.concat(
+                            outpost.militaryNpcIds().stream(), outpost.civilianNpcIds().stream())
+                    .filter(residentId -> level.getEntity(residentId) instanceof GalacticRecruitEntity)
+                    .count();
+            Tag encoded = FactionOutpostSavedData.CODEC.encodeStart(NbtOps.INSTANCE, data).getOrThrow();
+            FactionOutpostSavedData restored = FactionOutpostSavedData.CODEC.parse(NbtOps.INSTANCE, encoded)
+                    .getOrThrow();
+            if (afterReplay != loadedResidents || restored.outpost(outpost.id()).isEmpty()
+                    || !restored.siteGenerated(outpost.id())) {
+                level.getChunkSource().updateChunkForced(siteChunk, false);
+                helper.fail("Blueprint site initialization was not reload-idempotent");
+                return;
+            }
+            level.getChunkSource().updateChunkForced(siteChunk, false);
+            helper.succeed();
+        });
     }
 
     private static void commanderCenterReplayRuntime(GameTestHelper helper) {
@@ -5487,25 +5507,27 @@ public final class ModGameTests {
         }
         player.getInventory().add(new ItemStack(ModItems.CREDIT_CHIP.get(), 100));
 
-        UUID outpostId = UUID.randomUUID();
-        BlockPos merchantPosition = helper.absolutePos(new BlockPos(2, 1, 2));
+        ServerPlayer merchantOwner = makeConnectedMockPlayer(helper, GameType.CREATIVE);
+        BlockPos marketHallPos = isolatedCapital(helper, 83);
+        CommandCenterBlockEntity marketHall = placeCommandCenter(helper, marketHallPos);
+        marketHall.claim(merchantOwner);
+        marketHall.setFaction("galacticwars:republic");
+        KingdomSavedData kingdoms = KingdomSavedData.get(level);
+        if (kingdoms.activateHall(
+                merchantOwner.getUUID(),
+                marketHall.factionId(),
+                level.dimension().identifier().toString(),
+                marketHallPos).isEmpty()) {
+            helper.fail("Trader disposition setup could not activate its physical market");
+            return;
+        }
         GalacticRecruitEntity trader = helper.spawn(
                 ModEntityTypes.REPUBLIC_CIVILIAN.get(), new BlockPos(2, 1, 2));
-        trader.initializeBlueprintSiteResident(
-                outpostId,
-                NpcServiceBranch.CIVILIAN,
-                NpcRole.TRADER,
-                merchantPosition,
-                32);
-        FactionOutpostSavedData.get(level).registerGeneratedSite(
-                outpostId,
-                "galacticwars:republic",
-                level.dimension().identifier().toString(),
-                merchantPosition,
-                32,
-                List.of(),
-                List.of(trader.getUUID()),
-                level.getGameTime());
+        trader.initializeFromSpawnEgg();
+        trader.tame(merchantOwner);
+        trader.setWorkerProfession(WorkerProfession.MERCHANT);
+        configurePhysicalMarket(
+                helper, merchantOwner, trader, marketHall, marketHallPos, 32);
         player.setPos(trader.getX(), trader.getY(), trader.getZ() + 1.0D);
         level.getChunkSource().move(player);
 
@@ -5576,6 +5598,83 @@ public final class ModGameTests {
                 live.itemCount(),
                 live.creditPrice(),
                 live.disposition());
+        MerchantTradeMenu marketMenu = (MerchantTradeMenu) new MerchantTradeMenuProvider(trader)
+                .createMenu(72, player.getInventory(), player);
+        int stockBeforeClose = countContainerItem(marketHall, ModItems.ENERGY_CELL.get());
+        int creditsBeforeClose = CreditTransactionService.playerBalance(player);
+        setWorkerPhase(trader, WorkerPhase.COOLDOWN, "market_closed", null);
+        PhysicalTradeService.TradePreview closedMarket = PhysicalTradeService.preview(
+                player, "republic_quartermaster", trader);
+        PhysicalTradeService.TradeResult closedPurchase = PhysicalTradeService.purchase(
+                player,
+                UUID.randomUUID(),
+                "republic_quartermaster",
+                trader,
+                liveQuote);
+        if (closedMarket.eligible()
+                || !closedMarket.reason().equals("merchant_unavailable")
+                || closedPurchase.accepted()
+                || !closedPurchase.reason().equals("merchant_unavailable")
+                || marketMenu.stillValid(player)
+                || countContainerItem(marketHall, ModItems.ENERGY_CELL.get()) != stockBeforeClose
+                || CreditTransactionService.playerBalance(player) != creditsBeforeClose) {
+            helper.fail("A closed physical market became synthetic stock: preview="
+                    + closedMarket + ", purchase=" + closedPurchase
+                    + ", menuValid=" + marketMenu.stillValid(player)
+                    + ", stock=" + stockBeforeClose + "/"
+                    + countContainerItem(marketHall, ModItems.ENERGY_CELL.get())
+                    + ", credits=" + creditsBeforeClose + "/"
+                    + CreditTransactionService.playerBalance(player));
+            return;
+        }
+        setWorkerPhase(trader, WorkerPhase.COOLDOWN, "market_open", null);
+
+        ServerPlayer overflowPlayer = makeConnectedMockPlayer(helper, GameType.SURVIVAL);
+        overflowPlayer.setPos(trader.getX(), trader.getY(), trader.getZ() + 1.0D);
+        level.getChunkSource().move(overflowPlayer);
+        alignment.setScore(overflowPlayer.getUUID(), merchantFaction, 10);
+        overflowPlayer.getInventory().add(new ItemStack(ModItems.CREDIT_CHIP.get(), 100));
+        setSavedDataState(
+                progression,
+                overflowPlayer.getUUID(),
+                new ProgressionState(
+                        ProgressionState.CURRENT_SCHEMA_VERSION,
+                        overflowPlayer.getUUID(),
+                        "galacticwars:hutt_cartel",
+                        0,
+                        Set.of(),
+                        Map.of(ProgressionEventType.TRADE_COMPLETED, Integer.MAX_VALUE),
+                        Map.of(),
+                        Set.of("intro_quest", "faction_intro")));
+        PhysicalTradeService.TradePreview overflowPreview = PhysicalTradeService.preview(
+                overflowPlayer, "republic_quartermaster", trader);
+        PhysicalTradeService.TradeQuote overflowQuote = new PhysicalTradeService.TradeQuote(
+                overflowPreview.tradeId(),
+                overflowPreview.itemId(),
+                overflowPreview.itemCount(),
+                overflowPreview.creditPrice(),
+                overflowPreview.disposition());
+        int stockBeforeOverflow = countContainerItem(marketHall, ModItems.ENERGY_CELL.get());
+        int creditsBeforeOverflow = CreditTransactionService.playerBalance(overflowPlayer);
+        PhysicalTradeService.TradeResult overflowPurchase = PhysicalTradeService.purchase(
+                overflowPlayer,
+                UUID.randomUUID(),
+                "republic_quartermaster",
+                trader,
+                overflowQuote);
+        if (overflowPurchase.accepted()
+                || !overflowPurchase.reason().equals("progression_limit_reached")
+                || countContainerItem(marketHall, ModItems.ENERGY_CELL.get()) != stockBeforeOverflow
+                || CreditTransactionService.playerBalance(overflowPlayer) != creditsBeforeOverflow) {
+            helper.fail("Progression rejection consumed physical market state: preview="
+                    + overflowPreview + ", purchase=" + overflowPurchase
+                    + ", stock=" + stockBeforeOverflow + "/"
+                    + countContainerItem(marketHall, ModItems.ENERGY_CELL.get())
+                    + ", credits=" + creditsBeforeOverflow + "/"
+                    + CreditTransactionService.playerBalance(overflowPlayer));
+            return;
+        }
+
         UUID replayId = UUID.randomUUID();
         PhysicalTradeService.TradeResult purchase = PhysicalTradeService.purchase(
                 player,
@@ -5595,9 +5694,8 @@ public final class ModGameTests {
         int replayedItems = countPlayerItem(
                 player,
                 BuiltInRegistries.ITEM.getValue(Identifier.parse(live.itemId())));
-        boolean alarmRaised = NpcFactionAiService.raiseAlert(
-                trader, player, "gametest_hostile_trade");
-        PhysicalTradeService.TradePreview alarmRefusal =
+        alignment.setScore(player.getUUID(), merchantFaction, -21);
+        PhysicalTradeService.TradePreview hostileRevalidation =
                 PhysicalTradeService.preview(player, "republic_quartermaster", trader);
         if (!purchase.accepted()
                 || !purchase.changed()
@@ -5606,15 +5704,14 @@ public final class ModGameTests {
                 || replay.changed()
                 || replayedItems != purchasedItems
                 || alignment.processedEventCount(player.getUUID()) != 1
-                || !alarmRaised
-                || alarmRefusal.eligible()
-                || !alarmRefusal.reason().equals("hostile_merchant")
-                || !alarmRefusal.disposition().equals("hostile")) {
-            helper.fail("Trader purchase replay or active-alarm revalidation failed: purchase="
+                || hostileRevalidation.eligible()
+                || !hostileRevalidation.reason().equals("hostile_merchant")
+                || !hostileRevalidation.disposition().equals("hostile")) {
+            helper.fail("Trader purchase replay or live-hostility revalidation failed: purchase="
                     + purchase + ", replay=" + replay + ", items=" + purchasedItems
                     + "/" + replayedItems + ", reputationEvents="
                     + alignment.processedEventCount(player.getUUID())
-                    + ", alarm=" + alarmRaised + "/" + alarmRefusal);
+                    + ", hostility=" + hostileRevalidation);
             return;
         }
         trader.discard();
@@ -5866,6 +5963,8 @@ public final class ModGameTests {
         ServerPlayer owner = makeConnectedMockPlayer(helper, GameType.CREATIVE);
         ServerPlayer builder = makeConnectedMockPlayer(helper, GameType.CREATIVE);
         BlockPos hallPos = isolatedCapital(helper, 3);
+        CommandCenterBlockEntity hall = placeCommandCenter(helper, hallPos);
+        hall.claim(owner);
         KingdomSavedData data = KingdomSavedData.get(helper.getLevel());
         KingdomRecord kingdom = data.activateHall(
                 owner.getUUID(), "galacticwars:republic",
@@ -5932,6 +6031,23 @@ public final class ModGameTests {
             helper.fail("A valid claimed courier route was rejected: "
                     + configuredRoute.reasonCode());
         }
+        WorksiteRecord routeConfiguredWorksite = data.assignedWorksite(
+                owner.getUUID(), first).orElseThrow();
+        StorageEndpoint hallStorage = data.registeredStorageEndpoint(
+                        owner.getUUID(),
+                        helper.getLevel().dimension().identifier().toString(),
+                        hallPos)
+                .orElseThrow(() -> new IllegalStateException(
+                        "Authority fixture Command Center was not registered as storage"));
+        WorksiteUpdateResult configuredStorage = data.configureWorksiteStorage(
+                owner.getUUID(),
+                routeConfiguredWorksite.id(),
+                routeConfiguredWorksite.configuration().revision(),
+                hallStorage);
+        if (!configuredStorage.accepted()) {
+            helper.fail("A registered Command Center storage target was rejected: "
+                    + configuredStorage.reasonCode());
+        }
         WorksiteRecord configuredWorksite = data.assignedWorksite(
                 owner.getUUID(), first).orElseThrow();
         SettlementRecord configuredSettlement = data.kingdomForOwner(owner.getUUID()).orElseThrow()
@@ -5962,6 +6078,77 @@ public final class ModGameTests {
                 || unchangedWorksite.configuration().courierRouteRevision() != routeRevision
                 || unchangedSettlement.revision() != settlementRevision) {
             helper.fail("An identical courier route advanced durable revisions");
+        }
+
+        BlockPos alternateStoragePos = hallPos.offset(3, 0, 0);
+        helper.getLevel().setBlock(
+                alternateStoragePos, Blocks.CHEST.defaultBlockState(), 3);
+        if (!(helper.getLevel().getBlockEntity(alternateStoragePos) instanceof Container alternateStorage)) {
+            helper.fail("Authority fixture could not place its alternate registered storage");
+            return;
+        }
+        StorageEndpoint alternateEndpoint = new StorageEndpoint(
+                helper.getLevel().dimension().identifier().toString(),
+                alternateStoragePos.getX(),
+                alternateStoragePos.getY(),
+                alternateStoragePos.getZ(),
+                alternateStorage.getContainerSize());
+        KingdomRecord authorityKingdom = data.kingdomForOwner(owner.getUUID()).orElseThrow();
+        SettlementRecord authoritySettlement = authorityKingdom.settlement();
+        WorksiteRecord authorityWorksite = data.assignedWorksite(
+                owner.getUUID(), first).orElseThrow();
+        WorksiteRecord registeredAlternate = authorityWorksite
+                .withPrimaryStorageEndpoint(alternateEndpoint)
+                .withPrimaryStorageEndpoint(hallStorage);
+        List<WorksiteRecord> authorityWorksites = authoritySettlement.worksites().stream()
+                .map(candidate -> candidate.id().equals(registeredAlternate.id())
+                        ? registeredAlternate : candidate)
+                .toList();
+        SettlementRecord storageEnabledSettlement = new SettlementRecord(
+                authoritySettlement.id(),
+                authoritySettlement.dimensionId(),
+                authoritySettlement.hallX(),
+                authoritySettlement.hallY(),
+                authoritySettlement.hallZ(),
+                authoritySettlement.claimRadius(),
+                authoritySettlement.housingCapacity(),
+                authoritySettlement.recruitIds(),
+                authoritySettlement.commanderId(),
+                authoritySettlement.commanderPolicy(),
+                authorityWorksites,
+                authoritySettlement.buildProjects(),
+                authoritySettlement.workOrders(),
+                authoritySettlement.recruitmentCampaigns(),
+                authoritySettlement.rewards().add(
+                        hallStorage.slots() + alternateEndpoint.slots(), 0),
+                authoritySettlement.revision() + 1,
+                authoritySettlement.additionalCommanderIds());
+        storeKingdomFixture(data, authorityKingdom.replaceSettlement(storageEnabledSettlement));
+        if (data.registeredStorageEndpoint(
+                        owner.getUUID(),
+                        helper.getLevel().dimension().identifier().toString(),
+                        alternateStoragePos)
+                .filter(endpoint -> endpoint.slots() == alternateEndpoint.slots())
+                .isEmpty()) {
+            helper.fail("Authority fixture did not register its alternate storage");
+            return;
+        }
+        setRecruitField(assignedRecruit, "storageTarget", hallPos.immutable());
+        boolean alternateSelected = assignedRecruit.configureWorkerStorageFromMenu(
+                owner, alternateStoragePos);
+        invokeWorkerAuthorityReconciliation(assignedRecruit, helper.getLevel());
+        WorksiteRecord selectedStorageWorksite = data.assignedWorksite(
+                owner.getUUID(), first).orElseThrow();
+        StorageEndpoint selectedStorage = selectedStorageWorksite.storageEndpoints().getFirst();
+        if (!alternateSelected
+                || selectedStorage.x() != alternateStoragePos.getX()
+                || selectedStorage.y() != alternateStoragePos.getY()
+                || selectedStorage.z() != alternateStoragePos.getZ()
+                || !alternateStoragePos.equals(assignedRecruit.getStorageTarget())) {
+            helper.fail("Storage selection did not survive worksite authority reconciliation: selected="
+                    + alternateSelected + ", durable=" + selectedStorage
+                    + ", entity=" + assignedRecruit.getStorageTarget());
+            return;
         }
 
         GalacticRecruitEntity unassignedRecruit = helper.spawn(
@@ -8222,6 +8409,60 @@ public final class ModGameTests {
         return count;
     }
 
+    private static WorksiteRecord configurePhysicalMarket(
+            GameTestHelper helper,
+            ServerPlayer owner,
+            GalacticRecruitEntity merchant,
+            CommandCenterBlockEntity storage,
+            BlockPos storagePos,
+            int energyCellStock
+    ) {
+        KingdomSavedData data = KingdomSavedData.get(helper.getLevel());
+        if (data.kingdomForRecruit(merchant.getUUID()).isEmpty()
+                && !data.registerRecruit(
+                        owner.getUUID(), merchant.getUUID(), NpcServiceBranch.CIVILIAN)) {
+            throw new IllegalStateException("Could not register the physical market merchant");
+        }
+        if (!data.reserveWorksite(
+                owner.getUUID(), merchant.getUUID(), WorkerProfession.MERCHANT)) {
+            throw new IllegalStateException("Could not reserve the physical market worksite");
+        }
+        String dimensionId = helper.getLevel().dimension().identifier().toString();
+        WorksiteRecord worksite = data.configureAssignedFrontierWorksite(
+                        owner.getUUID(),
+                        merchant.getUUID(),
+                        dimensionId,
+                        storagePos.offset(2, 0, 0),
+                        8)
+                .orElseGet(() -> data.assignedWorksite(
+                        owner.getUUID(), merchant.getUUID()).orElseThrow());
+        StorageEndpoint endpoint = data.registeredStorageEndpoint(
+                        owner.getUUID(), dimensionId, storagePos)
+                .orElseThrow(() -> new IllegalStateException(
+                        "Command Center was not registered as physical market storage"));
+        WorksiteUpdateResult configured = data.configureWorksiteStorage(
+                owner.getUUID(), worksite.id(), worksite.configuration().revision(), endpoint);
+        if (!configured.accepted() && !configured.reasonCode().equals("unchanged")) {
+            throw new IllegalStateException(
+                    "Could not configure physical market storage: " + configured.reasonCode());
+        }
+        WorksiteRecord authoritative = data.assignedWorksite(
+                owner.getUUID(), merchant.getUUID()).orElseThrow();
+        setRecruitField(merchant, "storageTarget", storagePos.immutable());
+        merchant.setPos(
+                authoritative.x() + 0.5D,
+                authoritative.y(),
+                authoritative.z() + 0.5D);
+        setWorkerPhase(merchant, WorkerPhase.COOLDOWN, "market_open", null);
+        if (energyCellStock > 0) {
+            putContainerItem(storage, new ItemStack(ModItems.ENERGY_CELL.get(), energyCellStock));
+        }
+        if (!merchant.isMarketAvailable()) {
+            throw new IllegalStateException("Configured physical market did not open");
+        }
+        return authoritative;
+    }
+
     private static SmartBrainTestArea prepareSmartBrainTestArea(
             GameTestHelper helper,
             GameType playerGameType,
@@ -8485,6 +8726,23 @@ public final class ModGameTests {
             data.setDirty();
         } catch (ReflectiveOperationException exception) {
             throw new IllegalStateException("Could not install GameTest kingdom fixture", exception);
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private static void setSavedDataState(
+            ProgressionSavedData data,
+            UUID playerId,
+            ProgressionState state
+    ) {
+        try {
+            Field field = ProgressionSavedData.class.getDeclaredField("states");
+            field.setAccessible(true);
+            ((Map<UUID, ProgressionState>) field.get(data)).put(playerId, state);
+            data.setDirty();
+        } catch (ReflectiveOperationException exception) {
+            throw new IllegalStateException(
+                    "Could not install progression overflow fixture", exception);
         }
     }
 

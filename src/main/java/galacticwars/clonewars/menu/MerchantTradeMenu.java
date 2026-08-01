@@ -82,6 +82,7 @@ public final class MerchantTradeMenu extends AbstractContainerMenu {
         Entity entity = level.getEntity(merchantEntityId);
         return entity instanceof GalacticRecruitEntity recruit
                 && recruit.isMerchant()
+                && recruit.isMarketAvailable()
                 && entity.isAlive()
                 && player.distanceToSqr(entity) <= 64.0D;
     }

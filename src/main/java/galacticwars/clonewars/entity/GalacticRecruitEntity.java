@@ -1905,10 +1905,34 @@ public class GalacticRecruitEntity extends TamableAnimal
         if (!this.canPlayerManageWorksites(actor)
                 || !this.canPlayerManageLogistics(actor)
                 || !this.isRegisteredStorageTarget(target)
-                || this.findContainer(target).isEmpty()) {
+                || this.findContainer(target).isEmpty()
+                || !(this.level() instanceof ServerLevel serverLevel)) {
+            return false;
+        }
+        KingdomSavedData data = KingdomSavedData.get(serverLevel);
+        KingdomRecord kingdom = data.kingdomForRecruit(this.getUUID()).orElse(null);
+        if (kingdom == null) {
+            return false;
+        }
+        WorksiteRecord worksite = data.assignedWorksite(
+                kingdom.ownerId(), this.getUUID()).orElse(null);
+        StorageEndpoint endpoint = data.registeredStorageEndpoint(
+                kingdom.ownerId(),
+                serverLevel.dimension().identifier().toString(),
+                target).orElse(null);
+        if (worksite == null || endpoint == null) {
+            return false;
+        }
+        var configured = data.configureWorksiteStorage(
+                actor.getUUID(),
+                worksite.id(),
+                worksite.configuration().revision(),
+                endpoint);
+        if (!configured.accepted()) {
             return false;
         }
         this.releaseCurrentWorkOrder(false);
+        this.adoptAssignedWorksiteCursor();
         this.setStorageTarget(target.immutable());
         this.transitionWorker(WorkerPhase.ACQUIRE_ORDER, "storage_assigned", null);
         return true;
@@ -2143,17 +2167,12 @@ public class GalacticRecruitEntity extends TamableAnimal
             }
             case SET_STORAGE -> {
                 Optional<BlockPos> targetedStorage = targetedBlock(player);
-                if (targetedStorage.isEmpty() || this.findContainer(targetedStorage.get()).isEmpty()) {
+                if (targetedStorage.isEmpty()
+                        || !this.configureWorkerStorageFromMenu(
+                                player, targetedStorage.orElseThrow())) {
                     player.sendSystemMessage(Component.translatable("message.galacticwars.recruit.storage.invalid"));
                     yield false;
                 }
-                if (!this.isRegisteredStorageTarget(targetedStorage.orElseThrow())) {
-                    player.sendSystemMessage(Component.translatable("message.galacticwars.recruit.storage.invalid"));
-                    yield false;
-                }
-                this.releaseCurrentWorkOrder(false);
-                this.setStorageTarget(targetedStorage.get());
-                this.transitionWorker(WorkerPhase.ACQUIRE_ORDER, "storage_assigned", null);
                 player.sendSystemMessage(Component.translatable("message.galacticwars.recruit.storage.set"));
                 yield true;
             }
