@@ -51,11 +51,11 @@
 - Modify only if required: `src/main/java/galacticwars/clonewars/entity/ai/RecruitDoorInteractionBehaviour.java`
 - Modify only if required: command/order SmartBrain behaviors under `src/main/java/galacticwars/clonewars/entity/ai`
 
-- [ ] Add a claimed wooden-door corridor fixture that records natural open and close transitions.
-- [ ] Issue follow through the recruit menu, observe traversal, then issue hold and prove the recruit remains held with the command intact.
-- [ ] Issue an authoritative two-waypoint patrol across the same boundary and prove the loaded commander advances/resumes the persisted patrol without teleportation.
-- [ ] Retain the existing black-box farmer lifecycle as the worker resumption proof and add explicit final command/status assertions if missing.
-- [ ] Run the door tests twice, then commit `Prove recruit door command resumption`.
+- [x] Add a claimed wooden-door corridor fixture that records natural open and close transitions.
+- [x] Issue follow through the recruit menu, observe traversal, then issue hold and prove the recruit remains held with the command intact.
+- [x] Issue an authoritative two-waypoint patrol across the same boundary and prove the loaded commander advances/resumes the persisted patrol without teleportation.
+- [x] Retain the existing black-box farmer lifecycle as the worker resumption proof and add explicit final command/status assertions if missing.
+- [x] Run the door tests twice, then commit `Prove recruit door command resumption`. Both corrected fresh-world NeoForge runs passed all 78 required tests; RED fixture calibration exposed that the first rally point sat inside patrol arrival tolerance but outside the door-close radius, so the proof was corrected without a production AI change.
 
 ## Task 4: Ordinary-command self-care arbitration
 

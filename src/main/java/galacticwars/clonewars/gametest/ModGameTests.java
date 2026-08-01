@@ -300,6 +300,9 @@ public final class ModGameTests {
         isolatedEnvironments.put(id("black_box_farmer_door_lifecycle"), event.registerEnvironment(
                         id("black_box_farmer_door_lifecycle_environment"),
                         new TestEnvironmentDefinition.AllOf(List.of())));
+        isolatedEnvironments.put(id("recruit_door_command_resumption"), event.registerEnvironment(
+                        id("recruit_door_command_resumption_environment"),
+                        new TestEnvironmentDefinition.AllOf(List.of())));
         isolatedEnvironments.put(id("specialist_worker_loops"), event.registerEnvironment(
                         id("specialist_worker_loops_environment"),
                         new TestEnvironmentDefinition.AllOf(List.of())));
@@ -340,6 +343,7 @@ public final class ModGameTests {
                 id("worker_safety_and_upkeep"),
                 id("recruit_hazard_and_self_care"),
                 id("black_box_farmer_door_lifecycle"),
+                id("recruit_door_command_resumption"),
                 id("specialist_worker_loops"),
                 id("competing_courier_leases"),
                 id("local_recruit_protect_owner"),
@@ -374,6 +378,8 @@ public final class ModGameTests {
                                             ? 360
                                     : testId.equals(id("black_box_farmer_door_lifecycle"))
                                             ? 700
+                                    : testId.equals(id("recruit_door_command_resumption"))
+                                            ? 900
                                     : testId.equals(id("specialist_worker_loops"))
                                             ? 1_600
                                     : testId.equals(id("competing_courier_leases"))
@@ -467,6 +473,8 @@ public final class ModGameTests {
         tests.put(id("recruit_hazard_and_self_care"), ModGameTests::recruitHazardAndSelfCare);
         tests.put(id("black_box_farmer_door_lifecycle"),
                 ModGameTests::blackBoxFarmerDoorLifecycle);
+        tests.put(id("recruit_door_command_resumption"),
+                ModGameTests::recruitDoorCommandResumption);
         tests.put(id("physical_logistics_transaction"),
                 PhysicalLogisticsGameTests::atomicPhysicalTransfer);
         tests.put(id("enabled_worker_loops"), ModGameTests::enabledWorkerLoops);
@@ -6907,6 +6915,265 @@ public final class ModGameTests {
     }
 
     /**
+     * Proves that ordinary embodied army commands retain their persisted
+     * authority while the sole SmartBrain navigation path opens and closes a
+     * claimed door. The recruit is never moved after the first command.
+     */
+    private static void recruitDoorCommandResumption(GameTestHelper helper) {
+        SmartBrainTestArea area = prepareSmartBrainTestAreaAt(
+                helper,
+                GameType.CREATIVE,
+                -2,
+                18,
+                -2,
+                10,
+                isolatedCapital(helper, 211));
+        ServerPlayer owner = area.player();
+        BlockPos hallPos = area.at(0, 1, 0);
+        BlockPos recruitPos = area.at(0, 1, 4);
+        BlockPos doorPos = area.at(6, 1, 4);
+        BlockPos followTarget = area.at(14, 1, 4);
+        CommandCenterBlockEntity hall = placeCommandCenter(helper, hallPos);
+        hall.claim(owner);
+        KingdomSavedData data = KingdomSavedData.get(helper.getLevel());
+        data.activateHall(
+                owner.getUUID(),
+                hall.factionId(),
+                helper.getLevel().dimension().identifier().toString(),
+                hallPos).orElseThrow();
+        FactionAlignmentSavedData.get(helper.getLevel()).setScore(
+                owner.getUUID(), FactionId.of("republic"), 100);
+        applyCampaignSetupEvent(
+                ProgressionSavedData.get(helper.getLevel()),
+                owner,
+                ProgressionEventType.FACTION_PLEDGED,
+                "galacticwars:republic");
+
+        for (int z = -2; z <= 10; z++) {
+            for (int y = 1; y <= 3; y++) {
+                helper.getLevel().setBlock(
+                        area.at(6, y, z),
+                        Blocks.STONE.defaultBlockState(),
+                        3);
+            }
+        }
+        var lowerDoor = Blocks.OAK_DOOR.defaultBlockState()
+                .setValue(BlockStateProperties.HORIZONTAL_FACING, Direction.EAST)
+                .setValue(BlockStateProperties.DOUBLE_BLOCK_HALF, DoubleBlockHalf.LOWER);
+        var upperDoor = lowerDoor.setValue(
+                BlockStateProperties.DOUBLE_BLOCK_HALF, DoubleBlockHalf.UPPER);
+        helper.getLevel().setBlock(doorPos, lowerDoor, 3);
+        helper.getLevel().setBlock(doorPos.above(), upperDoor, 3);
+
+        GalacticRecruitEntity recruit = spawnRecruitAt(
+                helper, ModEntityTypes.CLONE_TROOPER.get(), recruitPos);
+        recruit.setInvulnerable(true);
+        owner.setPos(recruit.getX(), recruit.getY(), recruit.getZ());
+        if (!recruit.handleMenuButton(owner, RecruitCommandMenu.BUTTON_HIRE)) {
+            helper.fail("Door-command recruit could not be hired");
+            return;
+        }
+        KingdomBaseBlueprint forwardBase = GameplayDataManager.snapshot()
+                .blueprint("galacticwars:forward_base").orElseThrow();
+        BuildProject forwardBaseProject = fullyProgressProject(
+                data,
+                owner.getUUID(),
+                forwardBase,
+                helper.getLevel().dimension().identifier().toString(),
+                hallPos.offset(24, 0, 0));
+        if (!data.completeBuildProject(owner.getUUID(), forwardBaseProject, forwardBase)
+                || !recruit.handleMenuButton(
+                        owner, RecruitCommandMenu.BUTTON_PROMOTE_COMMANDER)
+                || !recruit.handleMenuButton(owner, RecruitCommandMenu.BUTTON_FOLLOW)) {
+            helper.fail("Door-command recruit could not become a following commander");
+            return;
+        }
+        var group = data.armyGroupForRecruit(recruit.getUUID()).orElse(null);
+        if (group == null || recruit.getArmyGroupId() == null
+                || !recruit.getArmyGroupId().equals(group.id())) {
+            helper.fail("Door-command commander lacks an authoritative army group");
+            return;
+        }
+
+        owner.setNoGravity(true);
+        owner.setPos(
+                followTarget.getX() + 0.5D,
+                followTarget.getY(),
+                followTarget.getZ() + 0.5D);
+        helper.getLevel().getChunkSource().move(owner);
+        UUID groupId = group.id();
+        int[] phase = {0};
+        int[] phaseStartedRecruitTick = {recruit.tickCount};
+        Vec3[] heldPosition = {Vec3.ZERO};
+        boolean[] followDoorOpened = {false};
+        boolean[] followCrossedDoor = {false};
+        boolean[] followDoorClosed = {false};
+        boolean[] patrolDoorOpened = {false};
+        boolean[] patrolCrossedDoor = {false};
+        boolean[] patrolDoorClosed = {false};
+        boolean[] complete = {false};
+        helper.onEachTick(() -> {
+            if (complete[0]) {
+                return;
+            }
+            var liveDoor = helper.getLevel().getBlockState(doorPos);
+            boolean doorOpen = liveDoor.hasProperty(BlockStateProperties.OPEN)
+                    && liveDoor.getValue(BlockStateProperties.OPEN);
+            var currentGroup = data.armyGroup(groupId).orElse(null);
+            if (currentGroup == null) {
+                complete[0] = true;
+                helper.fail("Door-command army group disappeared");
+                return;
+            }
+
+            if (phase[0] == 0) {
+                followDoorOpened[0] |= doorOpen;
+                followCrossedDoor[0] |= recruit.getX() > doorPos.getX() + 3.0D
+                        && recruit.distanceToSqr(
+                                doorPos.getX() + 0.5D,
+                                doorPos.getY() + 0.5D,
+                                doorPos.getZ() + 0.5D) > 12.25D;
+                followDoorClosed[0] |= followDoorOpened[0]
+                        && followCrossedDoor[0]
+                        && !doorOpen;
+                if (followDoorOpened[0]
+                        && followCrossedDoor[0]
+                        && recruit.getRecruitCommand() == RecruitmentAction.FOLLOW_OWNER
+                        && currentGroup.order().type() == ArmyCommandType.FOLLOW_OWNER) {
+                    owner.setPos(recruit.getX(), recruit.getY(), recruit.getZ());
+                    helper.getLevel().getChunkSource().move(owner);
+                    if (!recruit.handleMenuButton(owner, RecruitCommandMenu.BUTTON_HOLD)) {
+                        complete[0] = true;
+                        helper.fail("Follow-through-door did not accept Hold");
+                        return;
+                    }
+                    heldPosition[0] = recruit.position();
+                    phaseStartedRecruitTick[0] = recruit.tickCount;
+                    phase[0] = 1;
+                    return;
+                }
+                if (recruit.tickCount - phaseStartedRecruitTick[0] >= 360) {
+                    complete[0] = true;
+                    helper.fail("Follow command did not complete its claimed-door cycle: position="
+                            + recruit.position() + ", command=" + recruit.getRecruitCommand()
+                            + ", order=" + currentGroup.order()
+                            + ", opened=" + followDoorOpened[0]
+                            + ", crossed=" + followCrossedDoor[0]
+                            + ", closed=" + followDoorClosed[0]
+                            + ", path=" + pathState(recruit, followTarget));
+                }
+                return;
+            }
+
+            if (phase[0] == 1) {
+                followDoorClosed[0] |= !doorOpen;
+                int holdTicks = recruit.tickCount - phaseStartedRecruitTick[0];
+                boolean walkTargetCleared = !BrainUtil.hasMemory(
+                        recruit,
+                        net.minecraft.world.entity.ai.memory.MemoryModuleType.WALK_TARGET);
+                if (holdTicks >= 20
+                        && followDoorClosed[0]
+                        && recruit.getNavigation().isDone()
+                        && walkTargetCleared
+                        && recruit.isOrderedToSit()
+                        && recruit.getRecruitCommand() == RecruitmentAction.HOLD_POSITION
+                        && currentGroup.order().type() == ArmyCommandType.HOLD_POSITION) {
+                    heldPosition[0] = recruit.position();
+                    phaseStartedRecruitTick[0] = recruit.tickCount;
+                    phase[0] = 2;
+                    return;
+                }
+                if (holdTicks >= 120) {
+                    complete[0] = true;
+                    helper.fail("Hold did not stop navigation and close the traversed door: position="
+                            + recruit.position() + ", held=" + heldPosition[0]
+                            + ", command=" + recruit.getRecruitCommand()
+                            + ", order=" + currentGroup.order()
+                            + ", doorClosed=" + followDoorClosed[0]
+                            + ", orderedSit=" + recruit.isOrderedToSit()
+                            + ", navigationDone=" + recruit.getNavigation().isDone()
+                            + ", walkTargetCleared=" + walkTargetCleared);
+                }
+                return;
+            }
+
+            if (phase[0] == 2) {
+                if (recruit.tickCount - phaseStartedRecruitTick[0] < 20) {
+                    return;
+                }
+                double heldDeltaX = recruit.getX() - heldPosition[0].x();
+                double heldDeltaZ = recruit.getZ() - heldPosition[0].z();
+                if (!recruit.isOrderedToSit()
+                        || recruit.getRecruitCommand() != RecruitmentAction.HOLD_POSITION
+                        || currentGroup.order().type() != ArmyCommandType.HOLD_POSITION
+                        || heldDeltaX * heldDeltaX + heldDeltaZ * heldDeltaZ > 0.25D) {
+                    complete[0] = true;
+                    helper.fail("Hold did not remain stationary after door traversal: position="
+                            + recruit.position() + ", held=" + heldPosition[0]
+                            + ", command=" + recruit.getRecruitCommand()
+                            + ", order=" + currentGroup.order()
+                            + ", orderedSit=" + recruit.isOrderedToSit());
+                    return;
+                }
+                if (!recruit.handleMenuButton(owner, RecruitCommandMenu.BUTTON_PATROL)) {
+                    complete[0] = true;
+                    helper.fail("Held commander could not start a persisted patrol");
+                    return;
+                }
+                phaseStartedRecruitTick[0] = recruit.tickCount;
+                phase[0] = 3;
+                return;
+            }
+
+            patrolDoorOpened[0] |= doorOpen;
+            patrolCrossedDoor[0] |= recruit.getX() < doorPos.getX() - 2.0D
+                    && recruit.distanceToSqr(
+                            doorPos.getX() + 0.5D,
+                            doorPos.getY() + 0.5D,
+                            doorPos.getZ() + 0.5D) > 12.25D;
+            patrolDoorClosed[0] |= patrolDoorOpened[0]
+                    && patrolCrossedDoor[0]
+                    && !doorOpen;
+            if (patrolDoorClosed[0]
+                    && recruit.getRecruitCommand() == RecruitmentAction.PATROL_ROUTE
+                    && currentGroup.order().type() == ArmyCommandType.PATROL_ROUTE
+                    && currentGroup.effectivePatrolPlan().isPresent()) {
+                complete[0] = true;
+                recruit.discard();
+                helper.succeed();
+                return;
+            }
+            if (recruit.tickCount - phaseStartedRecruitTick[0] >= 420) {
+                complete[0] = true;
+                var activePath = recruit.getNavigation().getPath();
+                helper.fail("Patrol command did not resume through the claimed door: position="
+                        + recruit.position() + ", command=" + recruit.getRecruitCommand()
+                        + ", order=" + currentGroup.order()
+                        + ", plan=" + currentGroup.effectivePatrolPlan().orElse(null)
+                        + ", opened=" + patrolDoorOpened[0]
+                        + ", crossed=" + patrolCrossedDoor[0]
+                        + ", closed=" + patrolDoorClosed[0]
+                        + ", door=" + helper.getLevel().getBlockState(doorPos)
+                        + ", upperDoor=" + helper.getLevel().getBlockState(doorPos.above())
+                        + ", horizontalCollision=" + recruit.horizontalCollision
+                        + ", orderedSit=" + recruit.isOrderedToSit()
+                        + ", velocity=" + recruit.getDeltaMovement()
+                        + ", moveWanted=" + recruit.getMoveControl().hasWanted()
+                        + ", wanted=(" + recruit.getMoveControl().getWantedX()
+                        + "," + recruit.getMoveControl().getWantedY()
+                        + "," + recruit.getMoveControl().getWantedZ() + ")"
+                        + ", activePath=" + (activePath == null ? "none"
+                                : "nodes=" + activePath.getNodeCount()
+                                + ", index=" + activePath.getNextNodeIndex()
+                                + ", next=" + activePath.getNextNodePos()
+                                + ", target=" + activePath.getTarget())
+                        + ", path=" + pathState(
+                                recruit, recruitPos));
+            }
+        });
+    }
+
+    /**
      * Exercises the ordinary survival path without setting worker phases, invoking
      * the controller, or moving the recruit after assignment.
      */
@@ -7050,6 +7317,7 @@ public final class ModGameTests {
                     && completedOrder
                     && doorOpened[0]
                     && doorClosedAfterPassage[0]
+                    && recruit.getRecruitCommand() == RecruitmentAction.WORK_AT_SITE
                     && recruit.getWorkerMainHandItem().getDamageValue()
                             > toolDamageBefore) {
                 complete[0] = true;
@@ -7064,6 +7332,7 @@ public final class ModGameTests {
                         + ", cropReplanted=" + cropReplanted
                         + ", deposited=" + deposited
                         + ", completedOrder=" + completedOrder
+                        + ", command=" + recruit.getRecruitCommand()
                         + ", doorOpened=" + doorOpened[0]
                         + ", doorClosed=" + doorClosedAfterPassage[0]);
             }
