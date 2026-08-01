@@ -139,8 +139,10 @@ import galacticwars.clonewars.workforce.CourierDispatchMode;
 import galacticwars.clonewars.workforce.CourierRouteMode;
 import galacticwars.clonewars.workforce.CourierTransferAction;
 import galacticwars.clonewars.workforce.CourierWaypoint;
+import galacticwars.clonewars.workforce.SettlementSupplyLedger;
 import galacticwars.clonewars.workforce.SupplyCategory;
 import galacticwars.clonewars.workforce.SupplyDemand;
+import galacticwars.clonewars.workforce.SupplyReservation;
 import galacticwars.clonewars.workforce.WorkAreaBounds;
 import galacticwars.clonewars.workforce.WorkerExecutionState;
 import galacticwars.clonewars.world.PlanetTravelService;
@@ -302,6 +304,9 @@ public final class ModGameTests {
         isolatedEnvironments.put(id("hybrid_courier_dispatch"), event.registerEnvironment(
                         id("hybrid_courier_dispatch_environment"),
                         new TestEnvironmentDefinition.AllOf(List.of())));
+        isolatedEnvironments.put(id("competing_courier_leases"), event.registerEnvironment(
+                        id("competing_courier_leases_environment"),
+                        new TestEnvironmentDefinition.AllOf(List.of())));
         isolatedEnvironments.put(id("commander_center_replay_runtime"), event.registerEnvironment(
                         id("commander_center_replay_runtime_environment"),
                         new TestEnvironmentDefinition.AllOf(List.of())));
@@ -334,6 +339,7 @@ public final class ModGameTests {
                 id("recruit_hazard_and_self_care"),
                 id("black_box_farmer_door_lifecycle"),
                 id("specialist_worker_loops"),
+                id("competing_courier_leases"),
                 id("local_recruit_protect_owner"),
                 id("command_marker_runtime"));
         for (Identifier testId : TESTS.keySet()) {
@@ -368,6 +374,8 @@ public final class ModGameTests {
                                             ? 700
                                     : testId.equals(id("specialist_worker_loops"))
                                             ? 1_600
+                                    : testId.equals(id("competing_courier_leases"))
+                                            ? 700
                                     : Set.of(
                                             id("local_recruit_protect_owner"),
                                             id("ungrouped_recruit_ranged_brain"),
@@ -463,6 +471,7 @@ public final class ModGameTests {
         tests.put(id("specialist_worker_loops"), ModGameTests::specialistWorkerLoops);
         tests.put(id("bounded_worker_scans"), ModGameTests::boundedWorkerScans);
         tests.put(id("hybrid_courier_dispatch"), ModGameTests::hybridCourierDispatch);
+        tests.put(id("competing_courier_leases"), ModGameTests::competingCourierLeases);
         tests.put(id("animal_farmer_species_pairing"), ModGameTests::animalFarmerSpeciesPairing);
         tests.put(id("workforce_saved_data_authority"), ModGameTests::workforceSavedDataAuthority);
         tests.put(id("recruit_spawn_eggs"), ModGameTests::recruitSpawnEggs);
@@ -7534,6 +7543,149 @@ public final class ModGameTests {
                 Set.copyOf(specialistChunks),
                 countContainerItems(hall));
         helper.onEachTick(scenario::tick);
+    }
+
+    /**
+     * Exercises automatic courier contention without setting private phases,
+     * invoking the worker controller, or moving either courier after assignment.
+     */
+    private static void competingCourierLeases(GameTestHelper helper) {
+        SmartBrainTestArea area = prepareSmartBrainTestAreaAt(
+                helper,
+                GameType.CREATIVE,
+                -2,
+                14,
+                -2,
+                8,
+                isolatedCapital(helper, 215));
+        ServerLevel level = helper.getLevel();
+        ServerPlayer owner = area.player();
+        BlockPos hallPos = area.at(1, 1, 3);
+        CommandCenterBlockEntity hall = placeCommandCenter(helper, hallPos);
+        hall.claim(owner);
+        hall.setFaction("galacticwars:republic");
+        KingdomSavedData data = KingdomSavedData.get(level);
+        KingdomRecord kingdom = data.activateHall(
+                owner.getUUID(),
+                hall.factionId(),
+                level.dimension().identifier().toString(),
+                hallPos).orElse(null);
+        if (kingdom == null) {
+            helper.fail("Competing courier fixture could not activate its kingdom");
+            return;
+        }
+        FactionAlignmentSavedData.get(level).setScore(
+                owner.getUUID(), FactionId.of("republic"), 100);
+        applyCampaignSetupEvent(
+                ProgressionSavedData.get(level),
+                owner,
+                ProgressionEventType.FACTION_PLEDGED,
+                "galacticwars:republic");
+
+        GalacticRecruitEntity firstCourier = spawnRecruitAt(
+                helper, ModEntityTypes.CLONE_TROOPER.get(), area.at(3, 1, 2));
+        GalacticRecruitEntity secondCourier = spawnRecruitAt(
+                helper, ModEntityTypes.CLONE_TROOPER.get(), area.at(3, 1, 4));
+        GalacticRecruitEntity requester = spawnRecruitAt(
+                helper, ModEntityTypes.CLONE_TROOPER.get(), area.at(11, 1, 3));
+        requester.initializeFromSpawnEgg();
+        requester.tame(owner);
+        requester.setNoAi(true);
+        if (!data.registerRecruit(
+                owner.getUUID(), requester.getUUID(), NpcServiceBranch.CIVILIAN)) {
+            helper.fail("Competing courier requester could not join the settlement");
+            return;
+        }
+        for (GalacticRecruitEntity courier : List.of(firstCourier, secondCourier)) {
+            courier.initializeFromSpawnEgg();
+            owner.setPos(courier.getX(), courier.getY(), courier.getZ());
+            if (!courier.handleMenuButton(owner, RecruitCommandMenu.BUTTON_HIRE)
+                    || !courier.handleMenuButton(
+                            owner, RecruitCommandMenu.BUTTON_ASSIGN_COURIER)) {
+                helper.fail("Competing courier could not be hired and assigned: "
+                        + courier.getUUID());
+                return;
+            }
+        }
+
+        putContainerItem(hall, new ItemStack(ModItems.ENERGY_CELL.get(), 4));
+        SupplyDemand demand = new SupplyDemand(
+                UUID.randomUUID(),
+                SupplyCategory.AMMUNITION,
+                "galacticwars:energy_cell",
+                6,
+                0,
+                100,
+                "recruit/" + requester.getUUID() + "/competing_couriers");
+        if (!data.requestSupply(owner.getUUID(), kingdom.settlement().id(), demand)) {
+            helper.fail("Competing courier demand was rejected");
+            return;
+        }
+
+        long startedAt = helper.getTick();
+        boolean[] complete = {false};
+        helper.onEachTick(() -> {
+            if (complete[0]) {
+                return;
+            }
+            SettlementSupplyLedger ledger = data.supplyLedger(
+                    kingdom.settlement().id()).orElseThrow();
+            long activeReservations = ledger.reservations().stream()
+                    .filter(reservation -> reservation.active(level.getGameTime()))
+                    .count();
+            if (activeReservations > 1) {
+                complete[0] = true;
+                helper.fail("Competing couriers double-reserved partial stock: "
+                        + ledger.reservations());
+                return;
+            }
+
+            int sourceStock = countContainerItem(hall, ModItems.ENERGY_CELL.get());
+            int firstCargo = countContainerItem(
+                    firstCourier.createCargoContainer(), ModItems.ENERGY_CELL.get());
+            int secondCargo = countContainerItem(
+                    secondCourier.createCargoContainer(), ModItems.ENERGY_CELL.get());
+            int requesterCargo = countContainerItem(
+                    requester.createCargoContainer(), ModItems.ENERGY_CELL.get());
+            int physicalTotal = sourceStock + firstCargo + secondCargo + requesterCargo;
+            if (physicalTotal != 4) {
+                complete[0] = true;
+                helper.fail("Competing courier transfer violated physical conservation: source="
+                        + sourceStock + ", first=" + firstCargo + ", second=" + secondCargo
+                        + ", requester=" + requesterCargo + ", ledger=" + ledger);
+                return;
+            }
+
+            SupplyDemand currentDemand = ledger.demands().stream()
+                    .filter(candidate -> candidate.id().equals(demand.id()))
+                    .findFirst().orElseThrow();
+            long completedReservations = ledger.reservations().stream()
+                    .filter(reservation -> reservation.state()
+                            == SupplyReservation.State.COMPLETED)
+                    .count();
+            if (requesterCargo == 4
+                    && sourceStock == 0
+                    && firstCargo == 0
+                    && secondCargo == 0
+                    && currentDemand.outstandingQuantity() == 2
+                    && completedReservations == 1) {
+                complete[0] = true;
+                firstCourier.discard();
+                secondCourier.discard();
+                requester.discard();
+                helper.succeed();
+                return;
+            }
+            if (helper.getTick() - startedAt >= 650) {
+                complete[0] = true;
+                helper.fail("Competing courier delivery timed out: source=" + sourceStock
+                        + ", first=" + firstCourier.getWorkerStatus()
+                        + ", second=" + secondCourier.getWorkerStatus()
+                        + ", requester=" + requesterCargo
+                        + ", demand=" + currentDemand
+                        + ", reservations=" + ledger.reservations());
+            }
+        });
     }
 
     private static void hybridCourierDispatch(GameTestHelper helper) {

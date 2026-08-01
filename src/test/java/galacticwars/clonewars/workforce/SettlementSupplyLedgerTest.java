@@ -28,9 +28,60 @@ public final class SettlementSupplyLedgerTest {
         assertTrue(expired.reservation(second.reservation().orElseThrow().id()).orElseThrow().state()
                 == SupplyReservation.State.RELEASED, "expired lease released");
         repeatedRequestsAndEndpointAccounting(demand, storage, firstWorker);
+        competingWorkersRespectExpiredLeases(storage);
         compactsCompletedDemandHistory(storage);
         handlesReservationCapacity(storage);
         System.out.println("SettlementSupplyLedgerTest passed");
+    }
+
+    private static void competingWorkersRespectExpiredLeases(StorageEndpoint storage) {
+        UUID settlementId = UUID.randomUUID();
+        UUID demandId = UUID.randomUUID();
+        UUID firstWorker = UUID.randomUUID();
+        UUID secondWorker = UUID.randomUUID();
+        SupplyDemand demand = new SupplyDemand(
+                demandId,
+                SupplyCategory.AMMUNITION,
+                "galacticwars:energy_cell",
+                6,
+                0,
+                100,
+                "recruit/" + UUID.randomUUID() + "/ammunition");
+        SettlementSupplyLedger requested = SettlementSupplyLedger.create(settlementId).request(demand);
+
+        SettlementSupplyLedger.ReservationDecision first = requested.reserve(
+                demandId, firstWorker, storage, 4, 4, 100L, 10L);
+        assertTrue(first.accepted(), "first competing courier reserves the partial stock");
+        int firstRevision = first.ledger().revision();
+
+        SettlementSupplyLedger.ReservationDecision blocked = first.ledger().reserve(
+                demandId, secondWorker, storage, 4, 4, 101L, 10L);
+        assertTrue(!blocked.accepted(), "second courier cannot double-reserve the same stock");
+        assertEquals("physical_stock_unavailable", blocked.reason(),
+                "stock contention has a stable rejection reason");
+        assertTrue(blocked.ledger() == first.ledger(),
+                "contention rejection does not advance the ledger revision");
+
+        SettlementSupplyLedger.ReservationDecision reacquired = blocked.ledger().reserve(
+                demandId, secondWorker, storage, 4, 4, 110L, 20L);
+        assertTrue(reacquired.accepted(), "second courier reacquires stock at lease expiry");
+        assertTrue(reacquired.ledger().revision() > firstRevision,
+                "expiry and reacquisition advance the ledger revision");
+        assertTrue(reacquired.ledger().reservation(first.reservation().orElseThrow().id())
+                        .orElseThrow().state() == SupplyReservation.State.RELEASED,
+                "expired competing lease is terminal before reacquisition");
+        assertThrows(() -> reacquired.ledger().complete(
+                        first.reservation().orElseThrow().id(), firstWorker, 4, 111L),
+                "expired first courier cannot complete after stock is reacquired");
+
+        SettlementSupplyLedger completed = reacquired.ledger().complete(
+                reacquired.reservation().orElseThrow().id(), secondWorker, 4, 111L);
+        assertEquals(2, completed.nextDemand().orElseThrow().outstandingQuantity(),
+                "only the successful competing delivery fulfills demand");
+        assertTrue(completed.complete(
+                        reacquired.reservation().orElseThrow().id(), secondWorker, 4, 111L)
+                        == completed,
+                "successful competing delivery retry remains idempotent");
     }
 
     private static void compactsCompletedDemandHistory(StorageEndpoint storage) {
@@ -188,6 +239,12 @@ public final class SettlementSupplyLedgerTest {
 
     private static void assertEquals(int expected, int actual, String message) {
         if (expected != actual) throw new AssertionError(message + ": expected " + expected + ", got " + actual);
+    }
+
+    private static void assertEquals(String expected, String actual, String message) {
+        if (!expected.equals(actual)) {
+            throw new AssertionError(message + ": expected " + expected + ", got " + actual);
+        }
     }
 
     private static void assertThrows(Runnable action, String message) {

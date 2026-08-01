@@ -24,10 +24,10 @@
 - Modify only if the tests fail: `src/main/java/galacticwars/clonewars/entity/GalacticRecruitEntity.java`
 - Modify only if the tests fail: `src/main/java/galacticwars/clonewars/workforce/SettlementSupplyLedger.java`
 
-- [ ] Extend the dependency-light ledger harness with two workers competing for partial stock, lease expiry and reacquisition, stale-worker completion rejection, idempotent retries, and revision monotonicity.
-- [ ] Add an ordinary-path courier GameTest with two assigned couriers, one registered source, one requester, and less stock than aggregate demand. Assert bounded reservations and exact physical conservation without private phase mutation.
-- [ ] If the runtime test exposes a gap, make the smallest lease/cleanup repair and first preserve the failing test as RED evidence.
-- [ ] Run the focused harness and the GameTest twice, then commit `Prove competing courier lease integrity`.
+- [x] Extend the dependency-light ledger harness with two workers competing for partial stock, lease expiry and reacquisition, stale-worker completion rejection, idempotent retries, and revision monotonicity.
+- [x] Add an ordinary-path courier GameTest with two assigned couriers, one registered source, one requester, and less stock than aggregate demand. Assert bounded reservations and exact physical conservation without private phase mutation.
+- [x] If the runtime test exposes a gap, make the smallest lease/cleanup repair and first preserve the failing test as RED evidence. The new evidence passed without a production repair.
+- [x] Run the focused harness and the GameTest twice, then commit `Prove competing courier lease integrity`. The focused harness passed and both NeoForge runs passed all 77 required tests.
 
 ## Task 2: Concurrent worksite authority and replay rejection
 
