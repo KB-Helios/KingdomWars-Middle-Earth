@@ -336,6 +336,9 @@ public final class ModGameTests {
         isolatedEnvironments.put(id("black_box_builder_lifecycle"), event.registerEnvironment(
                         id("black_box_builder_lifecycle_environment"),
                         new TestEnvironmentDefinition.AllOf(List.of())));
+        isolatedEnvironments.put(id("black_box_courier_lifecycle"), event.registerEnvironment(
+                        id("black_box_courier_lifecycle_environment"),
+                        new TestEnvironmentDefinition.AllOf(List.of())));
         isolatedEnvironments.put(id("hybrid_courier_dispatch"), event.registerEnvironment(
                         id("hybrid_courier_dispatch_environment"),
                         new TestEnvironmentDefinition.AllOf(List.of())));
@@ -389,6 +392,7 @@ public final class ModGameTests {
                 id("black_box_fisher_lifecycle"),
                 id("black_box_merchant_lifecycle"),
                 id("black_box_builder_lifecycle"),
+                id("black_box_courier_lifecycle"),
                 id("competing_courier_leases"),
                 id("courier_live_lease_reload"),
                 id("courier_hall_removal"),
@@ -443,6 +447,8 @@ public final class ModGameTests {
                                             ? 900
                                     : testId.equals(id("black_box_builder_lifecycle"))
                                             ? 1_800
+                                    : testId.equals(id("black_box_courier_lifecycle"))
+                                            ? 1_200
                                     : testId.equals(id("competing_courier_leases"))
                                             ? 700
                                     : testId.equals(id("courier_live_lease_reload"))
@@ -558,6 +564,7 @@ public final class ModGameTests {
         tests.put(id("black_box_fisher_lifecycle"), ModGameTests::blackBoxFisherLifecycle);
         tests.put(id("black_box_merchant_lifecycle"), ModGameTests::blackBoxMerchantLifecycle);
         tests.put(id("black_box_builder_lifecycle"), ModGameTests::blackBoxBuilderLifecycle);
+        tests.put(id("black_box_courier_lifecycle"), ModGameTests::blackBoxCourierLifecycle);
         tests.put(id("bounded_worker_scans"), ModGameTests::boundedWorkerScans);
         tests.put(id("hybrid_courier_dispatch"), ModGameTests::hybridCourierDispatch);
         tests.put(id("competing_courier_leases"), ModGameTests::competingCourierLeases);
@@ -9958,6 +9965,297 @@ public final class ModGameTests {
                         + ", events=" + buildingEventsBefore + "->" + buildingEventsAfter
                         + ", navigation=" + withdrawNavigationObserved[0] + "/"
                         + buildNavigationObserved[0]
+                        + ", moved=" + movedPhysically[0]);
+            }
+        });
+    }
+
+    /**
+     * Exercises one manual delivery through ordinary Survival hire, marker-selected worksite
+     * and storage actions, the replay-safe worksite menu, SmartBrain navigation, physical cargo,
+     * persisted order completion, and progression. The fixture never mutates a worker phase,
+     * invokes the controller, or moves the recruit after assignment.
+     */
+    private static void blackBoxCourierLifecycle(GameTestHelper helper) {
+        SmartBrainTestArea area = prepareSmartBrainTestAreaAt(
+                helper,
+                GameType.SURVIVAL,
+                -2,
+                18,
+                -2,
+                10,
+                isolatedCapital(helper, 229));
+        ServerLevel level = helper.getLevel();
+        ServerPlayer owner = area.player();
+        BlockPos hallPos = area.at(0, 1, 0);
+        BlockPos destination = area.at(8, 1, 2);
+        BlockPos recruitPos = area.at(14, 1, 6);
+        CommandCenterBlockEntity hall = placeCommandCenter(helper, hallPos);
+        hall.claim(owner);
+        KingdomSavedData data = KingdomSavedData.get(level);
+        if (data.activateHall(
+                owner.getUUID(),
+                hall.factionId(),
+                level.dimension().identifier().toString(),
+                hallPos).isEmpty()) {
+            helper.fail("Black-box courier fixture could not activate its Command Center");
+            return;
+        }
+        owner.getInventory().add(new ItemStack(ModItems.CREDIT_CHIP.get(), 128));
+        FactionAlignmentSavedData.get(level).setScore(
+                owner.getUUID(), FactionId.of("republic"), 100);
+        applyCampaignSetupEvent(
+                ProgressionSavedData.get(level),
+                owner,
+                ProgressionEventType.FACTION_PLEDGED,
+                "galacticwars:republic");
+
+        level.setBlock(destination, Blocks.CHEST.defaultBlockState(), 3);
+        if (!(level.getBlockEntity(destination) instanceof Container destinationStorage)) {
+            helper.fail("Black-box courier fixture could not place its destination chest");
+            return;
+        }
+        GalacticRecruitEntity recruit = spawnRecruitAt(
+                helper, ModEntityTypes.CLONE_TROOPER.get(), recruitPos);
+        owner.setPos(recruit.getX(), recruit.getY(), recruit.getZ());
+        if (!recruit.handleMenuButton(owner, RecruitCommandMenu.BUTTON_HIRE)
+                || !recruit.handleMenuButton(owner, RecruitCommandMenu.BUTTON_ASSIGN_COURIER)) {
+            helper.fail("Black-box courier could not be hired and assigned");
+            return;
+        }
+        ItemStack marker = new ItemStack(ModItems.COMMAND_MARKER.get());
+        owner.setItemInHand(InteractionHand.MAIN_HAND, marker);
+
+        int initialMaterials = 3;
+        if (initialMaterials > 0) {
+            putContainerItem(hall, new ItemStack(ModItems.DURACRETE.get(), initialMaterials));
+        }
+        int deliveryEventsBefore = ProgressionSavedData.get(level).state(owner.getUUID())
+                .total(ProgressionEventType.DELIVERY_COMPLETED);
+        Container recruitCargo = recruit.createCargoContainer();
+        Vec3 initialRecruitPosition = recruit.position();
+        boolean[] configured = {false};
+        boolean[] sourceNavigationObserved = {false};
+        boolean[] destinationNavigationObserved = {false};
+        boolean[] sourceApproached = {false};
+        boolean[] destinationApproached = {false};
+        boolean[] cargoObserved = {false};
+        boolean[] movedPhysically = {false};
+        boolean[] complete = {false};
+        int[] startedRecruitTick = {-1};
+        UUID[] workOrderId = {null};
+        long readinessStartedAt = helper.getTick();
+        helper.onEachTick(() -> {
+            if (complete[0]) {
+                return;
+            }
+            if (!configured[0]) {
+                boolean areaTicking = areSmartBrainAreaChunksTicking(
+                        helper, area, -2, 18, -2, 10);
+                boolean recruitIndexed = level.getEntity(recruit.getUUID()) == recruit;
+                if (!areaTicking || !recruitIndexed || recruit.tickCount == 0) {
+                    if (helper.getTick() - readinessStartedAt
+                            >= SMART_BRAIN_CHUNK_READY_TIMEOUT) {
+                        complete[0] = true;
+                        helper.fail("Black-box courier area never became entity-ticking: ticking="
+                                + areaTicking + ", recruit=" + recruitIndexed
+                                + ", recruitTick=" + recruit.tickCount);
+                    }
+                    return;
+                }
+
+                InteractionResult worksiteSelection = marker.getItem().useOn(new UseOnContext(
+                        owner,
+                        InteractionHand.MAIN_HAND,
+                        new BlockHitResult(
+                                Vec3.atCenterOf(destination),
+                                Direction.UP,
+                                destination,
+                                false)));
+                boolean worksiteAccepted = recruit.handleMenuButton(
+                        owner, RecruitCommandMenu.BUTTON_SET_WORKSITE);
+                InteractionResult storageSelection = marker.getItem().useOn(new UseOnContext(
+                        owner,
+                        InteractionHand.MAIN_HAND,
+                        new BlockHitResult(
+                                Vec3.atCenterOf(hallPos),
+                                Direction.UP,
+                                hallPos,
+                                false)));
+                boolean storageAccepted = recruit.handleMenuButton(
+                        owner, RecruitCommandMenu.BUTTON_SET_STORAGE);
+                owner.setPos(recruit.getX(), recruit.getY(), recruit.getZ());
+                level.getChunkSource().move(owner);
+                WorksiteConfigurationMenu menu = (WorksiteConfigurationMenu)
+                        WorksiteConfigurationMenuProvider.prepare(owner, recruit)
+                                .orElseThrow(() -> new IllegalStateException(
+                                        "Black-box courier did not expose its worksite menu"))
+                                .createMenu(51, owner.getInventory(), owner);
+                CourierDispatchMode initialDispatch = menu.snapshot().dispatchMode();
+                boolean hybridAccepted = menu.handleReplayAction(
+                        owner,
+                        new WorksiteActionPayload(
+                                UUID.randomUUID(),
+                                menu.containerId,
+                                WorksiteConfigurationAction.CYCLE_DISPATCH_MODE.id(),
+                                menu.snapshot().configurationRevision(),
+                                -1));
+                CourierDispatchMode intermediateDispatch = menu.snapshot().dispatchMode();
+                boolean manualAccepted = menu.handleReplayAction(
+                        owner,
+                        new WorksiteActionPayload(
+                                UUID.randomUUID(),
+                                menu.containerId,
+                                WorksiteConfigurationAction.CYCLE_DISPATCH_MODE.id(),
+                                menu.snapshot().configurationRevision(),
+                                -1));
+                WorksiteRecord worksite = data.assignedWorksite(
+                        owner.getUUID(), recruit.getUUID()).orElse(null);
+                boolean durableStorage = worksite != null
+                        && worksite.storageEndpoints().stream().anyMatch(endpoint ->
+                                endpoint.dimensionId().equals(
+                                        level.dimension().identifier().toString())
+                                        && endpoint.x() == hallPos.getX()
+                                        && endpoint.y() == hallPos.getY()
+                                        && endpoint.z() == hallPos.getZ());
+                double initialSourceDistance = recruit.distanceToSqr(Vec3.atCenterOf(hallPos));
+                double initialDestinationDistance = recruit.distanceToSqr(
+                        Vec3.atCenterOf(destination));
+                if (worksiteSelection != InteractionResult.SUCCESS
+                        || !worksiteAccepted
+                        || storageSelection != InteractionResult.SUCCESS
+                        || !storageAccepted
+                        || initialDispatch != CourierDispatchMode.AUTOMATIC
+                        || !hybridAccepted
+                        || intermediateDispatch != CourierDispatchMode.HYBRID
+                        || !manualAccepted
+                        || menu.snapshot().dispatchMode() != CourierDispatchMode.MANUAL
+                        || worksite == null
+                        || worksite.x() != destination.getX()
+                        || worksite.y() != destination.getY()
+                        || worksite.z() != destination.getZ()
+                        || worksite.configuration().courierDispatchMode()
+                                != CourierDispatchMode.MANUAL
+                        || !durableStorage
+                        || !hallPos.equals(recruit.getStorageTarget())
+                        || !destination.equals(recruit.getWorkTarget())
+                        || recruit.getRecruitCommand() != RecruitmentAction.WORK_AT_SITE
+                        || initialSourceDistance <= 16.0D
+                        || initialDestinationDistance <= 16.0D) {
+                    complete[0] = true;
+                    helper.fail("Black-box courier setup did not cross its player-facing authority: "
+                            + "selection=" + worksiteSelection + "/" + storageSelection
+                            + ", actions=" + worksiteAccepted + "/" + storageAccepted
+                            + ", dispatch=" + initialDispatch + "->" + intermediateDispatch
+                            + "->" + menu.snapshot().dispatchMode()
+                            + ", worksite=" + worksite
+                            + ", storage=" + recruit.getStorageTarget()
+                            + ", target=" + recruit.getWorkTarget()
+                            + ", command=" + recruit.getRecruitCommand()
+                            + ", distances=" + initialSourceDistance + "/"
+                            + initialDestinationDistance);
+                    return;
+                }
+                configured[0] = true;
+                startedRecruitTick[0] = recruit.tickCount;
+                return;
+            }
+
+            WorkerStatus status = recruit.getWorkerStatus();
+            sourceNavigationObserved[0] |= status.phase() == WorkerPhase.NAVIGATE_SOURCE
+                    && status.reasonCode().equals("courier_withdraw");
+            destinationNavigationObserved[0] |= status.phase() == WorkerPhase.NAVIGATE_STORAGE
+                    && status.reasonCode().equals("courier_deliver");
+            sourceApproached[0] |= recruit.distanceToSqr(Vec3.atCenterOf(hallPos)) <= 4.0D;
+            destinationApproached[0] |= recruit.distanceToSqr(
+                    Vec3.atCenterOf(destination)) <= 4.0D;
+            movedPhysically[0] |= recruit.position().distanceToSqr(initialRecruitPosition) > 4.0D;
+            status.workOrderId().ifPresent(currentOrderId -> {
+                if (workOrderId[0] == null) {
+                    workOrderId[0] = currentOrderId;
+                } else if (!workOrderId[0].equals(currentOrderId)) {
+                    complete[0] = true;
+                    helper.fail("Black-box courier replaced its live persisted work order: "
+                            + workOrderId[0] + "->" + currentOrderId);
+                }
+            });
+            if (complete[0]) {
+                return;
+            }
+
+            int storedMaterials = countContainerItem(hall, ModItems.DURACRETE.get());
+            int carriedMaterials = countContainerItem(
+                    recruitCargo, ModItems.DURACRETE.get());
+            int deliveredMaterials = countContainerItem(
+                    destinationStorage, ModItems.DURACRETE.get());
+            cargoObserved[0] |= carriedMaterials == initialMaterials
+                    && initialMaterials > 0
+                    && storedMaterials == 0
+                    && deliveredMaterials == 0;
+            if (storedMaterials + carriedMaterials + deliveredMaterials != initialMaterials
+                    || carriedMaterials != workerInventoryCount(recruit)) {
+                complete[0] = true;
+                helper.fail("Black-box courier violated exact physical conservation: source="
+                        + storedMaterials + ", cargo=" + carriedMaterials
+                        + ", destination=" + deliveredMaterials
+                        + ", totalCargo=" + workerInventoryCount(recruit)
+                        + ", expected=" + initialMaterials + ", status=" + status);
+                return;
+            }
+            if (status.phase() == WorkerPhase.BLOCKED
+                    && status.reasonCode().equals("courier_source_empty")) {
+                complete[0] = true;
+                WorkOrder blockedOrder = workOrderId[0] == null
+                        ? null
+                        : data.workOrder(owner.getUUID(), workOrderId[0]).orElse(null);
+                helper.fail("Black-box courier reached the registered source without physical cargo: "
+                        + "source=" + storedMaterials + ", cargo=" + carriedMaterials
+                        + ", destination=" + deliveredMaterials
+                        + ", navigation=" + sourceNavigationObserved[0]
+                        + ", approached=" + sourceApproached[0]
+                        + ", moved=" + movedPhysically[0]
+                        + ", order=" + blockedOrder);
+                return;
+            }
+
+            WorkOrder completedOrder = workOrderId[0] == null
+                    ? null
+                    : data.workOrder(owner.getUUID(), workOrderId[0]).orElse(null);
+            int deliveryEventsAfter = ProgressionSavedData.get(level).state(owner.getUUID())
+                    .total(ProgressionEventType.DELIVERY_COMPLETED);
+            if (storedMaterials == 0
+                    && carriedMaterials == 0
+                    && deliveredMaterials == initialMaterials
+                    && completedOrder != null
+                    && completedOrder.type() == WorkOrderType.COURIER
+                    && completedOrder.state() == WorkOrderState.COMPLETED
+                    && deliveryEventsAfter == deliveryEventsBefore + 1
+                    && sourceNavigationObserved[0]
+                    && destinationNavigationObserved[0]
+                    && sourceApproached[0]
+                    && destinationApproached[0]
+                    && cargoObserved[0]
+                    && movedPhysically[0]
+                    && recruit.getRecruitCommand() == RecruitmentAction.WORK_AT_SITE) {
+                complete[0] = true;
+                recruit.discard();
+                helper.succeed();
+                return;
+            }
+
+            if (recruit.tickCount - startedRecruitTick[0] >= 800) {
+                complete[0] = true;
+                helper.fail("Black-box courier lifecycle timed out: status=" + status
+                        + ", source=" + storedMaterials
+                        + ", cargo=" + carriedMaterials
+                        + ", destination=" + deliveredMaterials
+                        + ", order=" + completedOrder
+                        + ", events=" + deliveryEventsBefore + "->" + deliveryEventsAfter
+                        + ", navigation=" + sourceNavigationObserved[0] + "/"
+                        + destinationNavigationObserved[0]
+                        + ", approached=" + sourceApproached[0] + "/"
+                        + destinationApproached[0]
+                        + ", cargoObserved=" + cargoObserved[0]
                         + ", moved=" + movedPhysically[0]);
             }
         });
