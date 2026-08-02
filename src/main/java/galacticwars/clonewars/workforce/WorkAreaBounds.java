@@ -1,5 +1,7 @@
 package galacticwars.clonewars.workforce;
 
+import net.minecraft.core.BlockPos;
+
 public record WorkAreaBounds(int width, int height, int depth) {
     public WorkAreaBounds {
         if (width < 1 || width > 64 || height < 1 || height > 64 || depth < 1 || depth > 64) {
@@ -11,6 +13,24 @@ public record WorkAreaBounds(int width, int height, int depth) {
         int diameter = Math.addExact(Math.multiplyExact(radius, 2), 1);
         int bounded = Math.min(64, diameter);
         return new WorkAreaBounds(bounded, bounded, bounded);
+    }
+
+    public boolean contains(BlockPos center, BlockPos target) {
+        return containsCenteredAt(
+                center.getX(), center.getY(), center.getZ(),
+                target.getX(), target.getY(), target.getZ());
+    }
+
+    public boolean contains(
+            int centerX,
+            int centerY,
+            int centerZ,
+            int targetX,
+            int targetY,
+            int targetZ
+    ) {
+        return containsCenteredAt(
+                centerX, centerY, centerZ, targetX, targetY, targetZ);
     }
 
     public boolean containsCenteredAt(

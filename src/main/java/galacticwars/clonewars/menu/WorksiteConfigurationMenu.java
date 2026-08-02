@@ -67,6 +67,13 @@ public final class WorksiteConfigurationMenu extends AbstractContainerMenu {
                         : Optional.empty());
     }
 
+    static Optional<WorksiteConfigurationSnapshot> captureSnapshot(
+            ServerPlayer player,
+            GalacticRecruitEntity recruit
+    ) {
+        return capture(player, recruit, "ready");
+    }
+
     WorksiteConfigurationMenu(
             int id,
             Inventory inventory,

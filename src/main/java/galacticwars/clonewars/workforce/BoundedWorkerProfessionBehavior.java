@@ -92,12 +92,9 @@ final class BoundedWorkerProfessionBehavior implements WorkerProfessionBehavior 
         if (!worksite.dimensionId().equals(target.dimensionId())) {
             return false;
         }
-        return worksite.configuration().bounds().containsCenteredAt(
-                worksite.x(),
-                worksite.y(),
-                worksite.z(),
-                target.x(),
-                target.y(),
-                target.z());
+        WorkAreaBounds bounds = worksite.configuration().bounds();
+        return bounds.contains(
+                worksite.x(), worksite.y(), worksite.z(),
+                target.x(), target.y(), target.z());
     }
 }

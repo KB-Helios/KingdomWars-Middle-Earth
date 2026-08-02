@@ -4925,15 +4925,17 @@ public class GalacticRecruitEntity extends TamableAnimal
                     this,
                     context.item(),
                     transferred);
-            data.releaseSupply(
-                    context.kingdom().ownerId(),
-                    context.settlementId(),
-                    context.reservation().id(),
-                    this.getUUID());
-            this.workerExecutionState = this.workerExecutionState.withSupplyReservation(Optional.empty());
-            this.blockWorker(rolledBack == transferred
-                    ? "reservation_expired"
-                    : "delivery_rollback_failed");
+            if (rolledBack == transferred) {
+                data.releaseSupply(
+                        context.kingdom().ownerId(),
+                        context.settlementId(),
+                        context.reservation().id(),
+                        this.getUUID());
+                this.workerExecutionState = this.workerExecutionState.withSupplyReservation(Optional.empty());
+                this.blockWorker("reservation_expired");
+            } else {
+                this.blockWorker("delivery_rollback_failed");
+            }
             return;
         }
         this.workerExecutionState = this.workerExecutionState.withSupplyReservation(Optional.empty());
@@ -5576,13 +5578,9 @@ public class GalacticRecruitEntity extends TamableAnimal
         if (!worksite.dimensionId().equals(this.level().dimension().identifier().toString())) {
             return false;
         }
-        return worksite.configuration().bounds().containsCenteredAt(
-                worksite.x(),
-                worksite.y(),
-                worksite.z(),
-                target.getX(),
-                target.getY(),
-                target.getZ());
+        return worksite.configuration().bounds().contains(
+                new BlockPos(worksite.x(), worksite.y(), worksite.z()),
+                target);
     }
 
     private net.minecraft.world.item.Item availableCarriedFarmerSeed() {

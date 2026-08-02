@@ -30,9 +30,15 @@ final class RecruitCombatMovement {
         List<BlockPos> candidates = new ArrayList<>();
         for (int radius = 2; radius <= 5; radius++) {
             for (Direction direction : Direction.Plane.HORIZONTAL) {
-                candidates.add(origin.relative(direction, radius));
-                candidates.add(origin.relative(direction, radius)
-                        .relative(direction.getClockWise(), radius / 2));
+                BlockPos pos = origin.relative(direction, radius).immutable();
+                if (!candidates.contains(pos)) {
+                    candidates.add(pos);
+                }
+                BlockPos diag = origin.relative(direction, radius)
+                        .relative(direction.getClockWise(), radius / 2).immutable();
+                if (!candidates.contains(diag)) {
+                    candidates.add(diag);
+                }
             }
         }
         List<BlockPos> ranked = rankCandidates(
