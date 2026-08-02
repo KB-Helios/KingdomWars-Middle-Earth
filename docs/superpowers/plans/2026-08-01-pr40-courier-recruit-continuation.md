@@ -164,6 +164,21 @@
 - [x] Record the pinned Workers lumberjack behavioral mapping and Minecraft 26.2 transformation in the authorized-source ledger.
 - [x] Run the focused GameTest twice, then run `runHarnesses`, two complete GameTest passes, `buildAll`, and `git diff --check` before committing. Both focused runs passed 1/1, `runHarnesses` passed 176 actionable tasks, both aggregate NeoForge runs passed all 83 required GameTests, and `buildAll` passed 186 actionable tasks for Fabric and NeoForge. No production repair was required; the existing Minecraft 26.2 runtime already satisfied the ordinary lifecycle and exact conservation proof.
 
+## Task 11: Ordinary-player miner lifecycle
+
+**Files:**
+
+- Modify: `src/main/java/galacticwars/clonewars/gametest/ModGameTests.java`
+- Modify only if the black-box test exposes a gap: `src/main/java/galacticwars/clonewars/entity/GalacticRecruitEntity.java`
+- Modify: `README.md`
+- Modify: `docs/authorized-source-intake.md`
+
+- [x] Add a dedicated ordinary-player-path miner GameTest using real hire, profession assignment, configured worksite, registered storage, navigation, correct-tool mining, and deposit paths. Do not mutate private phases, invoke the worker controller, or move the recruit after assignment.
+- [x] Seed exactly one in-bounds iron ore and prove physical approach, ore removal, exactly one raw-iron output, one point of pickaxe wear, persisted work-order completion, and registered-storage deposit. A controlled RED fixture placed the ore one block outside the worksite and correctly remained in `FIND_TARGET/scan_worksite` until its bounded timeout; the restored in-bounds fixture passed twice.
+- [x] Assert ore/raw-iron conservation throughout the lifecycle so no direct inventory/world mutation can duplicate or lose the mined resource.
+- [x] Record the pinned Workers miner behavioral mapping and Minecraft 26.2 transformation in the authorized-source ledger.
+- [x] Run the focused GameTest twice, then run `runHarnesses`, two complete GameTest passes, `buildAll`, and `git diff --check` before committing. The controlled out-of-bounds RED failed in `FIND_TARGET/scan_worksite` at recruit tick 503, both restored focused runs passed 1/1, `runHarnesses` passed 176 actionable tasks, both aggregate NeoForge runs passed all 84 required GameTests, and `buildAll` passed 186 actionable tasks for Fabric and NeoForge. No production repair was required; the existing Minecraft 26.2 runtime already satisfied the ordinary lifecycle and exact conservation proof.
+
 ## Completion gate
 
-This slice is complete when courier contention and expiry are conservation-proven, an exact automatic transfer survives a live-lease reload, owner removal of settlement authority releases leases and pauses/resumes configured routes without physical loss or ghost delivery, concurrent role/revision/replay cases are rejected server-side, follow/hold/patrol/work commands survive real door traversal, self-care retains ordinary commands while yielding to danger and combat, tamed recruit bolts consume physical Energy Cells with no empty-gun melee fallback, collision-level friendly-fire proof passes, an ordinary cook completes one exact physical furnace cycle without redundant fuel, an ordinary lumberjack conserves a matching sapling and connected tree through replant and deposit, provenance is current, and all four verification gates are green.
+This slice is complete when courier contention and expiry are conservation-proven, an exact automatic transfer survives a live-lease reload, owner removal of settlement authority releases leases and pauses/resumes configured routes without physical loss or ghost delivery, concurrent role/revision/replay cases are rejected server-side, follow/hold/patrol/work commands survive real door traversal, self-care retains ordinary commands while yielding to danger and combat, tamed recruit bolts consume physical Energy Cells with no empty-gun melee fallback, collision-level friendly-fire proof passes, an ordinary cook completes one exact physical furnace cycle without redundant fuel, an ordinary lumberjack conserves a matching sapling and connected tree through replant and deposit, an ordinary miner conserves one ore through bounded physical mining and deposit, provenance is current, and all four verification gates are green.
