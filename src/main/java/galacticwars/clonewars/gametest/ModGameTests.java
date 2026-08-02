@@ -333,6 +333,9 @@ public final class ModGameTests {
         isolatedEnvironments.put(id("black_box_merchant_lifecycle"), event.registerEnvironment(
                         id("black_box_merchant_lifecycle_environment"),
                         new TestEnvironmentDefinition.AllOf(List.of())));
+        isolatedEnvironments.put(id("black_box_builder_lifecycle"), event.registerEnvironment(
+                        id("black_box_builder_lifecycle_environment"),
+                        new TestEnvironmentDefinition.AllOf(List.of())));
         isolatedEnvironments.put(id("hybrid_courier_dispatch"), event.registerEnvironment(
                         id("hybrid_courier_dispatch_environment"),
                         new TestEnvironmentDefinition.AllOf(List.of())));
@@ -385,6 +388,7 @@ public final class ModGameTests {
                 id("black_box_animal_farmer_lifecycle"),
                 id("black_box_fisher_lifecycle"),
                 id("black_box_merchant_lifecycle"),
+                id("black_box_builder_lifecycle"),
                 id("competing_courier_leases"),
                 id("courier_live_lease_reload"),
                 id("courier_hall_removal"),
@@ -437,6 +441,8 @@ public final class ModGameTests {
                                             ? 1_000
                                     : testId.equals(id("black_box_merchant_lifecycle"))
                                             ? 900
+                                    : testId.equals(id("black_box_builder_lifecycle"))
+                                            ? 1_800
                                     : testId.equals(id("competing_courier_leases"))
                                             ? 700
                                     : testId.equals(id("courier_live_lease_reload"))
@@ -551,6 +557,7 @@ public final class ModGameTests {
                 ModGameTests::blackBoxAnimalFarmerLifecycle);
         tests.put(id("black_box_fisher_lifecycle"), ModGameTests::blackBoxFisherLifecycle);
         tests.put(id("black_box_merchant_lifecycle"), ModGameTests::blackBoxMerchantLifecycle);
+        tests.put(id("black_box_builder_lifecycle"), ModGameTests::blackBoxBuilderLifecycle);
         tests.put(id("bounded_worker_scans"), ModGameTests::boundedWorkerScans);
         tests.put(id("hybrid_courier_dispatch"), ModGameTests::hybridCourierDispatch);
         tests.put(id("competing_courier_leases"), ModGameTests::competingCourierLeases);
@@ -9674,6 +9681,289 @@ public final class ModGameTests {
     }
 
     /**
+     * Exercises one shipped blueprint through ordinary Survival hire, recruit-menu projector
+     * preparation, in-world projection, project-specific assignment, registered storage,
+     * navigation, physical placement, persistence, and completion. The fixture never mutates a
+     * worker phase, invokes the controller, or moves the recruit after project assignment.
+     */
+    private static void blackBoxBuilderLifecycle(GameTestHelper helper) {
+        SmartBrainTestArea area = prepareSmartBrainTestAreaAt(
+                helper,
+                GameType.SURVIVAL,
+                -2,
+                18,
+                -2,
+                10,
+                isolatedCapital(helper, 228));
+        ServerLevel level = helper.getLevel();
+        ServerPlayer owner = area.player();
+        BlockPos hallPos = area.at(0, 1, 0);
+        BlockPos origin = area.at(5, 1, 1);
+        BlockPos recruitPos = area.at(14, 1, 6);
+        CommandCenterBlockEntity hall = placeCommandCenter(helper, hallPos);
+        hall.claim(owner);
+        KingdomSavedData data = KingdomSavedData.get(level);
+        KingdomRecord kingdom = data.activateHall(
+                owner.getUUID(),
+                hall.factionId(),
+                level.dimension().identifier().toString(),
+                hallPos).orElse(null);
+        if (kingdom == null) {
+            helper.fail("Black-box builder fixture could not activate its Command Center");
+            return;
+        }
+        owner.getInventory().add(new ItemStack(ModItems.CREDIT_CHIP.get(), 128));
+        FactionAlignmentSavedData.get(level).setScore(
+                owner.getUUID(), FactionId.of("republic"), 100);
+        applyCampaignSetupEvent(
+                ProgressionSavedData.get(level),
+                owner,
+                ProgressionEventType.FACTION_PLEDGED,
+                "galacticwars:republic");
+
+        GalacticRecruitEntity recruit = spawnRecruitAt(
+                helper, ModEntityTypes.CLONE_TROOPER.get(), recruitPos);
+        owner.setPos(recruit.getX(), recruit.getY(), recruit.getZ());
+        if (!recruit.handleMenuButton(owner, RecruitCommandMenu.BUTTON_HIRE)) {
+            helper.fail("Black-box builder could not be hired");
+            return;
+        }
+        owner.setItemInHand(
+                InteractionHand.MAIN_HAND,
+                new ItemStack(ModItems.BLUEPRINT_PROJECTOR.get()));
+        ConstructionPlan selectedPlan = null;
+        int blueprintCount = GameplayDataManager.snapshot().blueprints().size();
+        for (int attempt = 0; attempt < blueprintCount; attempt++) {
+            if (!recruit.handleMenuButton(
+                    owner, RecruitCommandMenu.BUTTON_BUILD_STARTER_KEEP)) {
+                helper.fail("Black-box builder could not prepare its physical projector");
+                return;
+            }
+            selectedPlan = owner.getItemInHand(InteractionHand.MAIN_HAND)
+                    .get(ModDataComponents.CONSTRUCTION_PLAN.get());
+            if (selectedPlan != null && selectedPlan.blueprintId().equals("galacticwars:mine")) {
+                break;
+            }
+            if (!recruit.handleMenuButton(owner, RecruitCommandMenu.BUTTON_NEXT_BLUEPRINT)) {
+                helper.fail("Black-box builder could not cycle to the shipped mine blueprint");
+                return;
+            }
+        }
+        if (selectedPlan == null || !selectedPlan.blueprintId().equals("galacticwars:mine")) {
+            helper.fail("Black-box builder did not select the shipped mine blueprint: "
+                    + selectedPlan);
+            return;
+        }
+        KingdomBaseBlueprint blueprint = GameplayDataManager.snapshot()
+                .blueprint(selectedPlan.blueprintId()).orElseThrow();
+        if (blueprint.placements().size() != 9
+                || blueprint.placements().stream()
+                        .anyMatch(placement -> !placement.itemId().equals("galacticwars:duracrete"))) {
+            helper.fail("Black-box builder fixture requires the shipped nine-Duracrete mine");
+            return;
+        }
+        for (int placementIndex = 0;
+                placementIndex < blueprint.placements().size();
+                placementIndex++) {
+            BaseBlockPlacement placement = blueprint.rotatedPlacement(placementIndex, 0);
+            BlockPos placementPos = origin.offset(
+                    placement.x(), placement.y(), placement.z());
+            level.getChunkAt(placementPos);
+            level.setBlock(placementPos, Blocks.AIR.defaultBlockState(), 3);
+        }
+
+        int initialMaterials = 9;
+        putContainerItem(hall, new ItemStack(ModItems.DURACRETE.get(), initialMaterials));
+        int buildingEventsBefore = ProgressionSavedData.get(level).state(owner.getUUID())
+                .total(ProgressionEventType.BUILDING_COMPLETED);
+        Vec3 initialRecruitPosition = recruit.position();
+        double initialStorageDistance = recruit.distanceToSqr(
+                hallPos.getX() + 0.5D, hallPos.getY(), hallPos.getZ() + 0.5D);
+        double initialBuildDistance = recruit.distanceToSqr(
+                origin.getX() + 0.5D, origin.getY(), origin.getZ() + 0.5D);
+        if (initialStorageDistance <= 16.0D || initialBuildDistance <= 16.0D) {
+            helper.fail("Black-box builder did not begin far enough away to prove navigation: "
+                    + initialStorageDistance + "/" + initialBuildDistance);
+            return;
+        }
+        ItemStack projector = owner.getItemInHand(InteractionHand.MAIN_HAND);
+        BuildProject[] assignedProject = {null};
+        boolean[] withdrawNavigationObserved = {false};
+        boolean[] buildNavigationObserved = {false};
+        boolean[] movedPhysically = {false};
+        boolean[] complete = {false};
+        int[] startedRecruitTick = {-1};
+        int[] lastPersistedPlacements = {0};
+        UUID[] workOrderId = {null};
+        long readinessStartedAt = helper.getTick();
+        helper.onEachTick(() -> {
+            if (complete[0]) {
+                return;
+            }
+            if (startedRecruitTick[0] < 0) {
+                boolean areaTicking = areSmartBrainAreaChunksTicking(
+                        helper, area, -2, 18, -2, 10);
+                boolean recruitIndexed = level.getEntity(recruit.getUUID()) == recruit;
+                if (!areaTicking || !recruitIndexed || recruit.tickCount == 0) {
+                    if (helper.getTick() - readinessStartedAt
+                            >= SMART_BRAIN_CHUNK_READY_TIMEOUT) {
+                        complete[0] = true;
+                        helper.fail("Black-box builder area never became entity-ticking: ticking="
+                                + areaTicking + ", recruit=" + recruitIndexed
+                                + ", recruitTick=" + recruit.tickCount);
+                    }
+                    return;
+                }
+                startedRecruitTick[0] = recruit.tickCount;
+            }
+            if (assignedProject[0] == null) {
+                owner.setPos(origin.getX() + 0.5D, origin.getY(), origin.getZ() + 0.5D);
+                level.getChunkSource().move(owner);
+                InteractionResult projection = projector.getItem().useOn(new UseOnContext(
+                        owner,
+                        InteractionHand.MAIN_HAND,
+                        new BlockHitResult(
+                                Vec3.atCenterOf(origin.below()),
+                                Direction.UP,
+                                origin.below(),
+                                false)));
+                BuildProject project = data.kingdomForOwner(owner.getUUID()).orElseThrow().settlement()
+                        .buildProjects().stream()
+                        .filter(candidate -> candidate.blueprintId().equals(blueprint.id()))
+                        .filter(candidate -> candidate.originX() == origin.getX()
+                                && candidate.originY() == origin.getY()
+                                && candidate.originZ() == origin.getZ())
+                        .findFirst().orElse(null);
+                boolean projectWorksiteAssigned = project != null
+                        && data.assignedWorksite(owner.getUUID(), recruit.getUUID())
+                                .flatMap(WorksiteRecord::sourceProjectId)
+                                .filter(project.id()::equals)
+                                .isPresent();
+                if (projection != InteractionResult.SUCCESS
+                        || projector.get(ModDataComponents.CONSTRUCTION_PLAN.get()) != null
+                        || project == null
+                        || !projectWorksiteAssigned
+                        || recruit.getWorkerProfession().filter(WorkerProfession.BUILDER::equals).isEmpty()
+                        || recruit.getRecruitCommand() != RecruitmentAction.WORK_AT_SITE) {
+                    complete[0] = true;
+                    helper.fail("Black-box builder projection did not create its authoritative assignment: "
+                            + "projection=" + projection
+                            + ", plan=" + projector.get(ModDataComponents.CONSTRUCTION_PLAN.get())
+                            + ", project=" + project
+                            + ", worksite=" + projectWorksiteAssigned
+                            + ", profession=" + recruit.getWorkerProfession()
+                            + ", command=" + recruit.getRecruitCommand()
+                            + ", indexed=" + (level.getEntity(recruit.getUUID()) == recruit));
+                    return;
+                }
+                assignedProject[0] = project;
+                return;
+            }
+
+            WorkerStatus status = recruit.getWorkerStatus();
+            withdrawNavigationObserved[0] |= status.phase() == WorkerPhase.NAVIGATE_SOURCE
+                    && status.reasonCode().equals("withdraw_build_material");
+            buildNavigationObserved[0] |= status.phase() == WorkerPhase.NAVIGATE_SOURCE
+                    && status.reasonCode().equals("build_place");
+            movedPhysically[0] |= recruit.position().distanceToSqr(initialRecruitPosition) > 4.0D;
+            status.workOrderId().ifPresent(currentOrderId -> {
+                if (workOrderId[0] == null) {
+                    workOrderId[0] = currentOrderId;
+                } else if (!workOrderId[0].equals(currentOrderId)) {
+                    complete[0] = true;
+                    helper.fail("Black-box builder replaced its live persisted work order: "
+                            + workOrderId[0] + "->" + currentOrderId);
+                }
+            });
+            if (complete[0]) {
+                return;
+            }
+
+            BuildProject current = data.kingdomForOwner(owner.getUUID()).orElseThrow().settlement()
+                    .buildProjects().stream()
+                    .filter(candidate -> candidate.id().equals(assignedProject[0].id()))
+                    .findFirst().orElseThrow();
+            int placedBlocks = 0;
+            for (int placementIndex = 0;
+                    placementIndex < blueprint.placements().size();
+                    placementIndex++) {
+                BaseBlockPlacement placement = blueprint.rotatedPlacement(placementIndex, 0);
+                BlockPos placementPos = origin.offset(
+                        placement.x(), placement.y(), placement.z());
+                if (level.getBlockState(placementPos).is(ModBlocks.DURACRETE.get())) {
+                    placedBlocks++;
+                }
+            }
+            int persistedPlacements = current.completedPlacements().size();
+            int storedMaterials = countContainerItem(hall, ModItems.DURACRETE.get());
+            int carriedMaterials = workerInventoryCount(recruit);
+            int conservedMaterials = storedMaterials + carriedMaterials + placedBlocks;
+            if (persistedPlacements < lastPersistedPlacements[0]
+                    || persistedPlacements != placedBlocks
+                    || conservedMaterials != initialMaterials) {
+                complete[0] = true;
+                helper.fail("Black-box builder violated monotonic physical conservation: stored="
+                        + storedMaterials + ", carried=" + carriedMaterials
+                        + ", placed=" + placedBlocks + ", persisted=" + persistedPlacements
+                        + ", previous=" + lastPersistedPlacements[0]
+                        + ", expected=" + initialMaterials + ", status=" + status);
+                return;
+            }
+            lastPersistedPlacements[0] = persistedPlacements;
+
+            if (status.phase() == WorkerPhase.BLOCKED
+                    && status.reasonCode().equals("build_material_missing")) {
+                complete[0] = true;
+                helper.fail("Black-box builder exhausted physical material before completion: stored="
+                        + storedMaterials + ", carried=" + carriedMaterials
+                        + ", placed=" + placedBlocks + ", persisted=" + persistedPlacements
+                        + ", order=" + workOrderId[0]);
+                return;
+            }
+
+            WorkOrder completedOrder = workOrderId[0] == null
+                    ? null
+                    : data.workOrder(owner.getUUID(), workOrderId[0]).orElse(null);
+            int buildingEventsAfter = ProgressionSavedData.get(level).state(owner.getUUID())
+                    .total(ProgressionEventType.BUILDING_COMPLETED);
+            if (current.state()
+                            == galacticwars.clonewars.kingdom.BuildProjectState.COMPLETED
+                    && placedBlocks == 9
+                    && storedMaterials == 0
+                    && carriedMaterials == 0
+                    && completedOrder != null
+                    && completedOrder.type() == WorkOrderType.BUILD
+                    && completedOrder.state() == WorkOrderState.COMPLETED
+                    && buildingEventsAfter == buildingEventsBefore + 1
+                    && withdrawNavigationObserved[0]
+                    && buildNavigationObserved[0]
+                    && movedPhysically[0]
+                    && recruit.getRecruitCommand() == RecruitmentAction.FOLLOW_OWNER
+                    && recruit.getBaseTarget() == null
+                    && recruit.getWorkTarget() == null) {
+                complete[0] = true;
+                recruit.discard();
+                helper.succeed();
+                return;
+            }
+
+            if (recruit.tickCount - startedRecruitTick[0] >= 1_300) {
+                complete[0] = true;
+                helper.fail("Black-box builder lifecycle timed out: status=" + status
+                        + ", project=" + current
+                        + ", stored=" + storedMaterials
+                        + ", carried=" + carriedMaterials
+                        + ", placed=" + placedBlocks
+                        + ", order=" + completedOrder
+                        + ", events=" + buildingEventsBefore + "->" + buildingEventsAfter
+                        + ", navigation=" + withdrawNavigationObserved[0] + "/"
+                        + buildNavigationObserved[0]
+                        + ", moved=" + movedPhysically[0]);
+            }
+        });
+    }
+
+    /**
      * Exercises automatic courier contention without setting private phases,
      * invoking the worker controller, or moving either courier after assignment.
      */
@@ -11715,6 +12005,7 @@ public final class ModGameTests {
         }
 
         private void waitForIndexAndPrepare() {
+            this.helper.getLevel().getChunkSource().move(this.owner);
             long indexedVehicles = this.vehicles.stream()
                     .filter(vehicle -> this.helper.getLevel().getEntity(vehicle.getUUID()) == vehicle)
                     .count();
