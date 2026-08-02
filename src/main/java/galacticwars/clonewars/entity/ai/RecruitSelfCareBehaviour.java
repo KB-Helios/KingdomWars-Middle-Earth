@@ -8,6 +8,9 @@ import net.tslat.smartbrainlib.api.core.behaviour.base.ExtendedBehaviour;
 
 /** Eats physical cargo food or publishes a settlement demand while off duty. */
 public final class RecruitSelfCareBehaviour extends ExtendedBehaviour<GalacticRecruitEntity> {
+    private static final int FOOD_SUPPLY_REQUEST_COOLDOWN = 100;
+    private int cooldownTicks;
+
     public RecruitSelfCareBehaviour() {
         this.noTimeout();
     }
@@ -19,6 +22,10 @@ public final class RecruitSelfCareBehaviour extends ExtendedBehaviour<GalacticRe
 
     @Override
     protected boolean checkExtraStartConditions(ServerLevel level, GalacticRecruitEntity recruit) {
+        if (cooldownTicks > 0) {
+            cooldownTicks--;
+            return false;
+        }
         return recruit.shouldUseRecruitSelfCare();
     }
 
@@ -30,5 +37,6 @@ public final class RecruitSelfCareBehaviour extends ExtendedBehaviour<GalacticRe
     @Override
     protected void start(GalacticRecruitEntity recruit) {
         recruit.performRecruitSelfCare();
+        cooldownTicks = FOOD_SUPPLY_REQUEST_COOLDOWN;
     }
 }

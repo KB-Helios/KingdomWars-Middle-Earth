@@ -68,7 +68,8 @@ public final class NaturalCivilianWorkBehaviour
     }
 
     private static boolean canWork(GalacticRecruitEntity civilian) {
-        return civilian.isNaturalFactionCivilian()
+        return !civilian.isHazardAvoidanceActive()
+                && civilian.isNaturalFactionCivilian()
                 && civilian.hasHome()
                 && civilian.getWorkerProfession().isPresent()
                 && civilian.level().isBrightOutside();

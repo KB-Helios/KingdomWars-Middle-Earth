@@ -147,13 +147,15 @@ public final class ArmyCombatBehaviour extends ExtendedBehaviour<GalacticRecruit
                 recruit.getAttributeValue(Attributes.FOLLOW_RANGE));
         if (recruit.distanceToSqr(target) <= range * range
                 && recruit.getSensing().hasLineOfSight(target)) {
-            BrainUtil.setMemory(
-                    recruit,
-                    MemoryModuleType.WALK_TARGET,
-                    new WalkTarget(
-                            RecruitCombatMovement.coverOrDodge(recruit, target),
-                            1.1F,
-                            0));
+            if (recruit.tickCount % 8 == 0) {
+                BrainUtil.setMemory(
+                        recruit,
+                        MemoryModuleType.WALK_TARGET,
+                        new WalkTarget(
+                                RecruitCombatMovement.coverOrDodge(recruit, target),
+                                1.1F,
+                                0));
+            }
             return;
         }
         int preferredRange = Math.max(4,

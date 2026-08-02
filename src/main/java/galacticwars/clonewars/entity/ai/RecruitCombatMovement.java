@@ -3,7 +3,9 @@ package galacticwars.clonewars.entity.ai;
 import galacticwars.clonewars.entity.GalacticRecruitEntity;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.server.level.ServerLevel;
@@ -28,14 +30,24 @@ final class RecruitCombatMovement {
         List<BlockPos> candidates = new ArrayList<>();
         for (int radius = 2; radius <= 5; radius++) {
             for (Direction direction : Direction.Plane.HORIZONTAL) {
-                candidates.add(origin.relative(direction, radius));
-                candidates.add(origin.relative(direction, radius)
-                        .relative(direction.getClockWise(), radius / 2));
+                BlockPos pos = origin.relative(direction, radius).immutable();
+                if (!candidates.contains(pos)) {
+                    candidates.add(pos);
+                }
+                BlockPos diag = origin.relative(direction, radius)
+                        .relative(direction.getClockWise(), radius / 2).immutable();
+                if (!candidates.contains(diag)) {
+                    candidates.add(diag);
+                }
             }
         }
         candidates.removeIf(candidate -> !safeStand(level, candidate));
+        Map<BlockPos, Boolean> coverCache = new HashMap<>();
+        for (BlockPos candidate : candidates) {
+            coverCache.put(candidate, hasCover(level, candidate, target));
+        }
         candidates.sort(Comparator
-                .comparing((BlockPos candidate) -> hasCover(level, candidate, target))
+                .comparing((BlockPos candidate) -> coverCache.get(candidate))
                 .reversed()
                 .thenComparingDouble(candidate -> candidate.distSqr(origin))
                 .thenComparingLong(BlockPos::asLong));

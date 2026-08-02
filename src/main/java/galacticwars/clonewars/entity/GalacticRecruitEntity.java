@@ -206,6 +206,7 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.level.ServerLevelAccessor;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.CampfireBlock;
 import net.minecraft.world.level.block.CropBlock;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.entity.AbstractFurnaceBlockEntity;
@@ -582,7 +583,7 @@ public class GalacticRecruitEntity extends TamableAnimal
         this.workerReason = input.getStringOr("WorkerReason", "ready");
         this.workerRequiredItemId = input.getStringOr("WorkerRequiredItem", "")
                 .trim()
-                .toLowerCase();
+                .toLowerCase(java.util.Locale.ROOT);
         this.workerCooldownTicks = Math.max(0, input.getIntOr("WorkerCooldown", 0));
         this.lastCommanderCampaignGameTime = Math.max(0L, input.getLongOr("LastCommanderCampaignGameTime", 0L));
         if (input.getInt("ActiveWorkTargetX").isPresent()
@@ -1556,8 +1557,8 @@ public class GalacticRecruitEntity extends TamableAnimal
                 || state.is(Blocks.LAVA)
                 || state.is(Blocks.CACTUS)
                 || state.is(Blocks.MAGMA_BLOCK)
-                || state.is(Blocks.CAMPFIRE)
-                || state.is(Blocks.SOUL_CAMPFIRE)
+                || (state.is(Blocks.CAMPFIRE) && state.getValue(CampfireBlock.LIT))
+                || (state.is(Blocks.SOUL_CAMPFIRE) && state.getValue(CampfireBlock.LIT))
                 || state.is(Blocks.SWEET_BERRY_BUSH)
                 || state.is(Blocks.POWDER_SNOW);
     }
@@ -4761,15 +4762,17 @@ public class GalacticRecruitEntity extends TamableAnimal
                     this,
                     context.item(),
                     transferred);
-            data.releaseSupply(
-                    context.kingdom().ownerId(),
-                    context.settlementId(),
-                    context.reservation().id(),
-                    this.getUUID());
-            this.workerExecutionState = this.workerExecutionState.withSupplyReservation(Optional.empty());
-            this.blockWorker(rolledBack == transferred
-                    ? "reservation_expired"
-                    : "delivery_rollback_failed");
+            if (rolledBack == transferred) {
+                data.releaseSupply(
+                        context.kingdom().ownerId(),
+                        context.settlementId(),
+                        context.reservation().id(),
+                        this.getUUID());
+                this.workerExecutionState = this.workerExecutionState.withSupplyReservation(Optional.empty());
+                this.blockWorker("reservation_expired");
+            } else {
+                this.blockWorker("delivery_rollback_failed");
+            }
             return;
         }
         this.workerExecutionState = this.workerExecutionState.withSupplyReservation(Optional.empty());
@@ -5409,16 +5412,9 @@ public class GalacticRecruitEntity extends TamableAnimal
         if (!worksite.dimensionId().equals(this.level().dimension().identifier().toString())) {
             return false;
         }
-        WorkAreaConfiguration configuration = worksite.configuration();
-        int minX = worksite.x() - (configuration.bounds().width() - 1) / 2;
-        int maxX = worksite.x() + configuration.bounds().width() / 2;
-        int minY = worksite.y() - (configuration.bounds().height() - 1) / 2;
-        int maxY = worksite.y() + configuration.bounds().height() / 2;
-        int minZ = worksite.z() - (configuration.bounds().depth() - 1) / 2;
-        int maxZ = worksite.z() + configuration.bounds().depth() / 2;
-        return target.getX() >= minX && target.getX() <= maxX
-                && target.getY() >= minY && target.getY() <= maxY
-                && target.getZ() >= minZ && target.getZ() <= maxZ;
+        return worksite.configuration().bounds().contains(
+                new BlockPos(worksite.x(), worksite.y(), worksite.z()),
+                target);
     }
 
     private net.minecraft.world.item.Item availableCarriedFarmerSeed() {
@@ -5785,8 +5781,8 @@ public class GalacticRecruitEntity extends TamableAnimal
                 TagKey<Item> tag = TagKey.create(
                         Registries.ITEM,
                         Identifier.parse(filter.substring(1)));
-                net.minecraft.world.item.Item item = BuiltInRegistries.ITEM.stream()
-                        .filter(candidate -> new ItemStack(candidate).is(tag))
+                net.minecraft.world.item.Item item = BuiltInRegistries.ITEM.get(tag).stream()
+                        .map(net.minecraft.core.Holder::value)
                         .filter(candidate -> this.hasAnyCookingRecipe(
                                 level, new ItemStack(candidate)))
                         .findFirst()

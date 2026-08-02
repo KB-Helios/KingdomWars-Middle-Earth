@@ -31,13 +31,17 @@ public final class RecruitItemPickupBehaviour
             ServerLevel level,
             GalacticRecruitEntity recruit
     ) {
+        if (recruit.isHazardAvoidanceActive()) {
+            return false;
+        }
         target = recruit.nearbyRecruitPickupTarget().orElse(null);
         return target != null;
     }
 
     @Override
     protected boolean shouldKeepRunning(GalacticRecruitEntity recruit) {
-        return target != null
+        return !recruit.isHazardAvoidanceActive()
+                && target != null
                 && target.isAlive()
                 && recruit.canCollectRecruitItem(target);
     }

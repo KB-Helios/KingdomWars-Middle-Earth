@@ -33,6 +33,9 @@ public final class RecruitCompanionBehaviour
 
     @Override
     protected boolean checkExtraStartConditions(ServerLevel level, GalacticRecruitEntity recruit) {
+        if (recruit.isHazardAvoidanceActive()) {
+            return false;
+        }
         owner = recruit.getRecruitOwner().orElse(null);
         return owner != null
                 && recruit.shouldUseCompanionAi()
@@ -42,7 +45,8 @@ public final class RecruitCompanionBehaviour
 
     @Override
     protected boolean shouldKeepRunning(GalacticRecruitEntity recruit) {
-        return owner != null
+        return !recruit.isHazardAvoidanceActive()
+                && owner != null
                 && owner.isAlive()
                 && recruit.shouldUseCompanionAi()
                 && recruit.distanceToSqr(findCompanionAnchor(recruit, owner))

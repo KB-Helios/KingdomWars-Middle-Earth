@@ -1273,7 +1273,8 @@ public final class KingdomSavedData extends SavedData {
         Objects.requireNonNull(mode, "mode");
         KingdomRecord kingdom = kingdomForPlayer(actorId).orElse(null);
         if (kingdom == null || inactiveHallOwners.contains(kingdom.ownerId())
-                || !kingdom.allows(actorId, KingdomPermission.MANAGE_WORKSITES)) {
+                || !kingdom.allows(actorId, KingdomPermission.MANAGE_WORKSITES)
+                || !kingdom.allows(actorId, KingdomPermission.MANAGE_LOGISTICS)) {
             return WorksiteUpdateResult.rejected("permission_denied");
         }
         SettlementRecord settlement = kingdom.settlements().stream()

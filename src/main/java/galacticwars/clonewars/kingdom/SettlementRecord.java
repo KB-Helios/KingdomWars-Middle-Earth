@@ -409,6 +409,10 @@ public record SettlementRecord(
                 || selected.configuration().revision() != expectedConfigurationRevision) {
             return this;
         }
+        if (selected.configuration().courierRoute().equals(route)
+                && selected.configuration().courierRouteMode() == mode) {
+            return this;
+        }
         WorkAreaConfiguration configured = selected.configuration().withCourierRoute(route, mode);
         java.util.ArrayList<WorksiteRecord> updated = new java.util.ArrayList<>(worksites.size());
         for (WorksiteRecord worksite : worksites) {

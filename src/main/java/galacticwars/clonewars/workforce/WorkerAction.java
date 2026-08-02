@@ -1,5 +1,6 @@
 package galacticwars.clonewars.workforce;
 
+import java.util.Locale;
 import java.util.Objects;
 import java.util.Optional;
 
@@ -14,7 +15,7 @@ public record WorkerAction(
     public WorkerAction {
         Objects.requireNonNull(type, "type");
         target = target == null ? Optional.empty() : target;
-        itemId = itemId == null ? "" : itemId.trim().toLowerCase();
+        itemId = itemId == null ? "" : itemId.trim().toLowerCase(Locale.ROOT);
         if (quantity < 0) {
             throw new IllegalArgumentException("quantity cannot be negative");
         }
