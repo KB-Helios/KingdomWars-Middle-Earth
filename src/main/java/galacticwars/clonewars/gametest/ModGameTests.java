@@ -92,6 +92,8 @@ import galacticwars.clonewars.kingdom.WorksiteRecord;
 import galacticwars.clonewars.kingdom.WorksiteUpdateResult;
 import galacticwars.clonewars.item.CommandTargetSelection;
 import galacticwars.clonewars.menu.RecruitCommandMenu;
+import galacticwars.clonewars.menu.RecruitLoadoutMenu;
+import galacticwars.clonewars.menu.RecruitLoadoutMenuProvider;
 import galacticwars.clonewars.menu.CommandCenterOperationsMenu;
 import galacticwars.clonewars.menu.CommandCenterOperationsMenuProvider;
 import galacticwars.clonewars.menu.CommandCenterNavigationMenu;
@@ -236,6 +238,7 @@ public final class ModGameTests {
     private static final int SMART_BRAIN_TEST_AREA_HORIZONTAL_SPACING = 160;
     private static final int SMART_BRAIN_TEST_AREA_VERTICAL_SPACING = 120;
     private static final int SMART_BRAIN_TEST_AREA_VERTICAL_LANES = 2;
+    private static final int LOADOUT_WORKER_TOOL_SLOT = 1;
     private static final AtomicInteger SMART_BRAIN_AREA_SEQUENCE = new AtomicInteger();
     private static final Map<Identifier, Consumer<GameTestHelper>> TESTS = createTests();
 
@@ -327,6 +330,9 @@ public final class ModGameTests {
         isolatedEnvironments.put(id("black_box_miner_lifecycle"), event.registerEnvironment(
                         id("black_box_miner_lifecycle_environment"),
                         new TestEnvironmentDefinition.AllOf(List.of())));
+        isolatedEnvironments.put(id("black_box_miner_broken_tool_recovery"), event.registerEnvironment(
+                        id("black_box_miner_broken_tool_recovery_environment"),
+                        new TestEnvironmentDefinition.AllOf(List.of())));
         isolatedEnvironments.put(id("black_box_animal_farmer_lifecycle"), event.registerEnvironment(
                         id("black_box_animal_farmer_lifecycle_environment"),
                         new TestEnvironmentDefinition.AllOf(List.of())));
@@ -394,6 +400,7 @@ public final class ModGameTests {
                 id("black_box_cook_lifecycle"),
                 id("black_box_lumberjack_lifecycle"),
                 id("black_box_miner_lifecycle"),
+                id("black_box_miner_broken_tool_recovery"),
                 id("black_box_animal_farmer_lifecycle"),
                 id("black_box_fisher_lifecycle"),
                 id("black_box_merchant_lifecycle"),
@@ -446,6 +453,8 @@ public final class ModGameTests {
                                             ? 1_000
                                     : testId.equals(id("black_box_miner_lifecycle"))
                                             ? 900
+                                    : testId.equals(id("black_box_miner_broken_tool_recovery"))
+                                            ? 1_500
                                     : testId.equals(id("black_box_animal_farmer_lifecycle"))
                                             ? 900
                                     : testId.equals(id("black_box_fisher_lifecycle"))
@@ -568,6 +577,8 @@ public final class ModGameTests {
         tests.put(id("black_box_lumberjack_lifecycle"),
                 ModGameTests::blackBoxLumberjackLifecycle);
         tests.put(id("black_box_miner_lifecycle"), ModGameTests::blackBoxMinerLifecycle);
+        tests.put(id("black_box_miner_broken_tool_recovery"),
+                ModGameTests::blackBoxMinerBrokenToolRecovery);
         tests.put(id("black_box_animal_farmer_lifecycle"),
                 ModGameTests::blackBoxAnimalFarmerLifecycle);
         tests.put(id("black_box_fisher_lifecycle"), ModGameTests::blackBoxFisherLifecycle);
@@ -9156,6 +9167,250 @@ public final class ModGameTests {
                         + ", toolDamage=" + toolDamageBefore + "->" + toolDamage);
             }
         });
+    }
+
+    /**
+     * Verifies that a miner whose pickaxe breaks can physically withdraw a component-bearing
+     * replacement from registered storage and resume the already-blocked mine order.
+     */
+    private static void blackBoxMinerBrokenToolRecovery(GameTestHelper helper) {
+        SmartBrainTestArea area = prepareSmartBrainTestAreaAt(
+                helper,
+                GameType.SURVIVAL,
+                -2,
+                14,
+                -2,
+                10,
+                isolatedCapital(helper, 231));
+        ServerLevel level = helper.getLevel();
+        ServerPlayer owner = area.player();
+        BlockPos hallPos = area.at(0, 1, 0);
+        BlockPos recruitPos = area.at(2, 1, 4);
+        BlockPos firstOre = area.at(7, 1, 4);
+        BlockPos secondOre = area.at(8, 1, 4);
+        CommandCenterBlockEntity hall = placeCommandCenter(helper, hallPos);
+        hall.claim(owner);
+        KingdomSavedData data = KingdomSavedData.get(level);
+        if (data.activateHall(
+                owner.getUUID(),
+                hall.factionId(),
+                level.dimension().identifier().toString(),
+                hallPos).isEmpty()) {
+            helper.fail("Broken-tool recovery fixture could not activate its Command Center");
+            return;
+        }
+        putContainerItem(hall, new ItemStack(ModItems.CREDIT_CHIP.get(), 32));
+        FactionAlignmentSavedData.get(level).setScore(
+                owner.getUUID(), FactionId.of("republic"), 100);
+        applyCampaignSetupEvent(
+                ProgressionSavedData.get(level),
+                owner,
+                ProgressionEventType.FACTION_PLEDGED,
+                "galacticwars:republic");
+        level.setBlock(firstOre, Blocks.IRON_ORE.defaultBlockState(), 3);
+        level.setBlock(secondOre, Blocks.IRON_ORE.defaultBlockState(), 3);
+
+        GalacticRecruitEntity recruit = spawnRecruitAt(
+                helper, ModEntityTypes.CLONE_TROOPER.get(), recruitPos);
+        owner.setPos(recruit.getX(), recruit.getY(), recruit.getZ());
+        owner.getInventory().add(new ItemStack(ModItems.CREDIT_CHIP.get(), 53));
+        if (!recruit.handleMenuButton(owner, RecruitCommandMenu.BUTTON_HIRE)
+                || !recruit.handleMenuButton(owner, RecruitCommandMenu.BUTTON_ASSIGN_MINER)) {
+            helper.fail("Broken-tool recovery miner could not be hired and assigned");
+            return;
+        }
+        if (!configureWorkerLifecycleWorksite(
+                helper,
+                data,
+                owner,
+                recruit,
+                hallPos,
+                List.of("minecraft:iron_ore"))) {
+            return;
+        }
+
+        ItemStack original = quickMoveWorkerToolToPlayer(
+                helper, openServerRecruitLoadout(helper, owner, recruit, 74), owner);
+        ItemStack nearlyBroken = original.copy();
+        nearlyBroken.setDamageValue(nearlyBroken.getMaxDamage() - 1);
+        replaceExactPlayerStack(helper, owner, original, nearlyBroken);
+        quickMovePlayerToolToWorker(
+                helper,
+                openServerRecruitLoadout(helper, owner, recruit, 75),
+                owner,
+                recruit,
+                nearlyBroken);
+
+        ItemStack replacement = new ItemStack(Items.IRON_PICKAXE);
+        replacement.set(DataComponents.CUSTOM_NAME, Component.literal("Recovery Pickaxe"));
+        replacement.setDamageValue(7);
+
+        Container recruitCargo = recruit.createCargoContainer();
+        int[] phase = {0};
+        UUID[] blockedOrderId = {null};
+        boolean[] storageNavigationObserved = {false};
+        boolean[] complete = {false};
+        long[] readinessStartedAt = {helper.getTick()};
+        helper.onEachTick(() -> {
+            if (complete[0]) {
+                return;
+            }
+            boolean areaTicking = areSmartBrainAreaChunksTicking(helper, area, -2, 14, -2, 10);
+            boolean recruitIndexed = level.getEntity(recruit.getUUID()) == recruit;
+            if (!areaTicking || !recruitIndexed || recruit.tickCount == 0) {
+                if (helper.getTick() - readinessStartedAt[0] >= SMART_BRAIN_CHUNK_READY_TIMEOUT) {
+                    complete[0] = true;
+                    helper.fail("Broken-tool recovery area never became entity-ticking: ticking="
+                            + areaTicking + ", recruit=" + recruitIndexed
+                            + ", recruitTick=" + recruit.tickCount);
+                }
+                return;
+            }
+
+            int oreAndOutput = (level.getBlockState(firstOre).is(Blocks.IRON_ORE) ? 1 : 0)
+                    + (level.getBlockState(secondOre).is(Blocks.IRON_ORE) ? 1 : 0)
+                    + countContainerItem(hall, Items.RAW_IRON)
+                    + countContainerItem(recruitCargo, Items.RAW_IRON);
+            if (oreAndOutput != 2) {
+                complete[0] = true;
+                helper.fail("Broken-tool recovery violated ore conservation: total=" + oreAndOutput
+                        + ", stored=" + countContainerItem(hall, Items.RAW_IRON)
+                        + ", cargo=" + countContainerItem(recruitCargo, Items.RAW_IRON));
+                return;
+            }
+
+            long completedMineOrders = data.kingdomForOwner(owner.getUUID()).orElseThrow()
+                    .settlement().workOrders().stream()
+                    .filter(order -> order.type() == WorkOrderType.MINE)
+                    .filter(order -> order.state() == WorkOrderState.COMPLETED)
+                    .count();
+            WorkerStatus status = recruit.getWorkerStatus();
+            WorkOrder assigned = data.assignedWorkOrder(
+                    owner.getUUID(), recruit.getUUID()).orElse(null);
+
+            if (phase[0] == 0 && completedMineOrders == 1
+                    && recruit.getWorkerMainHandItem().isEmpty()) {
+                phase[0] = 1;
+            }
+            if (phase[0] == 1
+                    && status.phase() == WorkerPhase.BLOCKED
+                    && status.reasonCode().equals("missing_tool")
+                    && assigned != null
+                    && assigned.type() == WorkOrderType.MINE) {
+                blockedOrderId[0] = assigned.id();
+                putContainerItem(hall, replacement.copy());
+                phase[0] = 2;
+            }
+            if (phase[0] != 2) {
+                return;
+            }
+
+            storageNavigationObserved[0] |= status.phase() == WorkerPhase.NAVIGATE_SOURCE
+                    && status.reasonCode().equals("withdraw_worker_tool");
+            if (assigned != null && !assigned.id().equals(blockedOrderId[0])) {
+                complete[0] = true;
+                helper.fail("Broken-tool recovery replaced the blocked order: expected="
+                        + blockedOrderId[0] + ", actual=" + assigned.id());
+                return;
+            }
+            int physicalReplacementCount = countContainerItem(hall, Items.IRON_PICKAXE)
+                    + countContainerItem(recruitCargo, Items.IRON_PICKAXE)
+                    + (recruit.getWorkerMainHandItem().is(Items.IRON_PICKAXE) ? 1 : 0);
+            if (physicalReplacementCount != 1) {
+                complete[0] = true;
+                helper.fail("Broken-tool recovery duplicated or lost the replacement: count="
+                        + physicalReplacementCount);
+                return;
+            }
+            ItemStack expectedUsedReplacement = replacement.copy();
+            expectedUsedReplacement.setDamageValue(replacement.getDamageValue() + 1);
+            if (completedMineOrders == 2
+                    && countContainerItem(hall, Items.RAW_IRON) == 2
+                    && workerInventoryCount(recruit) == 0
+                    && storageNavigationObserved[0]
+                    && ItemStack.isSameItemSameComponents(
+                            recruit.getWorkerMainHandItem(), expectedUsedReplacement)) {
+                complete[0] = true;
+                recruit.discard();
+                helper.succeed();
+            }
+        });
+    }
+
+    private static RecruitLoadoutMenu openServerRecruitLoadout(
+            GameTestHelper helper,
+            ServerPlayer owner,
+            GalacticRecruitEntity recruit,
+            int containerId
+    ) {
+        if (!recruit.canPlayerManageLogistics(owner)
+                || owner.distanceToSqr(recruit) > 64.0D) {
+            helper.fail("Recruit loadout authority or distance gate was not satisfied");
+            return null;
+        }
+        return (RecruitLoadoutMenu) new RecruitLoadoutMenuProvider(recruit)
+                .createMenu(containerId, owner.getInventory(), owner);
+    }
+
+    private static ItemStack quickMoveWorkerToolToPlayer(
+            GameTestHelper helper,
+            RecruitLoadoutMenu menu,
+            ServerPlayer owner
+    ) {
+        ItemStack moved = menu.quickMoveStack(owner, LOADOUT_WORKER_TOOL_SLOT);
+        if (moved.isEmpty() || !inventoryContainsExact(owner.getInventory(), moved)) {
+            helper.fail("Provider-owned loadout did not move the physical worker tool to the player");
+        }
+        menu.removed(owner);
+        return moved;
+    }
+
+    private static void quickMovePlayerToolToWorker(
+            GameTestHelper helper,
+            RecruitLoadoutMenu menu,
+            ServerPlayer owner,
+            GalacticRecruitEntity recruit,
+            ItemStack expected
+    ) {
+        int sourceSlot = java.util.stream.IntStream.range(
+                        RecruitLoadoutMenu.PLAYER_INVENTORY_START,
+                        RecruitLoadoutMenu.PLAYER_INVENTORY_END)
+                .filter(slot -> ItemStack.isSameItemSameComponents(
+                        menu.getSlot(slot).getItem(), expected))
+                .findFirst()
+                .orElse(-1);
+        if (sourceSlot < 0 || menu.quickMoveStack(owner, sourceSlot).isEmpty()
+                || !ItemStack.isSameItemSameComponents(
+                        recruit.getWorkerMainHandItem(), expected)) {
+            helper.fail("Provider-owned loadout did not install the expected worker tool");
+        }
+        menu.removed(owner);
+    }
+
+    private static boolean inventoryContainsExact(Container inventory, ItemStack expected) {
+        for (int slot = 0; slot < inventory.getContainerSize(); slot++) {
+            if (ItemStack.isSameItemSameComponents(inventory.getItem(slot), expected)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static void replaceExactPlayerStack(
+            GameTestHelper helper,
+            ServerPlayer owner,
+            ItemStack previous,
+            ItemStack replacement
+    ) {
+        Container inventory = owner.getInventory();
+        for (int slot = 0; slot < inventory.getContainerSize(); slot++) {
+            if (ItemStack.isSameItemSameComponents(inventory.getItem(slot), previous)) {
+                inventory.setItem(slot, replacement.copy());
+                inventory.setChanged();
+                return;
+            }
+        }
+        helper.fail("Physical worker tool was not present in player inventory for fixture damage");
     }
 
     /**

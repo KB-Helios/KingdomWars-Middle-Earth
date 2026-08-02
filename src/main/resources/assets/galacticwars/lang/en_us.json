@@ -593,6 +593,7 @@
   "reason.galacticwars.operations.unsupported_crop": "that crop cannot be replanted safely",
   "reason.galacticwars.operations.withdraw_farmer_seed": "collecting seed from linked storage",
   "reason.galacticwars.operations.missing_tool": "the worker needs the correct tool and harvest tier",
+  "reason.galacticwars.operations.worker_tool_transfer_failed": "the worker could not transfer a compatible tool",
   "reason.galacticwars.operations.tree_changed": "the selected tree changed before harvesting",
   "reason.galacticwars.operations.replant_failed": "the original trunk position could not be replanted",
   "reason.galacticwars.operations.planting_failed": "the configured seed could not be planted",

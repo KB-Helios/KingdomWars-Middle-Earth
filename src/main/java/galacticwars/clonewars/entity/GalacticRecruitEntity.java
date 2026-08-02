@@ -144,6 +144,7 @@ import galacticwars.clonewars.workforce.WorkforceCodecs;
 import galacticwars.clonewars.workforce.logistics.LogisticsAccessPolicy;
 import galacticwars.clonewars.workforce.logistics.LogisticsEndpoint;
 import galacticwars.clonewars.workforce.logistics.LogisticsEndpointIdentity;
+import galacticwars.clonewars.workforce.logistics.LogisticsInventory;
 import galacticwars.clonewars.workforce.logistics.LogisticsTransferAuthority;
 import galacticwars.clonewars.workforce.logistics.LogisticsTransferRequest;
 import galacticwars.clonewars.workforce.logistics.PhysicalLogisticsTransaction;
@@ -3709,6 +3710,68 @@ public class GalacticRecruitEntity extends TamableAnimal
         return released;
     }
 
+    public boolean prepareMinerToolForTargetScan(WorkerProfession profession) {
+        if (WorkerDutyLoadoutPolicy.isUsableTool(profession, this.getWorkerMainHandItem())) {
+            return false;
+        }
+        this.workerRequiredItemId = BuiltInRegistries.ITEM
+                .getKey(WorkerDutyLoadoutPolicy.defaultTool(profession).getItem())
+                .toString();
+        if (!this.getWorkerMainHandItem().isEmpty()) {
+            this.blockWorker("missing_tool");
+            return true;
+        }
+        ItemStack cargoTool = this.firstCompatibleWorkerTool(
+                this.createCargoContainer(), ArmyMemberSnapshot.CARGO_SLOT_COUNT, profession);
+        if (!cargoTool.isEmpty()) {
+            if (this.equipCompatibleWorkerToolFromCargo(profession)) {
+                this.workerRequiredItemId = "";
+                return false;
+            }
+            this.blockWorker("worker_tool_transfer_failed");
+            return true;
+        }
+        if (this.storageTarget != null
+                && !this.firstCompatibleStoredWorkerTool(this.storageTarget, profession).isEmpty()) {
+            this.transitionWorker(
+                    WorkerPhase.NAVIGATE_SOURCE,
+                    "withdraw_worker_tool",
+                    this.storageTarget);
+            return true;
+        }
+        this.blockWorker("missing_tool");
+        return true;
+    }
+
+    public ItemStack firstCompatibleWorkerTool(
+            Container container,
+            int slotLimit,
+            WorkerProfession profession
+    ) {
+        int boundedSlots = Math.min(slotLimit, container.getContainerSize());
+        for (int slot = 0; slot < boundedSlots; slot++) {
+            ItemStack stack = container.getItem(slot);
+            if (WorkerDutyLoadoutPolicy.isUsableTool(profession, stack)) {
+                return stack.copyWithCount(1);
+            }
+        }
+        return ItemStack.EMPTY;
+    }
+
+    public ItemStack firstCompatibleStoredWorkerTool(
+            BlockPos storagePos,
+            WorkerProfession profession
+    ) {
+        Container storage = this.findContainer(storagePos).orElse(null);
+        if (storage == null) {
+            return ItemStack.EMPTY;
+        }
+        return this.firstCompatibleWorkerTool(
+                storage,
+                Math.min(this.registeredStorageSlots(storagePos), storage.getContainerSize()),
+                profession);
+    }
+
     private void tickFindTarget() {
         WorksiteRecord worksite = this.authoritativeWorksite().orElse(null);
         if (worksite == null || this.workTarget == null) {
@@ -3725,6 +3788,10 @@ public class GalacticRecruitEntity extends TamableAnimal
             this.setWorkTarget(authoritativeCenter);
         }
         WorkerProfession profession = this.getWorkerProfession().orElseThrow();
+        if (profession == WorkerProfession.MINER
+                && this.prepareMinerToolForTargetScan(profession)) {
+            return;
+        }
         WorkAreaConfiguration configuration = worksite.configuration();
         int width = configuration.bounds().width();
         int height = configuration.bounds().height();
@@ -3827,6 +3894,17 @@ public class GalacticRecruitEntity extends TamableAnimal
             return;
         }
         switch (this.workerReason) {
+            case "withdraw_worker_tool" -> {
+                WorkerProfession profession = this.getWorkerProfession().orElse(null);
+                if (profession == WorkerProfession.MINER
+                        && this.equipCompatibleWorkerToolFromStorage(
+                                this.activeWorkTarget, profession)) {
+                    this.workerRequiredItemId = "";
+                    this.transitionWorker(WorkerPhase.ACQUIRE_ORDER, "worker_tool_ready", null);
+                } else {
+                    this.blockWorker("worker_tool_transfer_failed");
+                }
+            }
             case "withdraw_matching_sapling", "withdraw_farmer_seed" -> {
                 net.minecraft.world.item.Item required = resolveItem(this.workerRequiredItemId);
                 if (required != null && this.withdrawSpecificItem(this.activeWorkTarget, required, 1)) {
@@ -4020,6 +4098,9 @@ public class GalacticRecruitEntity extends TamableAnimal
         if (profession == WorkerProfession.MINER
                 && state.requiresCorrectToolForDrops()
                 && !tool.isCorrectToolForDrops(state)) {
+            this.workerRequiredItemId = BuiltInRegistries.ITEM
+                    .getKey(WorkerDutyLoadoutPolicy.defaultTool(profession).getItem())
+                    .toString();
             this.blockWorker("missing_tool");
             return;
         }
@@ -6160,6 +6241,142 @@ public class GalacticRecruitEntity extends TamableAnimal
                         ownerId, source.identity(), destination.identity()),
                 new LogisticsTransferRequest(template, quantity, fulfillment));
         return result.committed() ? result.transferredQuantity() : 0;
+    }
+
+    private LogisticsEndpoint workerToolEndpoint(
+            WorkerProfession profession,
+            LogisticsAccessPolicy policy
+    ) {
+        LogisticsInventory inventory = new LogisticsInventory() {
+            @Override
+            public int size() {
+                return 1;
+            }
+
+            @Override
+            public ItemStack getStack(int slot) {
+                return slot == 0 ? GalacticRecruitEntity.this.getWorkerMainHandItem()
+                        : ItemStack.EMPTY;
+            }
+
+            @Override
+            public boolean canInsert(int slot, ItemStack stack) {
+                return slot == 0
+                        && GalacticRecruitEntity.this.getWorkerMainHandItem().isEmpty()
+                        && WorkerDutyLoadoutPolicy.isUsableTool(profession, stack);
+            }
+
+            @Override
+            public int maxStackSize(int slot, ItemStack stack) {
+                return slot == 0 ? 1 : 0;
+            }
+
+            @Override
+            public void setStack(int slot, ItemStack stack) {
+                if (slot != 0 || stack.getCount() > 1) {
+                    throw new IndexOutOfBoundsException("worker tool slot " + slot);
+                }
+                GalacticRecruitEntity.this.setWorkerMainHandItem(stack.copy());
+            }
+
+            @Override
+            public void setChanged() {
+                GalacticRecruitEntity.this.markLoadoutChanged();
+            }
+
+            @Override
+            public Object transactionIdentity() {
+                return GalacticRecruitEntity.this;
+            }
+        };
+        return new LogisticsEndpoint(
+                new LogisticsEndpointIdentity("recruit:" + this.getUUID() + ":worker_tool"),
+                inventory,
+                1,
+                policy);
+    }
+
+    private boolean equipCompatibleWorkerToolFromCargo(WorkerProfession profession) {
+        if (!(this.level() instanceof ServerLevel serverLevel)
+                || this.getOwnerReference() == null) {
+            return false;
+        }
+        Container cargo = this.createCargoContainer();
+        ItemStack selected = this.firstCompatibleWorkerTool(
+                cargo, ArmyMemberSnapshot.CARGO_SLOT_COUNT, profession);
+        if (selected.isEmpty()) {
+            return false;
+        }
+        UUID ownerId = this.getOwnerReference().getUUID();
+        LogisticsEndpointIdentity cargoIdentity = new LogisticsEndpointIdentity(
+                "recruit:" + this.getUUID() + ":cargo");
+        LogisticsEndpointIdentity toolIdentity = new LogisticsEndpointIdentity(
+                "recruit:" + this.getUUID() + ":worker_tool");
+        LogisticsAccessPolicy policy = (actorId, endpoint, counterpart, operation, slot, stack) ->
+                actorId.equals(ownerId)
+                        && (endpoint.equals(cargoIdentity) || endpoint.equals(toolIdentity))
+                        && this.isAlive()
+                        && this.level() == serverLevel;
+        LogisticsEndpoint sourceEndpoint = LogisticsEndpoint.container(
+                cargoIdentity, cargo, ArmyMemberSnapshot.CARGO_SLOT_COUNT, policy);
+        LogisticsEndpoint toolEndpoint = this.workerToolEndpoint(profession, policy);
+        PhysicalLogisticsTransaction.Result result = PhysicalLogisticsTransaction.transfer(
+                sourceEndpoint,
+                toolEndpoint,
+                new LogisticsTransferAuthority(ownerId, sourceEndpoint.identity(), toolEndpoint.identity()),
+                new LogisticsTransferRequest(
+                        selected.copyWithCount(1),
+                        1,
+                        LogisticsTransferRequest.Fulfillment.REQUIRE_EXACT));
+        return result.committed() && result.transferredQuantity() == 1;
+    }
+
+    private boolean equipCompatibleWorkerToolFromStorage(
+            BlockPos storagePos,
+            WorkerProfession profession
+    ) {
+        if (!(this.level() instanceof ServerLevel serverLevel)
+                || this.getOwnerReference() == null) {
+            return false;
+        }
+        Container storage = this.findContainer(storagePos).orElse(null);
+        if (storage == null) {
+            return false;
+        }
+        int slotLimit = Math.min(this.registeredStorageSlots(storagePos), storage.getContainerSize());
+        ItemStack selected = this.firstCompatibleWorkerTool(storage, slotLimit, profession);
+        if (selected.isEmpty()) {
+            return false;
+        }
+        UUID ownerId = this.getOwnerReference().getUUID();
+        LogisticsEndpointIdentity storageIdentity = this.storageEndpointIdentity(serverLevel, storagePos);
+        LogisticsEndpointIdentity toolIdentity = new LogisticsEndpointIdentity(
+                "recruit:" + this.getUUID() + ":worker_tool");
+        LogisticsAccessPolicy policy = (actorId, endpoint, counterpart, operation, slot, stack) -> {
+            if (!actorId.equals(ownerId)) {
+                return false;
+            }
+            if (endpoint.equals(toolIdentity)) {
+                return this.isAlive() && this.level() == serverLevel;
+            }
+            if (!endpoint.equals(storageIdentity) || !serverLevel.isLoaded(storagePos)) {
+                return false;
+            }
+            int liveSlots = this.authorizedPhysicalStorageSlots(storagePos, storage);
+            return Math.min(liveSlots, storage.getContainerSize()) == slotLimit;
+        };
+        LogisticsEndpoint sourceEndpoint = LogisticsEndpoint.container(
+                storageIdentity, storage, slotLimit, policy);
+        LogisticsEndpoint toolEndpoint = this.workerToolEndpoint(profession, policy);
+        PhysicalLogisticsTransaction.Result result = PhysicalLogisticsTransaction.transfer(
+                sourceEndpoint,
+                toolEndpoint,
+                new LogisticsTransferAuthority(ownerId, sourceEndpoint.identity(), toolEndpoint.identity()),
+                new LogisticsTransferRequest(
+                        selected.copyWithCount(1),
+                        1,
+                        LogisticsTransferRequest.Fulfillment.REQUIRE_EXACT));
+        return result.committed() && result.transferredQuantity() == 1;
     }
 
     private int authorizedPhysicalStorageSlots(BlockPos pos, Container container) {
