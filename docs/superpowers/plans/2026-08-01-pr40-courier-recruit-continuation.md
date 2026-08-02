@@ -281,9 +281,9 @@
 - [x] Change `WorkerDutyLoadoutPolicy.java` to distinguish usable tools from empty assignment slots; change `GalacticRecruitEntity.java` to fail closed before correct-tool ore changes, expose the live one-slot exact worker-tool logistics endpoint, retry the durable order through cargo or registered storage, and preserve component-bearing transfers; change `ModGameTests.java` to register and prove the broken-storage and manual-loadout recovery paths without post-assignment controller, phase, target, or position shortcuts. `en_us.json` adds the recovery status text.
 - [x] Keep automatic tool `SupplyDemand` out of this slice. A manual replacement can race an active courier lease, and the current ledger has no safe request-cancellation plus in-flight return-to-storage contract; publishing a demand could strand a withdrawn tool or deliver a duplicate.
 - [x] Record donor revisions: Workers `c1eb9bdb016af93eb2df2ce8e3b17fc3463d7ee1` (`MinerWorkGoal.java`, `GetNeededItemsFromStorage.java`, and `AbstractWorkerEntity.switchMainHandItem`) and Recruits `cff03e085d65653406a8b6ddcdd0ebff615c3e48` for inventory/equipment behavioral context only. The Minecraft 26.2 rewrite excludes donor Forge goals, inventory code, and global work-area state.
-- [x] Run fresh `runHarnesses`: 176 actionable tasks, 164 executed, and 12 up-to-date.
-- [ ] Run the complete 92-test NeoForge GameTest suite twice from fresh generated worlds.
-- [ ] Run `buildAll` for Fabric and NeoForge and record its actual task counts.
+- [x] Run fresh `runHarnesses`: 176 actionable tasks, 162 executed, and 14 up-to-date.
+- [x] Run the complete 92-test NeoForge GameTest suite twice from fresh generated worlds. Both accepted aggregate runs passed 92/92. Between them, one discarded fresh-world attempt reproduced the unchanged `faction_ai_reaction_runtime` entity-ticking readiness flake at tick 300 and remained live until the 244-second command timeout; the exact focused current-code rerun then passed 1/1 in 1.221 seconds, so no assertion, timeout, or unrelated gameplay code was changed before the fresh replacement aggregate passed 92/92.
+- [x] Run `buildAll` for Fabric and NeoForge: 186 actionable tasks, 166 executed, and 20 up-to-date.
 - [ ] Complete the focused Task 4 review, including component conservation, stale rollback, non-empty incompatible-tool preservation, durable order continuity, provider-owned menu movement, no-demand behavior, and no test shortcuts.
 
 ## Completion gate
