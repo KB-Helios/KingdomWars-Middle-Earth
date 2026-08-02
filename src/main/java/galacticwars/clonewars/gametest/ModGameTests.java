@@ -330,6 +330,9 @@ public final class ModGameTests {
         isolatedEnvironments.put(id("black_box_fisher_lifecycle"), event.registerEnvironment(
                         id("black_box_fisher_lifecycle_environment"),
                         new TestEnvironmentDefinition.AllOf(List.of())));
+        isolatedEnvironments.put(id("black_box_merchant_lifecycle"), event.registerEnvironment(
+                        id("black_box_merchant_lifecycle_environment"),
+                        new TestEnvironmentDefinition.AllOf(List.of())));
         isolatedEnvironments.put(id("hybrid_courier_dispatch"), event.registerEnvironment(
                         id("hybrid_courier_dispatch_environment"),
                         new TestEnvironmentDefinition.AllOf(List.of())));
@@ -381,6 +384,7 @@ public final class ModGameTests {
                 id("black_box_miner_lifecycle"),
                 id("black_box_animal_farmer_lifecycle"),
                 id("black_box_fisher_lifecycle"),
+                id("black_box_merchant_lifecycle"),
                 id("competing_courier_leases"),
                 id("courier_live_lease_reload"),
                 id("courier_hall_removal"),
@@ -416,7 +420,7 @@ public final class ModGameTests {
                                     : testId.equals(id("faction_ai_reaction_runtime"))
                                             ? 900
                                     : testId.equals(id("black_box_farmer_door_lifecycle"))
-                                            ? 700
+                                            ? 1_200
                                     : testId.equals(id("recruit_door_command_resumption"))
                                             ? 900
                                     : testId.equals(id("specialist_worker_loops"))
@@ -431,17 +435,20 @@ public final class ModGameTests {
                                             ? 900
                                     : testId.equals(id("black_box_fisher_lifecycle"))
                                             ? 1_000
+                                    : testId.equals(id("black_box_merchant_lifecycle"))
+                                            ? 900
                                     : testId.equals(id("competing_courier_leases"))
                                             ? 700
                                     : testId.equals(id("courier_live_lease_reload"))
                                             ? 700
                                     : testId.equals(id("courier_hall_removal"))
                                             ? 900
+                                    : testId.equals(id("worker_safety_and_upkeep"))
+                                            ? 700
                                     : Set.of(
                                             id("local_recruit_protect_owner"),
                                             id("ungrouped_recruit_ranged_brain"),
                                             id("ungrouped_recruit_melee_brain"),
-                                            id("worker_safety_and_upkeep"),
                                             id("recruit_hazard_and_self_care"),
                                             id("faction_selection_transaction")).contains(testId)
                                             ? 360
@@ -543,6 +550,7 @@ public final class ModGameTests {
         tests.put(id("black_box_animal_farmer_lifecycle"),
                 ModGameTests::blackBoxAnimalFarmerLifecycle);
         tests.put(id("black_box_fisher_lifecycle"), ModGameTests::blackBoxFisherLifecycle);
+        tests.put(id("black_box_merchant_lifecycle"), ModGameTests::blackBoxMerchantLifecycle);
         tests.put(id("bounded_worker_scans"), ModGameTests::boundedWorkerScans);
         tests.put(id("hybrid_courier_dispatch"), ModGameTests::hybridCourierDispatch);
         tests.put(id("competing_courier_leases"), ModGameTests::competingCourierLeases);
@@ -1743,18 +1751,21 @@ public final class ModGameTests {
         double[] startingDistance = {0.0D};
         helper.onEachTick(() -> {
             if (phase[0] == 0) {
-                if (helper.getLevel().getEntity(recruit.getUUID()) != recruit) {
+                owner.setPos(ownerPos.getX() + 0.5D, ownerPos.getY(), ownerPos.getZ() + 0.5D);
+                boolean areaTicking = areSmartBrainAreaChunksTicking(
+                        helper, area, -4, 12, -6, 10);
+                boolean recruitIndexed = helper.getLevel().getEntity(recruit.getUUID()) == recruit;
+                if (!areaTicking || !recruitIndexed || recruit.tickCount == 0) {
                     if (helper.getTick() - indexWaitStartedTick >= SMART_BRAIN_CHUNK_READY_TIMEOUT) {
                         phase[0] = 4;
-                        helper.fail("SmartBrain companion never entered the server entity index");
+                        helper.fail("SmartBrain companion area never became entity-ticking: ticking="
+                                + areaTicking + ", recruit=" + recruitIndexed
+                                + ", recruitTick=" + recruit.tickCount);
                     }
                     return;
                 }
-                owner.setPos(ownerPos.getX() + 0.5D, ownerPos.getY(), ownerPos.getZ() + 0.5D);
-                // Embedded GameTest players do not send the movement acknowledgement that
-                // normally advances their entity-ticking chunk ticket. Refresh it after the
-                // owner move and avoid starting the movement window until both entities tick.
-                helper.getLevel().getChunkSource().move(owner);
+                // The shared readiness poll refreshes the embedded player's post-move chunk
+                // ticket; retain the local checks before starting the movement window.
                 boolean ownerChunkTicking = helper.getLevel().areEntitiesActuallyLoadedAndTicking(
                         ChunkPos.containing(owner.blockPosition()));
                 boolean recruitChunkTicking = helper.getLevel().areEntitiesActuallyLoadedAndTicking(
@@ -7787,10 +7798,27 @@ public final class ModGameTests {
         boolean[] doorOpened = {false};
         boolean[] doorClosedAfterPassage = {false};
         boolean[] complete = {false};
-        long startedAt = helper.getTick();
+        int[] startedRecruitTick = {-1};
+        long readinessStartedAt = helper.getTick();
         helper.onEachTick(() -> {
             if (complete[0]) {
                 return;
+            }
+            if (startedRecruitTick[0] < 0) {
+                boolean areaTicking = areSmartBrainAreaChunksTicking(
+                        helper, area, -2, 14, -2, 10);
+                boolean recruitIndexed = helper.getLevel().getEntity(recruit.getUUID()) == recruit;
+                if (!areaTicking || !recruitIndexed || recruit.tickCount == 0) {
+                    if (helper.getTick() - readinessStartedAt
+                            >= SMART_BRAIN_CHUNK_READY_TIMEOUT) {
+                        complete[0] = true;
+                        helper.fail("Black-box farmer area never became entity-ticking: ticking="
+                                + areaTicking + ", recruit=" + recruitIndexed
+                                + ", recruitTick=" + recruit.tickCount);
+                    }
+                    return;
+                }
+                startedRecruitTick[0] = recruit.tickCount;
             }
             var liveDoor = helper.getLevel().getBlockState(doorPos);
             if (liveDoor.hasProperty(BlockStateProperties.OPEN)
@@ -7828,7 +7856,7 @@ public final class ModGameTests {
                 helper.succeed();
                 return;
             }
-            if (helper.getTick() - startedAt >= 650) {
+            if (recruit.tickCount - startedRecruitTick[0] >= 800) {
                 complete[0] = true;
                 helper.fail("Black-box farmer lifecycle timed out: status="
                         + recruit.getWorkerStatus()
@@ -9448,6 +9476,199 @@ public final class ModGameTests {
                         + ", cast=" + castObserved[0]
                         + ", completedOrder=" + completedOrder
                         + ", rodDamage=" + rodDamageBefore + "->" + rodDamage);
+            }
+        });
+    }
+
+    /**
+     * Exercises one physical market transaction through ordinary Survival hire, profession
+     * assignment, worksite, registered storage, navigation, server-authored menu, and menu-action
+     * paths. The fixture never mutates a worker phase, invokes the controller, or moves the
+     * recruit after assignment. Headless GameTest cannot send NeoForge's extended-screen packet,
+     * so it constructs the same provider-owned server menu after proving the live interaction
+     * distance and market-validity gates.
+     */
+    private static void blackBoxMerchantLifecycle(GameTestHelper helper) {
+        SmartBrainTestArea area = prepareSmartBrainTestAreaAt(
+                helper,
+                GameType.SURVIVAL,
+                -2,
+                14,
+                -2,
+                8,
+                isolatedCapital(helper, 226));
+        ServerLevel level = helper.getLevel();
+        ServerPlayer owner = area.player();
+        BlockPos hallPos = area.at(0, 1, 0);
+        BlockPos recruitPos = area.at(12, 1, 4);
+        CommandCenterBlockEntity hall = placeCommandCenter(helper, hallPos);
+        hall.claim(owner);
+        KingdomSavedData data = KingdomSavedData.get(level);
+        if (data.activateHall(
+                owner.getUUID(),
+                hall.factionId(),
+                level.dimension().identifier().toString(),
+                hallPos).isEmpty()) {
+            helper.fail("Black-box merchant fixture could not activate its Command Center");
+            return;
+        }
+        putContainerItem(hall, new ItemStack(ModItems.CREDIT_CHIP.get(), 32));
+        owner.getInventory().add(new ItemStack(ModItems.CREDIT_CHIP.get(), 128));
+        FactionAlignmentSavedData.get(level).setScore(
+                owner.getUUID(), FactionId.of("republic"), 100);
+        applyCampaignSetupEvent(
+                ProgressionSavedData.get(level),
+                owner,
+                ProgressionEventType.FACTION_PLEDGED,
+                "galacticwars:republic");
+
+        GalacticRecruitEntity recruit = spawnRecruitAt(
+                helper, ModEntityTypes.CLONE_TROOPER.get(), recruitPos);
+        owner.setPos(recruit.getX(), recruit.getY(), recruit.getZ());
+        if (!recruit.handleMenuButton(owner, RecruitCommandMenu.BUTTON_HIRE)
+                || !recruit.handleMenuButton(owner, RecruitCommandMenu.BUTTON_ASSIGN_MERCHANT)) {
+            helper.fail("Black-box merchant could not be hired and assigned");
+            return;
+        }
+        if (!configureWorkerLifecycleWorksite(
+                helper, data, owner, recruit, hallPos, List.of())) {
+            return;
+        }
+        WorksiteRecord worksite = data.assignedWorksite(
+                owner.getUUID(), recruit.getUUID()).orElseThrow();
+        Vec3 marketCenter = new Vec3(
+                worksite.x() + 0.5D, worksite.y() + 0.5D, worksite.z() + 0.5D);
+        double initialDistance = recruit.distanceToSqr(marketCenter);
+        if (initialDistance <= 16.0D) {
+            helper.fail("Black-box merchant did not begin far enough away to prove navigation: "
+                    + initialDistance);
+            return;
+        }
+        int expectedTradePrice = FactionBalanceService.applyPercentCeil(
+                FactionBalanceService.tradeCreditPrice(
+                        "galacticwars:republic",
+                        LaunchContentCatalog.trades()
+                                .get("republic_quartermaster").price()),
+                90);
+
+        putContainerItem(hall, new ItemStack(ModItems.ENERGY_CELL.get(), 8));
+        boolean[] navigationObserved = {false};
+        boolean[] complete = {false};
+        int[] startedRecruitTick = {-1};
+        long readinessStartedAt = helper.getTick();
+        helper.onEachTick(() -> {
+            if (complete[0]) {
+                return;
+            }
+            if (startedRecruitTick[0] < 0) {
+                boolean areaTicking = areSmartBrainAreaChunksTicking(
+                        helper, area, -2, 14, -2, 8);
+                boolean recruitIndexed = level.getEntity(recruit.getUUID()) == recruit;
+                if (!areaTicking || !recruitIndexed || recruit.tickCount == 0) {
+                    if (helper.getTick() - readinessStartedAt
+                            >= SMART_BRAIN_CHUNK_READY_TIMEOUT) {
+                        complete[0] = true;
+                        helper.fail("Black-box merchant area never became entity-ticking: ticking="
+                                + areaTicking + ", recruit=" + recruitIndexed
+                                + ", recruitTick=" + recruit.tickCount);
+                    }
+                    return;
+                }
+                startedRecruitTick[0] = recruit.tickCount;
+            }
+
+            WorkerStatus status = recruit.getWorkerStatus();
+            navigationObserved[0] |= status.phase() == WorkerPhase.NAVIGATE_SOURCE
+                    && status.reasonCode().equals("open_market");
+            if (recruit.isMarketAvailable()) {
+                WorkOrder order = data.assignedWorkOrder(
+                        owner.getUUID(), recruit.getUUID()).orElse(null);
+                owner.setPos(recruit.getX(), recruit.getY(), recruit.getZ() + 1.0D);
+                level.getChunkSource().move(owner);
+                MerchantTradeMenu tradeMenu = (MerchantTradeMenu)
+                        new MerchantTradeMenuProvider(recruit)
+                                .createMenu(73, owner.getInventory(), owner);
+
+                int offerIndex = tradeMenu.tradeIds().indexOf("republic_quartermaster");
+                var offer = offerIndex < 0 ? null : tradeMenu.offers().get(offerIndex);
+                int creditsBefore = CreditTransactionService.playerBalance(owner);
+                int stockBefore = countContainerItem(hall, ModItems.ENERGY_CELL.get());
+                int playerStockBefore = countPlayerItem(owner, ModItems.ENERGY_CELL.get());
+                int tradesBefore = ProgressionSavedData.get(level).state(owner.getUUID())
+                        .total(ProgressionEventType.TRADE_COMPLETED);
+                UUID requestId = UUID.randomUUID();
+                boolean traded = offerIndex >= 0
+                        && tradeMenu.handleReplayAction(owner, requestId, offerIndex);
+                boolean replayRejected = offerIndex >= 0
+                        && !tradeMenu.handleReplayAction(owner, requestId, offerIndex);
+                int creditsAfter = CreditTransactionService.playerBalance(owner);
+                int stockAfter = countContainerItem(hall, ModItems.ENERGY_CELL.get());
+                int playerStockAfter = countPlayerItem(owner, ModItems.ENERGY_CELL.get());
+                int tradesAfter = ProgressionSavedData.get(level).state(owner.getUUID())
+                        .total(ProgressionEventType.TRADE_COMPLETED);
+                WorkOrder persistedOrder = data.assignedWorkOrder(
+                        owner.getUUID(), recruit.getUUID()).orElse(null);
+                boolean truthfulOffer = offer != null
+                        && offer.tradeId().equals("republic_quartermaster")
+                        && offer.itemId().equals("galacticwars:energy_cell")
+                        && offer.itemCount() == 8
+                        && offer.creditPrice() == expectedTradePrice
+                        && offer.disposition().equals("friendly")
+                        && offer.eligible();
+                boolean validOrder = order != null
+                        && persistedOrder != null
+                        && persistedOrder.id().equals(order.id())
+                        && persistedOrder.type() == WorkOrderType.MERCHANT
+                        && !persistedOrder.state().terminal()
+                        && persistedOrder.assignedRecruitId()
+                                .filter(recruit.getUUID()::equals).isPresent();
+                boolean conserved = offer != null
+                        && stockBefore == 8
+                        && stockAfter == 0
+                        && playerStockBefore == 0
+                        && playerStockAfter == 8
+                        && creditsAfter == creditsBefore - expectedTradePrice;
+                if (!navigationObserved[0]
+                        || !truthfulOffer
+                        || !traded
+                        || !replayRejected
+                        || !conserved
+                        || tradesAfter != tradesBefore + 1
+                        || !validOrder
+                        || !tradeMenu.stillValid(owner)
+                        || recruit.getRecruitCommand() != RecruitmentAction.WORK_AT_SITE) {
+                    complete[0] = true;
+                    helper.fail("Black-box merchant did not complete one conserved live-menu trade: "
+                            + "status=" + status
+                            + ", initialDistance=" + initialDistance
+                            + ", navigation=" + navigationObserved[0]
+                            + ", offer=" + offer
+                            + ", expectedPrice=" + expectedTradePrice
+                            + ", traded=" + traded
+                            + ", replay=" + replayRejected
+                            + ", credits=" + creditsBefore + "->" + creditsAfter
+                            + ", stock=" + stockBefore + "->" + stockAfter
+                            + ", playerStock=" + playerStockBefore + "->" + playerStockAfter
+                            + ", trades=" + tradesBefore + "->" + tradesAfter
+                            + ", order=" + persistedOrder
+                            + ", menuValid=" + tradeMenu.stillValid(owner));
+                    return;
+                }
+
+                complete[0] = true;
+                recruit.discard();
+                helper.succeed();
+                return;
+            }
+
+            if (recruit.tickCount - startedRecruitTick[0] >= 500) {
+                complete[0] = true;
+                helper.fail("Black-box merchant lifecycle timed out: status=" + status
+                        + ", position=" + recruit.position()
+                        + ", worksite=" + worksite
+                        + ", navigation=" + navigationObserved[0]
+                        + ", market=" + recruit.isMarketAvailable()
+                        + ", stock=" + countContainerItem(hall, ModItems.ENERGY_CELL.get()));
             }
         });
     }
