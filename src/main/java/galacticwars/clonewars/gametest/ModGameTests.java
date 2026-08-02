@@ -136,6 +136,9 @@ import galacticwars.clonewars.settlement.KingdomBaseBlueprint;
 import galacticwars.clonewars.settlement.StarterCampDeployment;
 import galacticwars.clonewars.settlement.StarterCampDeploymentPhase;
 import galacticwars.clonewars.settlement.StarterCampDeploymentService;
+import galacticwars.clonewars.technology.KingdomResearchService;
+import galacticwars.clonewars.technology.KingdomTechnologyState;
+import galacticwars.clonewars.technology.ResearchResult;
 import galacticwars.clonewars.workforce.WorkerPhase;
 import galacticwars.clonewars.workforce.WorkerProfession;
 import galacticwars.clonewars.workforce.WorkerStatus;
@@ -339,6 +342,9 @@ public final class ModGameTests {
         isolatedEnvironments.put(id("black_box_courier_lifecycle"), event.registerEnvironment(
                         id("black_box_courier_lifecycle_environment"),
                         new TestEnvironmentDefinition.AllOf(List.of())));
+        isolatedEnvironments.put(id("black_box_technician_lifecycle"), event.registerEnvironment(
+                        id("black_box_technician_lifecycle_environment"),
+                        new TestEnvironmentDefinition.AllOf(List.of())));
         isolatedEnvironments.put(id("hybrid_courier_dispatch"), event.registerEnvironment(
                         id("hybrid_courier_dispatch_environment"),
                         new TestEnvironmentDefinition.AllOf(List.of())));
@@ -393,6 +399,7 @@ public final class ModGameTests {
                 id("black_box_merchant_lifecycle"),
                 id("black_box_builder_lifecycle"),
                 id("black_box_courier_lifecycle"),
+                id("black_box_technician_lifecycle"),
                 id("competing_courier_leases"),
                 id("courier_live_lease_reload"),
                 id("courier_hall_removal"),
@@ -449,6 +456,8 @@ public final class ModGameTests {
                                             ? 1_800
                                     : testId.equals(id("black_box_courier_lifecycle"))
                                             ? 1_200
+                                    : testId.equals(id("black_box_technician_lifecycle"))
+                                            ? 2_100
                                     : testId.equals(id("competing_courier_leases"))
                                             ? 700
                                     : testId.equals(id("courier_live_lease_reload"))
@@ -565,6 +574,8 @@ public final class ModGameTests {
         tests.put(id("black_box_merchant_lifecycle"), ModGameTests::blackBoxMerchantLifecycle);
         tests.put(id("black_box_builder_lifecycle"), ModGameTests::blackBoxBuilderLifecycle);
         tests.put(id("black_box_courier_lifecycle"), ModGameTests::blackBoxCourierLifecycle);
+        tests.put(id("black_box_technician_lifecycle"),
+                ModGameTests::blackBoxTechnicianLifecycle);
         tests.put(id("bounded_worker_scans"), ModGameTests::boundedWorkerScans);
         tests.put(id("hybrid_courier_dispatch"), ModGameTests::hybridCourierDispatch);
         tests.put(id("competing_courier_leases"), ModGameTests::competingCourierLeases);
@@ -10257,6 +10268,251 @@ public final class ModGameTests {
                         + destinationApproached[0]
                         + ", cargoObserved=" + cargoObserved[0]
                         + ", moved=" + movedPhysically[0]);
+            }
+        });
+    }
+
+    /**
+     * Exercises the ordinary Survival technician contract and Command Center research actions.
+     * The fixture never calls the research tick service, mutates a worker phase, invokes the
+     * worker controller, or moves the recruit after research assignment.
+     */
+    private static void blackBoxTechnicianLifecycle(GameTestHelper helper) {
+        SmartBrainTestArea area = prepareSmartBrainTestAreaAt(
+                helper,
+                GameType.SURVIVAL,
+                -2,
+                24,
+                -2,
+                6,
+                isolatedCapital(helper, 230));
+        ServerLevel level = helper.getLevel();
+        ServerPlayer owner = area.player();
+        BlockPos hallPos = area.at(0, 1, 0);
+        BlockPos recruitPos = area.at(20, 1, 0);
+        CommandCenterBlockEntity hall = placeCommandCenter(helper, hallPos);
+        hall.claim(owner);
+        KingdomSavedData data = KingdomSavedData.get(level);
+        KingdomRecord kingdom = data.activateHall(
+                owner.getUUID(),
+                hall.factionId(),
+                level.dimension().identifier().toString(),
+                hallPos).orElse(null);
+        if (kingdom == null) {
+            helper.fail("Black-box technician fixture could not activate its Command Center");
+            return;
+        }
+        owner.getInventory().add(new ItemStack(ModItems.CREDIT_CHIP.get(), 128));
+        FactionAlignmentSavedData.get(level).setScore(
+                owner.getUUID(), FactionId.of("republic"), 100);
+        applyCampaignSetupEvent(
+                ProgressionSavedData.get(level),
+                owner,
+                ProgressionEventType.FACTION_PLEDGED,
+                "galacticwars:republic");
+
+        GalacticRecruitEntity recruit = spawnRecruitAt(
+                helper, ModEntityTypes.CLONE_TROOPER.get(), recruitPos);
+        Vec3 initialRecruitPosition = recruit.position();
+        boolean[] configured = {false};
+        boolean[] navigationObserved = {false};
+        boolean[] arrivalObserved = {false};
+        boolean[] researchingObserved = {false};
+        boolean[] movedPhysically = {false};
+        boolean[] progressObserved = {false};
+        boolean[] complete = {false};
+        int[] startedRecruitTick = {-1};
+        int[] lastProgress = {0};
+        long readinessStartedAt = helper.getTick();
+        helper.onEachTick(() -> {
+            if (complete[0]) {
+                return;
+            }
+            if (!configured[0]) {
+                boolean areaTicking = areSmartBrainAreaChunksTicking(
+                        helper, area, -2, 24, -2, 6);
+                boolean recruitIndexed = level.getEntity(recruit.getUUID()) == recruit;
+                if (!areaTicking || !recruitIndexed || recruit.tickCount == 0) {
+                    if (helper.getTick() - readinessStartedAt
+                            >= SMART_BRAIN_CHUNK_READY_TIMEOUT) {
+                        complete[0] = true;
+                        helper.fail("Black-box technician area never became entity-ticking: ticking="
+                                + areaTicking + ", recruit=" + recruitIndexed
+                                + ", recruitTick=" + recruit.tickCount);
+                    }
+                    return;
+                }
+
+                owner.setPos(recruit.getX(), recruit.getY(), recruit.getZ());
+                level.getChunkSource().move(owner);
+                boolean hired = recruit.handleMenuButton(
+                        owner, RecruitCommandMenu.BUTTON_HIRE);
+                boolean professionAssigned = hired && recruit.handleMenuButton(
+                        owner, RecruitCommandMenu.BUTTON_ASSIGN_TECHNICIAN);
+                owner.setPos(
+                        hallPos.getX() + 0.5D,
+                        hallPos.getY(),
+                        hallPos.getZ() + 0.5D);
+                level.getChunkSource().move(owner);
+                CommandCenterOperationsMenu operations = (CommandCenterOperationsMenu)
+                        new CommandCenterOperationsMenuProvider(hallPos)
+                                .createMenu(52, owner.getInventory(), owner);
+                owner.containerMenu = operations;
+                boolean technicianListed = operations.dashboardState().workers().stream()
+                        .anyMatch(summary -> summary.entityId().equals(recruit.getUUID())
+                                && summary.profession().equals("technician"));
+                if (!hired || !professionAssigned || !operations.stillValid(owner)
+                        || !technicianListed
+                        || operations.dashboardState().contentGeneration()
+                                != GameplayDataManager.generation()) {
+                    complete[0] = true;
+                    helper.fail("Black-box technician did not cross its player-facing setup: hired="
+                            + hired + ", profession=" + professionAssigned
+                            + ", menu=" + operations.stillValid(owner)
+                            + ", listed=" + technicianListed
+                            + ", generation="
+                            + operations.dashboardState().contentGeneration() + "/"
+                            + GameplayDataManager.generation());
+                    return;
+                }
+
+                putContainerItem(hall, new ItemStack(Items.IRON_INGOT, 16));
+                putContainerItem(hall, new ItemStack(Items.REDSTONE, 8));
+                int initialRevision = data.technologyStateOrDefault(kingdom.id()).revision();
+                ResearchResult started = KingdomResearchService.start(
+                        owner,
+                        hall,
+                        "galacticwars:field_fabrication",
+                        UUID.randomUUID(),
+                        initialRevision);
+                ResearchResult contributed = started.accepted()
+                        ? KingdomResearchService.contribute(
+                                owner,
+                                hall,
+                                UUID.randomUUID(),
+                                started.revision())
+                        : ResearchResult.rejected("start_failed", initialRevision);
+                double assignmentDistance = recruit.distanceToSqr(Vec3.atCenterOf(hallPos));
+                ResearchResult assigned = contributed.accepted()
+                        ? KingdomResearchService.assignTechnician(
+                                owner,
+                                hall,
+                                recruit.getUUID(),
+                                UUID.randomUUID(),
+                                contributed.revision())
+                        : ResearchResult.rejected("contribution_failed", contributed.revision());
+                KingdomTechnologyState assignedState = data.technologyStateOrDefault(kingdom.id());
+                var assignedProject = assignedState.activeProject().orElse(null);
+                if (!started.accepted() || !started.changed()
+                        || !contributed.accepted() || !contributed.changed()
+                        || countContainerItem(hall, Items.IRON_INGOT) != 0
+                        || countContainerItem(hall, Items.REDSTONE) != 0
+                        || assignmentDistance <= 64.0D
+                        || !assigned.accepted() || !assigned.changed()
+                        || assignedProject == null
+                        || assignedProject.technicianId()
+                                .filter(recruit.getUUID()::equals).isEmpty()
+                        || assignedProject.deliveredInputs()
+                                .getOrDefault("minecraft:iron_ingot", 0) != 16
+                        || assignedProject.deliveredInputs()
+                                .getOrDefault("minecraft:redstone", 0) != 8
+                        || !hallPos.equals(recruit.getWorkTarget())
+                        || recruit.getRecruitCommand() != RecruitmentAction.WORK_AT_SITE) {
+                    complete[0] = true;
+                    helper.fail("Black-box distant technician assignment failed before its travel loop: "
+                            + "start=" + started + ", contribution=" + contributed
+                            + ", assignment=" + assigned
+                            + ", distance=" + assignmentDistance
+                            + ", project=" + assignedProject
+                            + ", iron=" + countContainerItem(hall, Items.IRON_INGOT)
+                            + ", redstone=" + countContainerItem(hall, Items.REDSTONE)
+                            + ", status=" + recruit.getWorkerStatus());
+                    return;
+                }
+                configured[0] = true;
+                startedRecruitTick[0] = recruit.tickCount;
+                return;
+            }
+
+            WorkerStatus status = recruit.getWorkerStatus();
+            navigationObserved[0] |= status.phase() == WorkerPhase.NAVIGATE_SOURCE
+                    && status.reasonCode().equals("travel_to_command_center");
+            arrivalObserved[0] |= recruit.distanceToSqr(Vec3.atCenterOf(hallPos)) <= 64.0D;
+            researchingObserved[0] |= status.phase() == WorkerPhase.COOLDOWN
+                    && status.reasonCode().equals("researching");
+            movedPhysically[0] |= recruit.position().distanceToSqr(initialRecruitPosition) > 4.0D;
+
+            KingdomTechnologyState current = data.technologyStateOrDefault(kingdom.id());
+            var project = current.activeProject().orElse(null);
+            if (project != null) {
+                int progress = project.workProgress();
+                int progressDelta = progress - lastProgress[0];
+                if (progressDelta < 0 || progressDelta > 20
+                        || Math.floorMod(progressDelta, 20) != 0
+                        || countContainerItem(hall, Items.IRON_INGOT) != 0
+                        || countContainerItem(hall, Items.REDSTONE) != 0
+                        || project.deliveredInputs()
+                                .getOrDefault("minecraft:iron_ingot", 0) != 16
+                        || project.deliveredInputs()
+                                .getOrDefault("minecraft:redstone", 0) != 8) {
+                    complete[0] = true;
+                    helper.fail("Black-box technician violated monotonic research conservation: "
+                            + "progress=" + lastProgress[0] + "->" + progress
+                            + ", project=" + project
+                            + ", iron=" + countContainerItem(hall, Items.IRON_INGOT)
+                            + ", redstone=" + countContainerItem(hall, Items.REDSTONE)
+                            + ", status=" + status);
+                    return;
+                }
+                progressObserved[0] |= progress > 0;
+                lastProgress[0] = progress;
+            }
+
+            if (current.completed("galacticwars:field_fabrication")
+                    && current.activeProject().isEmpty()) {
+                Tag encoded = KingdomSavedData.CODEC.encodeStart(NbtOps.INSTANCE, data).getOrThrow();
+                KingdomSavedData restored = KingdomSavedData.CODEC.parse(
+                        NbtOps.INSTANCE, encoded).getOrThrow();
+                boolean durableCompletion = restored.technologyStateOrDefault(kingdom.id())
+                        .completed("galacticwars:field_fabrication");
+                if (!navigationObserved[0]
+                        || !arrivalObserved[0]
+                        || !researchingObserved[0]
+                        || !movedPhysically[0]
+                        || !progressObserved[0]
+                        || lastProgress[0] < 1_180
+                        || countContainerItem(hall, Items.IRON_INGOT) != 0
+                        || countContainerItem(hall, Items.REDSTONE) != 0
+                        || recruit.getRecruitCommand() != RecruitmentAction.FOLLOW_OWNER
+                        || status.phase() != WorkerPhase.BLOCKED
+                        || !status.reasonCode().equals("awaiting_research")
+                        || !durableCompletion) {
+                    complete[0] = true;
+                    helper.fail("Black-box technician completed without its embodied lifecycle: "
+                            + "navigation=" + navigationObserved[0]
+                            + ", arrival=" + arrivalObserved[0]
+                            + ", researching=" + researchingObserved[0]
+                            + ", moved=" + movedPhysically[0]
+                            + ", progress=" + lastProgress[0]
+                            + ", durable=" + durableCompletion
+                            + ", status=" + status);
+                    return;
+                }
+                complete[0] = true;
+                recruit.discard();
+                helper.succeed();
+                return;
+            }
+
+            if (recruit.tickCount - startedRecruitTick[0] >= 1_700) {
+                complete[0] = true;
+                helper.fail("Black-box technician lifecycle timed out: status=" + status
+                        + ", project=" + project
+                        + ", navigation=" + navigationObserved[0]
+                        + ", arrival=" + arrivalObserved[0]
+                        + ", researching=" + researchingObserved[0]
+                        + ", moved=" + movedPhysically[0]
+                        + ", progress=" + lastProgress[0]);
             }
         });
     }
