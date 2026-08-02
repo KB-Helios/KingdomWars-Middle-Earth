@@ -327,6 +327,9 @@ public final class ModGameTests {
         isolatedEnvironments.put(id("black_box_animal_farmer_lifecycle"), event.registerEnvironment(
                         id("black_box_animal_farmer_lifecycle_environment"),
                         new TestEnvironmentDefinition.AllOf(List.of())));
+        isolatedEnvironments.put(id("black_box_fisher_lifecycle"), event.registerEnvironment(
+                        id("black_box_fisher_lifecycle_environment"),
+                        new TestEnvironmentDefinition.AllOf(List.of())));
         isolatedEnvironments.put(id("hybrid_courier_dispatch"), event.registerEnvironment(
                         id("hybrid_courier_dispatch_environment"),
                         new TestEnvironmentDefinition.AllOf(List.of())));
@@ -377,6 +380,7 @@ public final class ModGameTests {
                 id("black_box_lumberjack_lifecycle"),
                 id("black_box_miner_lifecycle"),
                 id("black_box_animal_farmer_lifecycle"),
+                id("black_box_fisher_lifecycle"),
                 id("competing_courier_leases"),
                 id("courier_live_lease_reload"),
                 id("courier_hall_removal"),
@@ -425,6 +429,8 @@ public final class ModGameTests {
                                             ? 900
                                     : testId.equals(id("black_box_animal_farmer_lifecycle"))
                                             ? 900
+                                    : testId.equals(id("black_box_fisher_lifecycle"))
+                                            ? 1_000
                                     : testId.equals(id("competing_courier_leases"))
                                             ? 700
                                     : testId.equals(id("courier_live_lease_reload"))
@@ -536,6 +542,7 @@ public final class ModGameTests {
         tests.put(id("black_box_miner_lifecycle"), ModGameTests::blackBoxMinerLifecycle);
         tests.put(id("black_box_animal_farmer_lifecycle"),
                 ModGameTests::blackBoxAnimalFarmerLifecycle);
+        tests.put(id("black_box_fisher_lifecycle"), ModGameTests::blackBoxFisherLifecycle);
         tests.put(id("bounded_worker_scans"), ModGameTests::boundedWorkerScans);
         tests.put(id("hybrid_courier_dispatch"), ModGameTests::hybridCourierDispatch);
         tests.put(id("competing_courier_leases"), ModGameTests::competingCourierLeases);
@@ -1540,15 +1547,19 @@ public final class ModGameTests {
                 case -1 -> {
                     boolean shooterIndexed = helper.getLevel().getEntity(shooter.getUUID()) == shooter;
                     boolean targetIndexed = helper.getLevel().getEntity(target.getUUID()) == target;
-                    boolean chunkTicking = helper.getLevel().areEntitiesActuallyLoadedAndTicking(
-                            ChunkPos.containing(shooter.blockPosition()));
-                    if (!shooterIndexed || !targetIndexed || !chunkTicking) {
+                    // The out-of-range phase spans several chunks. Under aggregate load,
+                    // the shooter's chunk can tick before the far target's chunk does.
+                    boolean areaTicking = areSmartBrainAreaChunksTicking(
+                            helper, area, -2, 48, -3, 5);
+                    boolean entitiesTicked = shooter.tickCount > 0 && target.tickCount > 0;
+                    if (!shooterIndexed || !targetIndexed || !areaTicking || !entitiesTicked) {
                         if (helper.getTick() - indexWaitStartedTick
                                 >= SMART_BRAIN_CHUNK_READY_TIMEOUT) {
                             complete[0] = true;
-                            helper.fail("Physical-ammunition entities never entered the server index: shooter="
+                            helper.fail("Physical-ammunition fixtures never became entity-ticking: shooter="
                                     + shooterIndexed + ", target=" + targetIndexed
-                                    + ", chunkTicking=" + chunkTicking);
+                                    + ", entitiesTicked=" + entitiesTicked
+                                    + ", areaTicking=" + areaTicking);
                         }
                         return;
                     }
@@ -2155,11 +2166,18 @@ public final class ModGameTests {
             boolean commanderIndexed = helper.getLevel().getEntity(commander.getUUID()) == commander;
             boolean soldierIndexed = helper.getLevel().getEntity(soldier.getUUID()) == soldier;
             if (!ordersIssued[0]) {
-                if (!commanderIndexed || !soldierIndexed) {
+                // Under aggregate load, entity indexing can precede the forced area's
+                // entity-ticking state; the live command and SmartBrain path require both.
+                boolean areaTicking = areSmartBrainAreaChunksTicking(
+                        helper, area, -4, 18, -4, 4);
+                boolean recruitsTicked = commander.tickCount > 0 && soldier.tickCount > 0;
+                if (!commanderIndexed || !soldierIndexed || !areaTicking || !recruitsTicked) {
                     if (helper.getTick() - startedAt[0] >= SMART_BRAIN_CHUNK_READY_TIMEOUT) {
                         complete[0] = true;
-                        helper.fail("Grouped SmartBrain entities never entered the server index: commander="
-                                + commanderIndexed + ", soldier=" + soldierIndexed);
+                        helper.fail("Grouped SmartBrain fixtures never became entity-ticking: commander="
+                                + commanderIndexed + ", soldier=" + soldierIndexed
+                                + ", recruitsTicked=" + recruitsTicked
+                                + ", areaTicking=" + areaTicking);
                     }
                     return;
                 }
@@ -2180,9 +2198,25 @@ public final class ModGameTests {
                         || heldOrder.targetPosition().orElseThrow().blockPosition().z()
                         != commander.blockPosition().getZ()) {
                     complete[0] = true;
+                    var currentGroup = data.armyGroup(squad.id()).orElseThrow();
                     helper.fail("Field Hold did not use the live commander's server position: result="
                             + holdState.result() + ", order=" + heldOrder
-                            + ", commander=" + commander.blockPosition());
+                            + ", commander=" + commander.blockPosition()
+                            + ", owner=" + owner.blockPosition()
+                            + ", distanceSqr=" + owner.distanceToSqr(commander)
+                            + ", lifecycle=" + currentGroup.simulation().lifecycleState()
+                            + ", serviceBranch=" + commander.getServiceBranch()
+                            + ", contains=" + currentGroup.contains(commander.getUUID())
+                            + ", visibleSquads=" + holdState.squads().size()
+                            + ", visibleTarget=" + holdState.squads().stream()
+                                    .anyMatch(candidate -> candidate.id().equals(squad.id()))
+                            + ", visibleNames=" + holdState.squads().stream()
+                                    .map(candidate -> candidate.name()).limit(4).toList()
+                            + ", kingdomGroups=" + data.armyGroupsForKingdom(kingdom.id()).size()
+                            + ", sameLevel=" + (owner.level() == helper.getLevel())
+                            + ", ticks=" + owner.tickCount + "/" + commander.tickCount
+                            + ", areaTicking=" + areSmartBrainAreaChunksTicking(
+                                    helper, area, -4, 18, -4, 4));
                     return;
                 }
                 if (!data.issueArmyOrder(owner.getUUID(), squad.id(), moveOrder)) {
@@ -8677,10 +8711,27 @@ public final class ModGameTests {
         boolean[] furnaceLit = {false};
         boolean[] consumedFuelWhileLit = {false};
         boolean[] complete = {false};
-        long startedAt = helper.getTick();
+        int[] startedRecruitTick = {-1};
+        long readinessStartedAt = helper.getTick();
         helper.onEachTick(() -> {
             if (complete[0]) {
                 return;
+            }
+            if (startedRecruitTick[0] < 0) {
+                boolean areaTicking = areSmartBrainAreaChunksTicking(
+                        helper, area, -2, 14, -2, 8);
+                boolean recruitIndexed = level.getEntity(recruit.getUUID()) == recruit;
+                if (!areaTicking || !recruitIndexed || recruit.tickCount == 0) {
+                    if (helper.getTick() - readinessStartedAt
+                            >= SMART_BRAIN_CHUNK_READY_TIMEOUT) {
+                        complete[0] = true;
+                        helper.fail("Black-box cook area never became entity-ticking: ticking="
+                                + areaTicking + ", recruit=" + recruitIndexed
+                                + ", recruitTick=" + recruit.tickCount);
+                    }
+                    return;
+                }
+                startedRecruitTick[0] = recruit.tickCount;
             }
             if (!(level.getBlockEntity(furnacePos) instanceof Container furnace)) {
                 complete[0] = true;
@@ -8752,7 +8803,7 @@ public final class ModGameTests {
                 return;
             }
 
-            if (helper.getTick() - startedAt >= 750L) {
+            if (recruit.tickCount - startedRecruitTick[0] >= 750) {
                 complete[0] = true;
                 helper.fail("Black-box cook lifecycle timed out: status=" + status
                         + ", raw=" + raw + ", cooked=" + cooked + ", coal=" + coal
@@ -9208,6 +9259,195 @@ public final class ModGameTests {
                         + ", withdrew=" + withdrewFeed[0]
                         + ", approached=" + approachedPair[0]
                         + ", completedOrder=" + completedOrder);
+            }
+        });
+    }
+
+    /**
+     * Exercises one complete fishing order through ordinary hire, profession-assignment,
+     * worksite, registered-storage, navigation, timed loot-table fishing, and deposit paths. The
+     * fixture never mutates a worker phase, invokes the controller, or moves the recruit after
+     * assignment.
+     */
+    private static void blackBoxFisherLifecycle(GameTestHelper helper) {
+        SmartBrainTestArea area = prepareSmartBrainTestAreaAt(
+                helper,
+                GameType.CREATIVE,
+                -2,
+                14,
+                -2,
+                8,
+                isolatedCapital(helper, 224));
+        ServerLevel level = helper.getLevel();
+        ServerPlayer owner = area.player();
+        BlockPos hallPos = area.at(0, 1, 0);
+        BlockPos recruitPos = area.at(2, 1, 4);
+        BlockPos waterPos = area.at(7, 1, 4);
+        CommandCenterBlockEntity hall = placeCommandCenter(helper, hallPos);
+        hall.claim(owner);
+        KingdomSavedData data = KingdomSavedData.get(level);
+        if (data.activateHall(
+                owner.getUUID(),
+                hall.factionId(),
+                level.dimension().identifier().toString(),
+                hallPos).isEmpty()) {
+            helper.fail("Black-box fisher fixture could not activate its Command Center");
+            return;
+        }
+        putContainerItem(hall, new ItemStack(ModItems.CREDIT_CHIP.get(), 32));
+        FactionAlignmentSavedData.get(level).setScore(
+                owner.getUUID(), FactionId.of("republic"), 100);
+        applyCampaignSetupEvent(
+                ProgressionSavedData.get(level),
+                owner,
+                ProgressionEventType.FACTION_PLEDGED,
+                "galacticwars:republic");
+
+        GalacticRecruitEntity recruit = spawnRecruitAt(
+                helper, ModEntityTypes.CLONE_TROOPER.get(), recruitPos);
+        owner.setPos(recruit.getX(), recruit.getY(), recruit.getZ());
+        if (!recruit.handleMenuButton(owner, RecruitCommandMenu.BUTTON_HIRE)
+                || !recruit.handleMenuButton(owner, RecruitCommandMenu.BUTTON_ASSIGN_FISHERMAN)) {
+            helper.fail("Black-box fisher could not be hired and assigned");
+            return;
+        }
+        if (!configureWorkerLifecycleWorksite(
+                helper, data, owner, recruit, hallPos, List.of())) {
+            return;
+        }
+        if (!recruit.getWorkerMainHandItem().is(Items.FISHING_ROD)) {
+            helper.fail("Black-box fisher assignment did not equip a fishing rod");
+            return;
+        }
+
+        for (int x = -1; x <= 1; x++) {
+            for (int z = -1; z <= 1; z++) {
+                if (x != 0 || z != 0) {
+                    level.setBlock(
+                            waterPos.offset(x, 0, z),
+                            Blocks.STONE.defaultBlockState(),
+                            3);
+                }
+            }
+        }
+        level.setBlock(waterPos, Blocks.WATER.defaultBlockState(), 3);
+
+        Container recruitCargo = recruit.createCargoContainer();
+        List<ItemStack> storageBaseline = copyContainerStacks(hall);
+        int storedCountBefore = countContainerItems(hall);
+        int rodDamageBefore = recruit.getWorkerMainHandItem().getDamageValue();
+        List<ItemStack> caughtStacks = new ArrayList<>();
+        boolean[] approachedWater = {false};
+        boolean[] castObserved = {false};
+        boolean[] complete = {false};
+        int[] startedRecruitTick = {-1};
+        long readinessStartedAt = helper.getTick();
+        helper.onEachTick(() -> {
+            if (complete[0]) {
+                return;
+            }
+            if (startedRecruitTick[0] < 0) {
+                boolean areaTicking = areSmartBrainAreaChunksTicking(
+                        helper, area, -2, 14, -2, 8);
+                boolean recruitIndexed = level.getEntity(recruit.getUUID()) == recruit;
+                if (!areaTicking || !recruitIndexed || recruit.tickCount == 0) {
+                    if (helper.getTick() - readinessStartedAt
+                            >= SMART_BRAIN_CHUNK_READY_TIMEOUT) {
+                        complete[0] = true;
+                        helper.fail("Black-box fisher area never became entity-ticking: ticking="
+                                + areaTicking + ", recruit=" + recruitIndexed
+                                + ", recruitTick=" + recruit.tickCount);
+                    }
+                    return;
+                }
+                startedRecruitTick[0] = recruit.tickCount;
+            }
+
+            WorkerStatus status = recruit.getWorkerStatus();
+            approachedWater[0] |= recruit.distanceToSqr(Vec3.atCenterOf(waterPos)) <= 4.0D;
+            castObserved[0] |= status.phase() == WorkerPhase.INTERACT
+                    && status.reasonCode().equals("fishing_wait");
+            if (caughtStacks.isEmpty() && !recruitCargo.isEmpty()) {
+                caughtStacks.addAll(copyContainerStacks(recruitCargo));
+            }
+
+            int caughtCount = caughtStacks.stream().mapToInt(ItemStack::getCount).sum();
+            int physicalCatchDelta = countContainerItems(hall)
+                    + countContainerItems(recruitCargo)
+                    - storedCountBefore;
+            if (caughtStacks.isEmpty()) {
+                if (physicalCatchDelta != 0) {
+                    complete[0] = true;
+                    helper.fail("Black-box fisher deposited output without observable cargo: delta="
+                            + physicalCatchDelta + ", stored=" + copyContainerStacks(hall));
+                    return;
+                }
+            } else {
+                if (physicalCatchDelta != caughtCount) {
+                    complete[0] = true;
+                    helper.fail("Black-box fisher violated catch-count conservation: caught="
+                            + caughtCount + ", physicalDelta=" + physicalCatchDelta
+                            + ", caughtStacks=" + caughtStacks
+                            + ", stored=" + copyContainerStacks(hall)
+                            + ", cargo=" + copyContainerStacks(recruitCargo));
+                    return;
+                }
+                for (int index = 0; index < caughtStacks.size(); index++) {
+                    ItemStack caught = caughtStacks.get(index);
+                    boolean alreadyChecked = false;
+                    for (int prior = 0; prior < index; prior++) {
+                        if (ItemStack.isSameItemSameComponents(caughtStacks.get(prior), caught)) {
+                            alreadyChecked = true;
+                            break;
+                        }
+                    }
+                    if (alreadyChecked) {
+                        continue;
+                    }
+                    int expectedCount = countMatchingStack(caughtStacks, caught);
+                    int currentCount = countMatchingStack(hall, caught)
+                            + countMatchingStack(recruitCargo, caught)
+                            - countMatchingStack(storageBaseline, caught);
+                    if (currentCount != expectedCount) {
+                        complete[0] = true;
+                        helper.fail("Black-box fisher changed catch components or quantity: expected="
+                                + expectedCount + " of " + caught + ", current=" + currentCount
+                                + ", stored=" + copyContainerStacks(hall)
+                                + ", cargo=" + copyContainerStacks(recruitCargo));
+                        return;
+                    }
+                }
+            }
+
+            boolean completedOrder = hasCompletedWorkerOrder(
+                    data, owner.getUUID(), WorkOrderType.FISH);
+            int rodDamage = recruit.getWorkerMainHandItem().getDamageValue();
+            if (completedOrder
+                    && !caughtStacks.isEmpty()
+                    && recruitCargo.isEmpty()
+                    && physicalCatchDelta == caughtCount
+                    && approachedWater[0]
+                    && castObserved[0]
+                    && rodDamage == rodDamageBefore + 1
+                    && recruit.getRecruitCommand() == RecruitmentAction.WORK_AT_SITE) {
+                complete[0] = true;
+                recruit.discard();
+                helper.succeed();
+                return;
+            }
+
+            if (recruit.tickCount - startedRecruitTick[0] >= 650) {
+                complete[0] = true;
+                helper.fail("Black-box fisher lifecycle timed out: status=" + status
+                        + ", position=" + recruit.position()
+                        + ", water=" + level.getBlockState(waterPos)
+                        + ", caught=" + caughtStacks
+                        + ", stored=" + copyContainerStacks(hall)
+                        + ", cargo=" + copyContainerStacks(recruitCargo)
+                        + ", approached=" + approachedWater[0]
+                        + ", cast=" + castObserved[0]
+                        + ", completedOrder=" + completedOrder
+                        + ", rodDamage=" + rodDamageBefore + "->" + rodDamage);
             }
         });
     }
@@ -10745,6 +10985,35 @@ public final class ModGameTests {
         return count;
     }
 
+    private static List<ItemStack> copyContainerStacks(Container container) {
+        List<ItemStack> stacks = new ArrayList<>();
+        for (int slot = 0; slot < container.getContainerSize(); slot++) {
+            ItemStack stack = container.getItem(slot);
+            if (!stack.isEmpty()) {
+                stacks.add(stack.copy());
+            }
+        }
+        return stacks;
+    }
+
+    private static int countMatchingStack(Container container, ItemStack template) {
+        int count = 0;
+        for (int slot = 0; slot < container.getContainerSize(); slot++) {
+            ItemStack stack = container.getItem(slot);
+            if (ItemStack.isSameItemSameComponents(stack, template)) {
+                count += stack.getCount();
+            }
+        }
+        return count;
+    }
+
+    private static int countMatchingStack(List<ItemStack> stacks, ItemStack template) {
+        return stacks.stream()
+                .filter(stack -> ItemStack.isSameItemSameComponents(stack, template))
+                .mapToInt(ItemStack::getCount)
+                .sum();
+    }
+
     private static int countContainerItems(Container container) {
         int count = 0;
         for (int slot = 0; slot < container.getContainerSize(); slot++) {
@@ -10889,6 +11158,9 @@ public final class ModGameTests {
             int minZ,
             int maxZ
     ) {
+        // Aggregate GameTests can register the embedded player after the one-shot
+        // post-teleport update. Refresh its ticket before polling the prepared lane.
+        helper.getLevel().getChunkSource().move(area.player());
         int minChunkX = Math.min(area.base().getX() + minX, area.base().getX() + maxX) >> 4;
         int maxChunkX = Math.max(area.base().getX() + minX, area.base().getX() + maxX) >> 4;
         int minChunkZ = Math.min(area.base().getZ() + minZ, area.base().getZ() + maxZ) >> 4;
