@@ -37,6 +37,9 @@ public final class RecruitMoveToCommandBehaviour
 
     @Override
     protected boolean checkExtraStartConditions(ServerLevel level, GalacticRecruitEntity recruit) {
+        if (recruit.isHazardAvoidanceActive()) {
+            return false;
+        }
         BlockPos currentTarget = recruit.getMoveTarget();
         if (retryTicks > 0 && (currentTarget == null || currentTarget.equals(trackedTarget))) {
             retryTicks--;
@@ -48,7 +51,8 @@ public final class RecruitMoveToCommandBehaviour
 
     @Override
     protected boolean shouldKeepRunning(GalacticRecruitEntity recruit) {
-        return recruit.shouldMoveToCommandTarget()
+        return !recruit.isHazardAvoidanceActive()
+                && recruit.shouldMoveToCommandTarget()
                 && !waitingToRetry
                 && distanceToTargetSqr(recruit) > ARRIVAL_DISTANCE_SQUARED;
     }

@@ -11,6 +11,7 @@ import galacticwars.clonewars.classes.PlayerClassRuntime;
 import galacticwars.clonewars.menu.CommandCenterOperationsMenu;
 import galacticwars.clonewars.menu.MerchantTradeMenu;
 import galacticwars.clonewars.menu.FabricatorMenu;
+import galacticwars.clonewars.menu.WorksiteConfigurationMenu;
 import galacticwars.clonewars.fabrication.FabricationService;
 import galacticwars.clonewars.technology.KingdomResearchService;
 import galacticwars.clonewars.settlement.CommandCenterBlockEntity;
@@ -64,6 +65,10 @@ public final class GalacticNetwork {
                 MenuActionPayload.STREAM_CODEC,
                 GalacticNetwork::handleMenuAction);
         NetworkManager.registerC2S(
+                WorksiteActionPayload.TYPE,
+                WorksiteActionPayload.STREAM_CODEC,
+                GalacticNetwork::handleWorksiteAction);
+        NetworkManager.registerC2S(
                 FabricationRequestPayload.TYPE,
                 FabricationRequestPayload.STREAM_CODEC,
                 GalacticNetwork::handleFabrication);
@@ -107,6 +112,10 @@ public final class GalacticNetwork {
                 ServerPolicyPayload.TYPE,
                 ServerPolicyPayload.STREAM_CODEC,
                 GalacticNetwork::handleServerPolicy);
+        NetworkManager.registerS2C(
+                WorksiteStatePayload.TYPE,
+                WorksiteStatePayload.STREAM_CODEC,
+                GalacticNetwork::handleWorksiteState);
         PlayerEvent.PLAYER_QUIT.register(player -> {
             ArmyFieldCommandService.clearReplayHistory(player.getUUID());
             ForceWorldEffectService.cancelAll(player.getUUID());
@@ -229,6 +238,21 @@ public final class GalacticNetwork {
         }
     }
 
+    private static void handleWorksiteAction(
+            WorksiteActionPayload payload,
+            NetworkManager.PacketContext context
+    ) {
+        if (!(context.getPlayer() instanceof ServerPlayer player)) {
+            return;
+        }
+        context.queue(() -> {
+            if (player.containerMenu instanceof WorksiteConfigurationMenu menu
+                    && menu.containerId == payload.containerId()) {
+                menu.handleReplayAction(player, payload);
+            }
+        });
+    }
+
     private static void handleResearch(
             ResearchActionPayload payload,
             NetworkManager.PacketContext context
@@ -339,6 +363,20 @@ public final class GalacticNetwork {
             NetworkManager.PacketContext context
     ) {
         context.queue(() -> ClientPacketBridge.handleServerPolicy(payload));
+    }
+
+    private static void handleWorksiteState(
+            WorksiteStatePayload payload,
+            NetworkManager.PacketContext context
+    ) {
+        context.queue(() -> {
+            var player = context.getPlayer();
+            if (player != null
+                    && player.containerMenu instanceof WorksiteConfigurationMenu menu
+                    && menu.containerId == payload.containerId()) {
+                menu.applyClientSnapshot(payload.snapshot());
+            }
+        });
     }
 
     /** Compatibility surface retained for existing `.get()`-style menu and keybinding call sites. */

@@ -31,7 +31,8 @@ public enum RecruitCommandAction {
     CYCLE_FORMATION,
     ROTATE_BLUEPRINT,
     PATROL,
-    OPEN_LOADOUT;
+    OPEN_LOADOUT,
+    OPEN_WORKSITE_CONFIGURATION;
 
     public static Optional<RecruitCommandAction> fromButtonId(int buttonId) {
         if (WorkerProfessionCatalog.professionForButton(buttonId).isPresent()) {
@@ -62,6 +63,8 @@ public enum RecruitCommandAction {
             case RecruitCommandMenu.BUTTON_ROTATE_BLUEPRINT -> ROTATE_BLUEPRINT;
             case RecruitCommandMenu.BUTTON_PATROL -> PATROL;
             case RecruitCommandMenu.BUTTON_OPEN_LOADOUT -> OPEN_LOADOUT;
+            case RecruitCommandMenu.BUTTON_OPEN_WORKSITE_CONFIGURATION ->
+                    OPEN_WORKSITE_CONFIGURATION;
             default -> null;
         });
     }

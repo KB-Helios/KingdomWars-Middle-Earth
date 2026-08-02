@@ -74,6 +74,7 @@ import galacticwars.clonewars.menu.RecruitCommandMenu;
 import galacticwars.clonewars.menu.RecruitCommandAction;
 import galacticwars.clonewars.menu.RecruitCommandMenuProvider;
 import galacticwars.clonewars.menu.RecruitLoadoutMenuProvider;
+import galacticwars.clonewars.menu.WorksiteConfigurationMenuProvider;
 import galacticwars.clonewars.menu.MerchantTradeMenuProvider;
 import galacticwars.clonewars.recruitment.RecruitmentAction;
 import galacticwars.clonewars.progression.ProgressionEventType;
@@ -97,6 +98,11 @@ import galacticwars.clonewars.settlement.KingdomWorkOrder;
 import galacticwars.clonewars.settlement.CommandCenterBlockEntity;
 import galacticwars.clonewars.settlement.ConstructionPlan;
 import galacticwars.clonewars.workforce.ResourceInventory;
+import galacticwars.clonewars.workforce.SupplyCategory;
+import galacticwars.clonewars.workforce.SupplyDemand;
+import galacticwars.clonewars.workforce.SupplyReservation;
+import galacticwars.clonewars.workforce.SettlementSupplyLedger;
+import galacticwars.clonewars.workforce.CourierDispatchMode;
 import galacticwars.clonewars.workforce.CourierTransferAction;
 import galacticwars.clonewars.workforce.CourierTransferType;
 import galacticwars.clonewars.workforce.CourierRouteExecutionState;
@@ -104,6 +110,8 @@ import galacticwars.clonewars.workforce.CourierRoutePlan;
 import galacticwars.clonewars.workforce.CourierRoutePlanner;
 import galacticwars.clonewars.workforce.CourierWaypoint;
 import galacticwars.clonewars.workforce.WorkAreaType;
+import galacticwars.clonewars.workforce.WorkAreaBounds;
+import galacticwars.clonewars.workforce.WorkAreaConfiguration;
 import galacticwars.clonewars.workforce.WorkerLogisticsDecision;
 import galacticwars.clonewars.workforce.WorkerLogisticsPlanner;
 import galacticwars.clonewars.workforce.WorkerLogisticsRoute;
@@ -111,16 +119,26 @@ import galacticwars.clonewars.workforce.WorkerProfession;
 import galacticwars.clonewars.workforce.WorkerProfessionCatalog;
 import galacticwars.clonewars.workforce.WorkerProfessionDefinition;
 import galacticwars.clonewars.workforce.WorkerAssignment;
+import galacticwars.clonewars.workforce.WorkerAction;
+import galacticwars.clonewars.workforce.WorkerActionResult;
 import galacticwars.clonewars.workforce.WorkerContractService;
 import galacticwars.clonewars.workforce.WorkerDutyLoadoutPolicy;
+import galacticwars.clonewars.workforce.WorkerExecutionState;
 import galacticwars.clonewars.workforce.WorkerPhase;
 import galacticwars.clonewars.workforce.WorkerResourceAction;
 import galacticwars.clonewars.workforce.WorkerResourceDecision;
 import galacticwars.clonewars.workforce.WorkerResourcePlanner;
+import galacticwars.clonewars.workforce.WorkerProfessionBehavior;
+import galacticwars.clonewars.workforce.WorkerProfessionBehaviors;
+import galacticwars.clonewars.workforce.WorkerRuntimeController;
+import galacticwars.clonewars.workforce.WorkerRuntimeContext;
+import galacticwars.clonewars.workforce.WorkerRuntimeHost;
 import galacticwars.clonewars.workforce.WorkerTaskDecision;
 import galacticwars.clonewars.workforce.WorkerTaskPlanner;
 import galacticwars.clonewars.workforce.WorkerStatus;
+import galacticwars.clonewars.workforce.WorkerTarget;
 import galacticwars.clonewars.workforce.WorkerWorksite;
+import galacticwars.clonewars.workforce.WorkerWorldActions;
 import galacticwars.clonewars.workforce.WorkforceCodecs;
 import galacticwars.clonewars.workforce.logistics.LogisticsAccessPolicy;
 import galacticwars.clonewars.workforce.logistics.LogisticsEndpoint;
@@ -135,9 +153,14 @@ import galacticwars.clonewars.world.FactionOutpostSavedData;
 import galacticwars.clonewars.world.OverworldFactionSpawnProfile;
 import galacticwars.clonewars.world.PlanetFactionSpawnPolicy;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.core.registries.Registries;
+import net.minecraft.tags.BlockTags;
 import net.minecraft.tags.FluidTags;
+import net.minecraft.tags.ItemTags;
+import net.minecraft.tags.TagKey;
 import net.minecraft.core.NonNullList;
 import net.minecraft.core.UUIDUtil;
 import net.minecraft.network.chat.Component;
@@ -147,6 +170,9 @@ import net.minecraft.network.syncher.EntityDataSerializers;
 import net.minecraft.network.syncher.SynchedEntityData;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.core.particles.ParticleTypes;
+import net.minecraft.sounds.SoundEvents;
+import net.minecraft.sounds.SoundSource;
 import net.minecraft.world.DifficultyInstance;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
@@ -165,7 +191,9 @@ import net.minecraft.world.entity.ai.attributes.AttributeSupplier;
 import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.entity.ai.memory.MemoryModuleType;
 import net.minecraft.world.entity.ai.memory.WalkTarget;
+import net.minecraft.world.entity.ai.navigation.GroundPathNavigation;
 import net.minecraft.world.entity.animal.Animal;
+import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.entity.monster.Monster;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.entity.projectile.ProjectileUtil;
@@ -178,13 +206,22 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.level.ServerLevelAccessor;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.CampfireBlock;
 import net.minecraft.world.level.block.CropBlock;
 import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraft.world.level.block.entity.AbstractFurnaceBlockEntity;
 import net.minecraft.world.level.block.entity.HopperBlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import net.minecraft.world.level.storage.ValueInput;
 import net.minecraft.world.level.storage.ValueOutput;
+import net.minecraft.world.level.storage.loot.BuiltInLootTables;
+import net.minecraft.world.level.storage.loot.LootParams;
+import net.minecraft.world.level.storage.loot.LootTable;
+import net.minecraft.world.level.storage.loot.parameters.LootContextParamSets;
+import net.minecraft.world.level.storage.loot.parameters.LootContextParams;
+import net.minecraft.world.item.crafting.RecipeType;
+import net.minecraft.world.item.crafting.SingleRecipeInput;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.EntityHitResult;
@@ -196,6 +233,9 @@ import net.tslat.smartbrainlib.api.SmartBrainOwner;
 import net.tslat.smartbrainlib.util.BrainUtil;
 
 import java.util.ArrayList;
+import java.util.ArrayDeque;
+import java.util.HashSet;
+import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -206,7 +246,8 @@ import java.util.UUID;
 import java.util.function.BooleanSupplier;
 
 public class GalacticRecruitEntity extends TamableAnimal
-        implements GeoEntity, SmartBrainOwner<GalacticRecruitEntity> {
+        implements GeoEntity, SmartBrainOwner<GalacticRecruitEntity>,
+        WorkerRuntimeHost, WorkerWorldActions {
     private static final int DEFAULT_WORK_RADIUS = 8;
     private static final int MIN_WORK_RADIUS = 2;
     private static final int MAX_WORK_RADIUS = 32;
@@ -271,10 +312,14 @@ public class GalacticRecruitEntity extends TamableAnimal
     private CourierRouteExecutionState courierRouteState = CourierRouteExecutionState.start(0L);
     private WorkerPhase workerPhase = WorkerPhase.ACQUIRE_ORDER;
     private String workerReason = "ready";
+    private String workerRequiredItemId = "";
     private @Nullable BlockPos activeWorkTarget;
+    private WorkerExecutionState workerExecutionState = WorkerExecutionState.initial();
+    private boolean legacyWorkerExecutionCursor;
     private int workerCooldownTicks;
     private int workerNavigationFailures;
     private int workerScanCursor;
+    private boolean hazardAvoidanceActive;
     private @Nullable BlockPos blacklistedWorkTarget;
     private int blacklistedWorkTargetTicks;
     private long lastCommanderCampaignGameTime;
@@ -300,6 +345,9 @@ public class GalacticRecruitEntity extends TamableAnimal
 
     public GalacticRecruitEntity(EntityType<? extends TamableAnimal> entityType, Level level) {
         super(entityType, level);
+        if (this.getNavigation() instanceof GroundPathNavigation navigation) {
+            navigation.setCanOpenDoors(true);
+        }
     }
 
     public static AttributeSupplier.Builder createAttributes() {
@@ -394,7 +442,7 @@ public class GalacticRecruitEntity extends TamableAnimal
         output.putBoolean("PendingNaturalSpawnRemoval", this.pendingNaturalSpawnRemoval);
         output.putBoolean("PendingNaturalSpawnInitialization", this.pendingNaturalSpawnInitialization);
         this.getWorkerProfession().ifPresent(profession -> output.putString("WorkerProfession", profession.id()));
-        output.putInt("RecruitDataVersion", 14);
+        output.putInt("RecruitDataVersion", 15);
         output.putBoolean("DefaultLoadoutInitialized", this.defaultLoadoutInitialized);
         output.store("InactiveDutyMainHand", ItemStack.OPTIONAL_CODEC, this.inactiveDutyMainHand);
         output.storeNullable("KingdomId", UUIDUtil.CODEC, this.kingdomId);
@@ -407,8 +455,11 @@ public class GalacticRecruitEntity extends TamableAnimal
         ContainerHelper.saveAllItems(workerInventoryOutput, this.workerInventory);
         output.store("CourierRouteState", WorkforceCodecs.COURIER_ROUTE_EXECUTION_STATE,
                 this.courierRouteState);
+        output.store("WorkerExecutionState", WorkforceCodecs.WORKER_EXECUTION_STATE,
+                this.workerExecutionSnapshot());
         output.putString("WorkerPhase", this.workerPhase.id());
         output.putString("WorkerReason", this.workerReason);
+        output.putString("WorkerRequiredItem", this.workerRequiredItemId);
         output.putInt("WorkerCooldown", this.workerCooldownTicks);
         output.putLong("LastCommanderCampaignGameTime", this.lastCommanderCampaignGameTime);
         if (this.activeWorkTarget != null) {
@@ -530,6 +581,9 @@ public class GalacticRecruitEntity extends TamableAnimal
                 .orElseGet(() -> CourierRouteExecutionState.start(0L));
         this.workerPhase = WorkerPhase.byId(input.getStringOr("WorkerPhase", WorkerPhase.ACQUIRE_ORDER.id()));
         this.workerReason = input.getStringOr("WorkerReason", "ready");
+        this.workerRequiredItemId = input.getStringOr("WorkerRequiredItem", "")
+                .trim()
+                .toLowerCase(java.util.Locale.ROOT);
         this.workerCooldownTicks = Math.max(0, input.getIntOr("WorkerCooldown", 0));
         this.lastCommanderCampaignGameTime = Math.max(0L, input.getLongOr("LastCommanderCampaignGameTime", 0L));
         if (input.getInt("ActiveWorkTargetX").isPresent()
@@ -540,6 +594,21 @@ public class GalacticRecruitEntity extends TamableAnimal
                     input.getIntOr("ActiveWorkTargetY", this.blockPosition().getY()),
                     input.getIntOr("ActiveWorkTargetZ", this.blockPosition().getZ()));
         }
+        this.legacyWorkerExecutionCursor = true;
+        input.read("WorkerExecutionState", WorkforceCodecs.WORKER_EXECUTION_STATE)
+                .ifPresent(state -> {
+                    this.legacyWorkerExecutionCursor = false;
+                    this.workerExecutionState = state;
+                    this.workerPhase = state.phase();
+                    this.workerReason = state.reasonCode();
+                    this.workerNavigationFailures = state.retryCount();
+                    this.workOrderId = state.workOrderId().orElse(this.workOrderId);
+                    this.activeWorkTarget = state.target()
+                            .filter(target -> target.dimensionId().equals(
+                                    this.level().dimension().identifier().toString()))
+                            .map(target -> new BlockPos(target.x(), target.y(), target.z()))
+                            .orElse(null);
+                });
         this.blacklistedWorkTargetTicks = Math.max(0, input.getIntOr("BlacklistedWorkTargetTicks", 0));
         if (this.blacklistedWorkTargetTicks > 0
                 && input.getInt("BlacklistedWorkTargetX").isPresent()
@@ -747,6 +816,7 @@ public class GalacticRecruitEntity extends TamableAnimal
     @Override
     public void die(DamageSource damageSource) {
         if (!this.deathResourcesReleased && this.level() instanceof ServerLevel serverLevel) {
+            this.releaseCurrentWorkOrder(false);
             if (damageSource.getEntity() instanceof ServerPlayer attacker) {
                 FactionReputationService.recordNaturalNpcKill(serverLevel, this, attacker);
             }
@@ -780,6 +850,9 @@ public class GalacticRecruitEntity extends TamableAnimal
 
     @Override
     public void onRemoval(Entity.RemovalReason reason) {
+        if (reason.shouldDestroy() && !this.deathResourcesReleased) {
+            this.releaseCurrentWorkOrder(false);
+        }
         if (reason.shouldDestroy() && this.factionOutpostId != null
                 && this.level() instanceof ServerLevel serverLevel) {
             FactionOutpostSavedData.get(serverLevel).removeNpc(this.getUUID(), serverLevel.getGameTime());
@@ -1304,6 +1377,293 @@ public class GalacticRecruitEntity extends TamableAnimal
                 this.unpaidTicks);
     }
 
+    public boolean shouldUseRecruitSelfCare() {
+        RecruitmentAction command = this.getRecruitCommand();
+        return this.isTame()
+                && this.getRecruitVitals().isExhausted()
+                && this.getTarget() == null
+                && this.hurtTime == 0
+                && !this.isOrderedToSit()
+                && !this.hazardAvoidanceActive
+                && !this.hasAuthoritativeArmyGroup()
+                && command != RecruitmentAction.MOVE_TO_POSITION
+                && command != RecruitmentAction.PROTECT_OWNER
+                && command != RecruitmentAction.ATTACK_TARGET
+                && command != RecruitmentAction.PATROL_ROUTE;
+    }
+
+    public void performRecruitSelfCare() {
+        if (!this.shouldUseRecruitSelfCare()
+                || !(this.level() instanceof ServerLevel serverLevel)) {
+            return;
+        }
+        for (ItemStack stack : this.workerInventory) {
+            FoodProperties food = stack.get(DataComponents.FOOD);
+            if (stack.isEmpty() || food == null) {
+                continue;
+            }
+            this.hunger = clampVital(this.hunger + food.nutrition() * 4);
+            stack.shrink(1);
+            this.syncRecruitStatusState();
+            return;
+        }
+        this.requestRecruitFoodSupply(serverLevel);
+    }
+
+    public Optional<ItemEntity> nearbyRecruitPickupTarget() {
+        if (!(this.level() instanceof ServerLevel level)
+                || !this.canStartRecruitItemPickup()) {
+            return Optional.empty();
+        }
+        return level.getEntitiesOfClass(
+                        ItemEntity.class,
+                        this.getBoundingBox().inflate(6.0D),
+                        this::canCollectRecruitItem)
+                .stream()
+                .min(java.util.Comparator
+                        .comparingDouble(
+                                (ItemEntity candidate) -> this.distanceToSqr(candidate))
+                        .thenComparingInt(Entity::getId));
+    }
+
+    private boolean canStartRecruitItemPickup() {
+        RecruitmentAction command = this.getRecruitCommand();
+        return this.isTame()
+                && this.getTarget() == null
+                && this.hurtTime == 0
+                && !this.isOrderedToSit()
+                && !this.hazardAvoidanceActive
+                && !this.hasAuthoritativeArmyGroup()
+                && this.getRecruitDuty() != RecruitDuty.WORKER
+                && command != RecruitmentAction.HOLD_POSITION
+                && command != RecruitmentAction.MOVE_TO_POSITION
+                && command != RecruitmentAction.WORK_AT_SITE
+                && command != RecruitmentAction.PROTECT_OWNER
+                && command != RecruitmentAction.ATTACK_TARGET
+                && command != RecruitmentAction.PATROL_ROUTE;
+    }
+
+    public boolean canCollectRecruitItem(ItemEntity itemEntity) {
+        if (!this.canStartRecruitItemPickup()
+                || itemEntity == null
+                || !itemEntity.isAlive()
+                || itemEntity.hasPickUpDelay()
+                || itemEntity.getItem().isEmpty()
+                || !this.isInsideSettlementClaim(itemEntity.blockPosition())) {
+            return false;
+        }
+        Entity itemOwner = itemEntity.getOwner();
+        if (itemOwner != null
+                && itemOwner != this
+                && (this.getOwnerReference() == null
+                        || !itemOwner.getUUID().equals(
+                                this.getOwnerReference().getUUID()))) {
+            return false;
+        }
+        NonNullList<ItemStack> simulated = this.copyWorkerInventory();
+        return mergeAll(simulated, List.of(itemEntity.getItem().copy()));
+    }
+
+    public boolean collectRecruitItem(ItemEntity itemEntity) {
+        if (!this.canCollectRecruitItem(itemEntity)
+                || this.distanceToSqr(itemEntity) > 2.25D) {
+            return false;
+        }
+        ItemStack collected = itemEntity.getItem().copy();
+        NonNullList<ItemStack> nextInventory = this.copyWorkerInventory();
+        if (!mergeAll(nextInventory, List.of(collected))) {
+            return false;
+        }
+        this.workerInventory = nextInventory;
+        this.take(itemEntity, collected.getCount());
+        itemEntity.discard();
+        this.level().playSound(
+                null,
+                this.blockPosition(),
+                SoundEvents.ITEM_PICKUP,
+                SoundSource.NEUTRAL,
+                0.2F,
+                1.0F + this.getRandom().nextFloat());
+        this.syncRecruitStatusState();
+        return true;
+    }
+
+    public boolean isInRecruitHazard() {
+        BlockPos feet = this.blockPosition();
+        return this.isOnFire()
+                || this.isInLava()
+                || isDangerousRecruitBlock(this.level().getBlockState(feet))
+                || isDangerousRecruitBlock(this.level().getBlockState(feet.below()))
+                || this.level().getFluidState(feet).is(FluidTags.LAVA);
+    }
+
+    public Optional<BlockPos> findRecruitHazardEscapeTarget() {
+        if (!this.isInRecruitHazard()) {
+            return Optional.empty();
+        }
+        BlockPos origin = this.blockPosition();
+        ArrayList<BlockPos> candidates = new ArrayList<>();
+        for (int radius = 1; radius <= 6; radius++) {
+            for (int x = -radius; x <= radius; x++) {
+                for (int z = -radius; z <= radius; z++) {
+                    if (Math.max(Math.abs(x), Math.abs(z)) != radius) {
+                        continue;
+                    }
+                    for (int y = -1; y <= 2; y++) {
+                        BlockPos candidate = origin.offset(x, y, z);
+                        if (this.isSafeRecruitStandPosition(candidate)) {
+                            candidates.add(candidate.immutable());
+                        }
+                    }
+                }
+            }
+            if (!candidates.isEmpty()) {
+                break;
+            }
+        }
+        return candidates.stream()
+                .min(java.util.Comparator
+                        .comparingDouble((BlockPos pos) -> pos.distSqr(origin))
+                        .thenComparingLong(BlockPos::asLong));
+    }
+
+    public boolean isHazardAvoidanceActive() {
+        return this.hazardAvoidanceActive;
+    }
+
+    public void setHazardAvoidanceActive(boolean active) {
+        this.hazardAvoidanceActive = active;
+        if (active) {
+            this.pauseWorkerNavigation();
+        }
+    }
+
+    private boolean isSafeRecruitStandPosition(BlockPos pos) {
+        return this.level().isLoaded(pos)
+                && !isDangerousRecruitBlock(this.level().getBlockState(pos))
+                && !isDangerousRecruitBlock(this.level().getBlockState(pos.below()))
+                && this.level().getFluidState(pos).isEmpty()
+                && this.level().getBlockState(pos).getCollisionShape(
+                        this.level(), pos).isEmpty()
+                && this.level().getBlockState(pos.above()).getCollisionShape(
+                        this.level(), pos.above()).isEmpty()
+                && this.level().getBlockState(pos.below()).isFaceSturdy(
+                        this.level(), pos.below(), Direction.UP);
+    }
+
+    private static boolean isDangerousRecruitBlock(BlockState state) {
+        return state.is(Blocks.FIRE)
+                || state.is(Blocks.SOUL_FIRE)
+                || state.is(Blocks.LAVA)
+                || state.is(Blocks.CACTUS)
+                || state.is(Blocks.MAGMA_BLOCK)
+                || (state.is(Blocks.CAMPFIRE) && state.getValue(CampfireBlock.LIT))
+                || (state.is(Blocks.SOUL_CAMPFIRE) && state.getValue(CampfireBlock.LIT))
+                || state.is(Blocks.SWEET_BERRY_BUSH)
+                || state.is(Blocks.POWDER_SNOW);
+    }
+
+    public Optional<String> recruitStatusAlertCode() {
+        RecruitVitals vitals = this.getRecruitVitals();
+        if (vitals.isCriticalHealth()) {
+            return Optional.of("health_critical");
+        }
+        if (vitals.isBrokenMorale()) {
+            return Optional.of("morale_broken");
+        }
+        if (this.getRecruitDuty() == RecruitDuty.WORKER
+                && (this.workerPhase == WorkerPhase.BLOCKED
+                        || this.workerPhase == WorkerPhase.PAUSED)
+                && !this.workerReason.equals("ready")) {
+            return Optional.of("worker/" + this.workerReason);
+        }
+        return Optional.empty();
+    }
+
+    public boolean sendRecruitStatusAlert(String code) {
+        if (!(this.level() instanceof ServerLevel level)
+                || this.getOwnerReference() == null
+                || code == null
+                || code.isBlank()) {
+            return false;
+        }
+        ServerPlayer owner = level.getServer().getPlayerList().getPlayer(
+                this.getOwnerReference().getUUID());
+        if (owner == null) {
+            return false;
+        }
+        Component detail = code.startsWith("worker/")
+                ? Component.translatable(
+                        "reason.galacticwars.operations." + code.substring(7))
+                : Component.translatable(
+                        "message.galacticwars.recruit.status_alert." + code);
+        owner.sendSystemMessage(Component.translatable(
+                "message.galacticwars.recruit.status_alert",
+                this.getDisplayName(),
+                detail));
+        return true;
+    }
+
+    public boolean canInteractWithRecruitDoor(BlockPos pos) {
+        return this.isTame()
+                && this.level().isLoaded(pos)
+                && this.isInsideSettlementClaim(pos);
+    }
+
+    private boolean requestRecruitFoodSupply(ServerLevel level) {
+        if (this.getOwnerReference() == null) {
+            return false;
+        }
+        KingdomSavedData data = KingdomSavedData.get(level);
+        KingdomRecord kingdom = data.kingdomForRecruit(this.getUUID()).orElse(null);
+        galacticwars.clonewars.kingdom.SettlementRecord settlement = kingdom == null
+                ? null
+                : kingdom.settlements().stream()
+                        .filter(candidate -> candidate.containsRecruit(this.getUUID()))
+                        .findFirst()
+                        .orElse(null);
+        if (kingdom == null || settlement == null) {
+            return false;
+        }
+        Item foodItem = data.registeredStorageEndpoints(kingdom.ownerId()).stream()
+                .filter(endpoint -> endpoint.dimensionId().equals(
+                        level.dimension().identifier().toString()))
+                .map(endpoint -> new BlockPos(endpoint.x(), endpoint.y(), endpoint.z()))
+                .map(this::findContainer)
+                .flatMap(Optional::stream)
+                .flatMap(container -> {
+                    ArrayList<ItemStack> stacks = new ArrayList<>();
+                    for (int slot = 0; slot < container.getContainerSize(); slot++) {
+                        stacks.add(container.getItem(slot));
+                    }
+                    return stacks.stream();
+                })
+                .filter(stack -> !stack.isEmpty() && stack.get(DataComponents.FOOD) != null)
+                .map(ItemStack::getItem)
+                .findFirst()
+                .orElse(null);
+        if (foodItem == null) {
+            return false;
+        }
+        String itemId = BuiltInRegistries.ITEM.getKey(foodItem).toString();
+        long demandEpoch = level.getGameTime() / 1200L;
+        String sourceId = "recruit/" + this.getUUID() + "/" + demandEpoch;
+        UUID demandId = UUID.nameUUIDFromBytes(
+                (settlement.id() + ":" + sourceId + ":" + itemId)
+                        .getBytes(StandardCharsets.UTF_8));
+        return data.requestSupply(
+                kingdom.ownerId(),
+                settlement.id(),
+                new SupplyDemand(
+                        demandId,
+                        SupplyCategory.FOOD,
+                        itemId,
+                        1,
+                        0,
+                        90,
+                        sourceId));
+    }
+
     public ClassProgressState classProgressState() {
         return this.classProgressState;
     }
@@ -1399,27 +1759,58 @@ public class GalacticRecruitEntity extends TamableAnimal
     }
 
     public Optional<WorkerAssignment> getWorkerAssignment() {
-        if (this.workTarget == null || this.getWorkerProfession().isEmpty()) {
+        if (this.workTarget == null
+                || this.getWorkerProfession().isEmpty()
+                || !(this.level() instanceof ServerLevel serverLevel)
+                || this.getOwnerReference() == null) {
+            return Optional.empty();
+        }
+        WorksiteRecord worksite = KingdomSavedData.get(serverLevel)
+                .assignedWorksite(this.getOwnerReference().getUUID(), this.getUUID())
+                .orElse(null);
+        if (worksite == null) {
             return Optional.empty();
         }
         return Optional.of(new WorkerAssignment(
+                worksite.id(),
                 this.getWorkerProfession().orElseThrow(),
-                this.level().dimension().identifier().toString(),
-                this.workTarget.getX(),
-                this.workTarget.getY(),
-                this.workTarget.getZ(),
-                this.workRadius,
+                worksite.dimensionId(),
+                worksite.x(),
+                worksite.y(),
+                worksite.z(),
+                worksite.radius(),
+                worksite.configuration().revision(),
                 Optional.ofNullable(this.workOrderId)));
     }
 
     public WorkerStatus getWorkerStatus() {
-        Optional<WorkerStatus.Target> target = Optional.ofNullable(this.activeWorkTarget)
-                .map(pos -> new WorkerStatus.Target(
+        Optional<WorkerTarget> target = Optional.ofNullable(this.activeWorkTarget)
+                .map(pos -> new WorkerTarget(
                         this.level().dimension().identifier().toString(),
                         pos.getX(),
                         pos.getY(),
                         pos.getZ()));
-        return new WorkerStatus(this.workerPhase, this.workerReason, target);
+        WorksiteRecord worksite = null;
+        WorkOrder workOrder = null;
+        if (this.level() instanceof ServerLevel serverLevel && this.getOwnerReference() != null) {
+            KingdomSavedData data = KingdomSavedData.get(serverLevel);
+            UUID ownerId = this.getOwnerReference().getUUID();
+            worksite = data.assignedWorksite(ownerId, this.getUUID()).orElse(null);
+            workOrder = this.workOrderId == null
+                    ? null
+                    : data.workOrder(ownerId, this.workOrderId).orElse(null);
+        }
+        return new WorkerStatus(
+                this.workerPhase,
+                this.workerReason,
+                target,
+                worksite == null ? this.workerExecutionState.worksiteId() : Optional.of(worksite.id()),
+                workOrder == null ? Optional.ofNullable(this.workOrderId) : Optional.of(workOrder.id()),
+                workOrder == null ? 0 : workOrder.completedQuantity(),
+                workOrder == null ? 0 : workOrder.quantity(),
+                workOrder != null && !workOrder.resourceId().isBlank()
+                        ? workOrder.resourceId()
+                        : this.workerRequiredItemId);
     }
 
     public int getWorkerCarriedItemCount() {
@@ -1495,6 +1886,21 @@ public class GalacticRecruitEntity extends TamableAnimal
 
     public @Nullable BlockPos getStorageTarget() {
         return this.storageTarget;
+    }
+
+    public boolean configureWorkerStorageFromMenu(ServerPlayer actor, BlockPos target) {
+        Objects.requireNonNull(actor, "actor");
+        Objects.requireNonNull(target, "target");
+        if (!this.canPlayerManageWorksites(actor)
+                || !this.canPlayerManageLogistics(actor)
+                || !this.isRegisteredStorageTarget(target)
+                || this.findContainer(target).isEmpty()) {
+            return false;
+        }
+        this.releaseCurrentWorkOrder(false);
+        this.setStorageTarget(target.immutable());
+        this.transitionWorker(WorkerPhase.ACQUIRE_ORDER, "storage_assigned", null);
+        return true;
     }
 
     public @Nullable BlockPos getBaseTarget() {
@@ -1616,6 +2022,15 @@ public class GalacticRecruitEntity extends TamableAnimal
                     yield false;
                 }
                 MenuRegistry.openExtendedMenu(player, new RecruitLoadoutMenuProvider(this));
+                yield true;
+            }
+            case OPEN_WORKSITE_CONFIGURATION -> {
+                if (!this.canPlayerManageWorksites(player)
+                        || this.getWorkerAssignment().isEmpty()) {
+                    yield false;
+                }
+                MenuRegistry.openExtendedMenu(
+                        player, new WorksiteConfigurationMenuProvider(this));
                 yield true;
             }
             case FOLLOW -> {
@@ -1793,6 +2208,7 @@ public class GalacticRecruitEntity extends TamableAnimal
     public boolean shouldMoveToCommandTarget() {
         return this.isTame()
                 && !this.hasAuthoritativeArmyGroup()
+                && !this.hazardAvoidanceActive
                 && this.getRecruitCommand() == RecruitmentAction.MOVE_TO_POSITION
                 && this.moveTarget != null
                 && this.distanceToMoveTargetSqr() > 4.0;
@@ -1813,6 +2229,7 @@ public class GalacticRecruitEntity extends TamableAnimal
         return this.isTame()
                 && !this.hasAuthoritativeArmyGroup()
                 && !this.isOrderedToSit()
+                && !this.hazardAvoidanceActive
                 && (command == RecruitmentAction.FOLLOW_OWNER || command == RecruitmentAction.PROTECT_OWNER)
                 && this.getRecruitOwner().isPresent();
     }
@@ -1984,6 +2401,7 @@ public class GalacticRecruitEntity extends TamableAnimal
     }
 
     private void clearWorkerProfession(@Nullable UUID actorId) {
+        this.releaseCurrentWorkOrder(false);
         if (this.level() instanceof ServerLevel serverLevel && actorId != null) {
             KingdomSavedData data = KingdomSavedData.get(serverLevel);
             data.releaseWorkerAssignments(actorId, this.getUUID());
@@ -2085,6 +2503,7 @@ public class GalacticRecruitEntity extends TamableAnimal
         return this.isTame()
                 && this.getRecruitDuty() == RecruitDuty.WORKER
                 && this.getRecruitCommand() == RecruitmentAction.WORK_AT_SITE
+                && !this.hazardAvoidanceActive
                 && this.getWorkerProfession().filter(WorkerProfessionCatalog::isEnabled).isPresent()
                 && this.workTarget != null
                 && this.hasAuthoritativeWorkerAssignment()
@@ -2223,6 +2642,8 @@ public class GalacticRecruitEntity extends TamableAnimal
         }
         String dimensionId = serverLevel.dimension().identifier().toString();
         if (worksite == null || !worksite.dimensionId().equals(dimensionId)) {
+            this.releaseCurrentWorkOrder(false);
+            this.pauseWorkerNavigation();
             if (!this.workerReason.equals("worksite_capacity_unavailable")) {
                 this.blockWorker("worksite_capacity_unavailable");
             }
@@ -2232,6 +2653,13 @@ public class GalacticRecruitEntity extends TamableAnimal
         this.setWorkRadius(worksite.radius());
         BlockPos worksiteCenter = new BlockPos(worksite.x(), worksite.y(), worksite.z());
         List<BlockPos> availableStorage = this.availableRegisteredStorage(serverLevel, data, ownerId);
+        BlockPos configuredStorage = worksite.storageEndpoints().stream()
+                .filter(endpoint -> endpoint.dimensionId().equals(dimensionId))
+                .map(endpoint -> new BlockPos(endpoint.x(), endpoint.y(), endpoint.z()))
+                .filter(serverLevel::isLoaded)
+                .filter(pos -> this.findContainer(pos).isPresent())
+                .findFirst()
+                .orElse(null);
         if (profession == WorkerProfession.COURIER) {
             WorksiteRecord authoritativeWorksite = worksite;
             BlockPos destination = authoritativeWorksite.type().equals("frontier")
@@ -2251,7 +2679,9 @@ public class GalacticRecruitEntity extends TamableAnimal
             this.setWorkTarget(destination == null ? worksiteCenter : destination);
         } else {
             this.setWorkTarget(worksiteCenter);
-            if (this.storageTarget == null
+            if (configuredStorage != null) {
+                this.setStorageTarget(configuredStorage);
+            } else if (this.storageTarget == null
                     || !this.isRegisteredStorageTarget(this.storageTarget)
                     || this.findContainer(this.storageTarget).isEmpty()) {
                 this.setStorageTarget(availableStorage.isEmpty() ? null : availableStorage.getFirst());
@@ -2402,44 +2832,287 @@ public class GalacticRecruitEntity extends TamableAnimal
     }
 
     public void tickWorkerController() {
-        if (!this.shouldRunWorkerCycle() || !(this.level() instanceof ServerLevel serverLevel)) {
-            return;
-        }
-        if (this.getTarget() != null || this.hurtTime > 0) {
-            this.workerCooldownTicks = 40;
-            this.transitionWorker(WorkerPhase.COOLDOWN, "combat_interrupted", null);
-            this.pauseWorkerNavigation();
-            return;
+        WorkerRuntimeController.tick(this);
+    }
+
+    @Override
+    public boolean workerRuntimeAvailable() {
+        return this.shouldRunWorkerCycle() && this.level() instanceof ServerLevel;
+    }
+
+    @Override
+    public boolean reconcileWorkerRuntimeAuthority() {
+        if (!(this.level() instanceof ServerLevel serverLevel)
+                || this.getOwnerReference() == null) {
+            return false;
         }
         if (this.getWorkerProfession().filter(WorkerProfession.TECHNICIAN::equals).isPresent()) {
-            this.tickTechnologyResearch(serverLevel);
-            return;
+            return true;
         }
-        if (this.workerPhase == WorkerPhase.FIND_TARGET
-                && Math.floorMod(this.getUUID().hashCode(), 4) != Math.floorMod(this.tickCount, 4)) {
-            return;
+
+        UUID ownerId = this.getOwnerReference().getUUID();
+        WorksiteRecord worksite = KingdomSavedData.get(serverLevel)
+                .assignedWorksite(ownerId, this.getUUID())
+                .filter(candidate -> this.getWorkerProfession()
+                        .filter(candidate::accepts)
+                        .isPresent())
+                .orElse(null);
+        if (worksite == null) {
+            this.releaseCurrentWorkOrder(false);
+            this.pauseWorkerNavigation();
+            this.workerExecutionState = WorkerExecutionState.initial();
+            this.transitionWorker(WorkerPhase.BLOCKED, "permission_revoked", null);
+            return false;
         }
+
+        Optional<UUID> cursorWorksiteId = this.workerExecutionState.worksiteId();
+        boolean legacyCursor = this.legacyWorkerExecutionCursor
+                && cursorWorksiteId.isEmpty()
+                && (this.workerPhase != WorkerPhase.ACQUIRE_ORDER
+                        || this.activeWorkTarget != null
+                        || this.workOrderId != null);
+        boolean changedAuthority = cursorWorksiteId
+                .filter(worksite.id()::equals)
+                .isEmpty() && cursorWorksiteId.isPresent();
+        boolean changedConfiguration = cursorWorksiteId.isPresent()
+                && this.workerExecutionState.configurationRevision()
+                        != worksite.configuration().revision();
+        if (legacyCursor || changedAuthority || changedConfiguration) {
+            this.releaseCurrentWorkOrder(false);
+            this.pauseWorkerNavigation();
+            this.workerNavigationFailures = 0;
+            this.workerCooldownTicks = 0;
+            this.workerExecutionState = new WorkerExecutionState(
+                    Optional.of(worksite.id()),
+                    Optional.empty(),
+                    WorkerPhase.ACQUIRE_ORDER,
+                    Optional.empty(),
+                    worksite.configuration().revision(),
+                    0,
+                    0L,
+                    Optional.empty(),
+                    changedConfiguration
+                            ? "configuration_changed"
+                            : "execution_cursor_restarted");
+            this.legacyWorkerExecutionCursor = false;
+            this.transitionWorker(
+                    WorkerPhase.ACQUIRE_ORDER,
+                    changedConfiguration
+                            ? "configuration_changed"
+                            : "execution_cursor_restarted",
+                    null);
+            return false;
+        }
+
+        if (cursorWorksiteId.isEmpty()) {
+            this.workerExecutionState = new WorkerExecutionState(
+                    Optional.of(worksite.id()),
+                    Optional.ofNullable(this.workOrderId),
+                    this.workerPhase,
+                    this.workerExecutionState.target(),
+                    worksite.configuration().revision(),
+                    this.workerNavigationFailures,
+                    this.workerExecutionState.retryAtGameTime(),
+                    this.workerExecutionState.supplyReservationId(),
+                    this.workerReason);
+            this.legacyWorkerExecutionCursor = false;
+        }
+        return true;
+    }
+
+    @Override
+    public boolean workerRuntimeInterrupted() {
+        return this.getTarget() != null || this.hurtTime > 0;
+    }
+
+    @Override
+    public void interruptWorkerRuntime() {
+        this.workerCooldownTicks = 40;
+        this.transitionWorker(WorkerPhase.COOLDOWN, "combat_interrupted", null);
+        this.pauseWorkerNavigation();
+    }
+
+    @Override
+    public boolean tickSpecializedWorkerRuntime() {
+        if (this.getWorkerProfession().filter(WorkerProfession.TECHNICIAN::equals).isEmpty()
+                || !(this.level() instanceof ServerLevel serverLevel)) {
+            return false;
+        }
+        this.tickTechnologyResearch(serverLevel);
+        return true;
+    }
+
+    @Override
+    public boolean throttleWorkerTargetScan() {
+        return Math.floorMod(this.getUUID().hashCode(), 4)
+                != Math.floorMod(this.tickCount, 4);
+    }
+
+    @Override
+    public void ageWorkerTargetBlacklist() {
         if (this.blacklistedWorkTargetTicks > 0 && --this.blacklistedWorkTargetTicks == 0) {
             this.blacklistedWorkTarget = null;
         }
+    }
 
-        switch (this.workerPhase) {
-            case ACQUIRE_ORDER -> this.tickAcquireOrder();
-            case FIND_TARGET -> this.tickFindTarget();
-            case NAVIGATE_SOURCE -> this.tickWorkerNavigation(WorkerPhase.INTERACT);
-            case INTERACT -> this.tickWorkerInteraction(serverLevel);
-            case COLLECT -> this.transitionAfterCollection();
-            case NAVIGATE_STORAGE -> this.tickWorkerNavigation(WorkerPhase.DEPOSIT);
-            case DEPOSIT -> this.tickWorkerDeposit();
-            case COOLDOWN, BLOCKED -> {
-                if (this.workerCooldownTicks > 0) {
-                    this.workerCooldownTicks--;
-                } else {
-                    this.transitionWorker(WorkerPhase.ACQUIRE_ORDER, "ready", null);
-                }
-            }
-            case PAUSED -> this.pauseWorkerNavigation();
+    @Override
+    public WorkerPhase workerRuntimePhase() {
+        return this.workerPhase;
+    }
+
+    @Override
+    public void acquireWorkerOrder() {
+        this.tickAcquireOrder();
+    }
+
+    @Override
+    public void findWorkerTarget() {
+        this.tickFindTarget();
+    }
+
+    @Override
+    public void navigateWorkerToInteraction() {
+        if (this.workerReason.equals("automatic_supply_deliver")) {
+            this.automaticSupplyContext().map(AutomaticSupplyContext::requester)
+                    .filter(Entity::isAlive)
+                    .ifPresent(requester -> {
+                        BlockPos currentTarget = requester.blockPosition();
+                        if (!currentTarget.equals(this.activeWorkTarget)) {
+                            this.transitionWorker(
+                                    WorkerPhase.NAVIGATE_SOURCE,
+                                    "automatic_supply_deliver",
+                                    currentTarget);
+                        }
+                    });
         }
+        this.tickWorkerNavigation(WorkerPhase.INTERACT);
+    }
+
+    @Override
+    public void interactWithWorkerTarget() {
+        WorkerRuntimeContext context = this.workerRuntimeContext().orElse(null);
+        WorkerProfessionBehavior behavior = context == null
+                ? null
+                : WorkerProfessionBehaviors.behavior(context.profession()).orElse(null);
+        if (context == null || behavior == null) {
+            this.blockWorker("unknown_worker_action");
+            return;
+        }
+        WorkerAction action = behavior.plan(context);
+        WorkerActionResult result = behavior.execute(context, action);
+        this.applyWorkerActionResult(result);
+    }
+
+    private Optional<WorkerRuntimeContext> workerRuntimeContext() {
+        if (!(this.level() instanceof ServerLevel serverLevel)
+                || this.getOwnerReference() == null) {
+            return Optional.empty();
+        }
+        WorkerProfession profession = this.getWorkerProfession().orElse(null);
+        WorksiteRecord worksite = this.authoritativeWorksite().orElse(null);
+        if (profession == null || worksite == null) {
+            return Optional.empty();
+        }
+        KingdomSavedData data = KingdomSavedData.get(serverLevel);
+        WorkOrder order = this.workOrderId == null
+                ? null
+                : data.workOrder(
+                        this.getOwnerReference().getUUID(),
+                        this.workOrderId).orElse(null);
+        return Optional.of(new WorkerRuntimeContext(
+                this.getUUID(),
+                profession,
+                worksite,
+                Optional.ofNullable(order),
+                this.workerExecutionSnapshot(),
+                this,
+                serverLevel.getGameTime()));
+    }
+
+    @Override
+    public WorkerActionResult executeAtomicWorkerAction(
+            WorkerProfession profession,
+            WorkerAction action
+    ) {
+        if (!(this.level() instanceof ServerLevel serverLevel)
+                || this.getWorkerProfession().filter(profession::equals).isEmpty()
+                || this.workerPhase != WorkerPhase.INTERACT
+                || action.target().filter(this::matchesActiveWorkerTarget).isEmpty()) {
+            return WorkerActionResult.unchanged(
+                    this.workerExecutionSnapshot().transition(
+                            WorkerPhase.BLOCKED,
+                            "permission_revoked",
+                            Optional.empty()));
+        }
+        int progressBefore = this.getWorkerStatus().completedQuantity();
+        this.tickWorkerInteraction(serverLevel);
+        int progressAfter = this.getWorkerStatus().completedQuantity();
+        return new WorkerActionResult(
+                this.workerExecutionSnapshot(),
+                Optional.empty(),
+                Math.max(0, progressAfter - progressBefore));
+    }
+
+    private boolean matchesActiveWorkerTarget(WorkerTarget target) {
+        return this.activeWorkTarget != null
+                && target.dimensionId().equals(
+                        this.level().dimension().identifier().toString())
+                && target.x() == this.activeWorkTarget.getX()
+                && target.y() == this.activeWorkTarget.getY()
+                && target.z() == this.activeWorkTarget.getZ();
+    }
+
+    private void applyWorkerActionResult(WorkerActionResult result) {
+        WorkerExecutionState state = result.executionState();
+        this.workerExecutionState = state;
+        this.workerPhase = state.phase();
+        this.workerReason = state.reasonCode();
+        this.activeWorkTarget = state.target()
+                .filter(target -> target.dimensionId().equals(
+                        this.level().dimension().identifier().toString()))
+                .map(target -> new BlockPos(target.x(), target.y(), target.z()))
+                .orElse(null);
+        if (state.phase() == WorkerPhase.BLOCKED) {
+            this.workerCooldownTicks = Math.max(this.workerCooldownTicks, 100);
+            this.pauseWorkerNavigation();
+            this.blockCurrentWorkOrder(state.reasonCode());
+        }
+        result.supplyRequest().ifPresent(request -> {
+            net.minecraft.world.item.Item item = resolveItem(request.itemId());
+            if (item != null) {
+                this.requestWorkerSupply(item, request.quantity());
+            }
+        });
+        this.syncRecruitStatusState();
+    }
+
+    @Override
+    public void finishWorkerCollection() {
+        this.transitionAfterCollection();
+    }
+
+    @Override
+    public void navigateWorkerToDeposit() {
+        this.tickWorkerNavigation(WorkerPhase.DEPOSIT);
+    }
+
+    @Override
+    public void depositWorkerInventory() {
+        this.tickWorkerDeposit();
+    }
+
+    @Override
+    public void tickWorkerDelay() {
+        if (this.workerCooldownTicks > 0) {
+            this.workerCooldownTicks--;
+        } else {
+            this.transitionWorker(WorkerPhase.ACQUIRE_ORDER, "ready", null);
+        }
+    }
+
+    @Override
+    public void maintainPausedWorker() {
+        this.pauseWorkerNavigation();
     }
 
     public void pauseWorkerNavigation() {
@@ -2606,7 +3279,8 @@ public class GalacticRecruitEntity extends TamableAnimal
                 && profession != WorkerProfession.BUILDER
                 && profession != WorkerProfession.COURIER
                 && profession != WorkerProfession.ANIMAL_FARMER
-                && profession != WorkerProfession.COOK) {
+                && profession != WorkerProfession.COOK
+                && this.hasCarriedProfessionOutput(profession)) {
             if (this.storageTarget == null
                     || !this.isRegisteredStorageTarget(this.storageTarget)
                     || this.findContainer(this.storageTarget).isEmpty()) {
@@ -2618,25 +3292,36 @@ public class GalacticRecruitEntity extends TamableAnimal
         }
 
         switch (profession) {
-            case FARMER, FISHERMAN, MINER ->
-                    this.transitionWorker(WorkerPhase.FIND_TARGET, "scan_worksite", null);
-            case LUMBERJACK -> {
-                if (!this.workerInventoryContains(Items.OAK_SAPLING)) {
-                    if (this.storageTarget == null || !this.containerContains(this.storageTarget, Items.OAK_SAPLING)) {
-                        this.blockWorker("matching_sapling_required");
-                    } else {
-                        this.transitionWorker(WorkerPhase.NAVIGATE_SOURCE, "withdraw_sapling", this.storageTarget);
-                    }
+            case FARMER -> {
+                net.minecraft.world.item.Item storedSeed = this.availableStoredFarmerSeed();
+                if (this.availableCarriedFarmerSeed() == null && storedSeed != null) {
+                    this.workerRequiredItemId = BuiltInRegistries.ITEM.getKey(storedSeed).toString();
+                    this.transitionWorker(
+                            WorkerPhase.NAVIGATE_SOURCE, "withdraw_farmer_seed", this.storageTarget);
                 } else {
                     this.transitionWorker(WorkerPhase.FIND_TARGET, "scan_worksite", null);
                 }
+            }
+            case FISHERMAN, MINER ->
+                    this.transitionWorker(WorkerPhase.FIND_TARGET, "scan_worksite", null);
+            case LUMBERJACK -> {
+                this.transitionWorker(WorkerPhase.FIND_TARGET, "scan_worksite", null);
             }
             case ANIMAL_FARMER -> this.acquireAnimalFarmerOrder();
             case BUILDER -> this.acquireBuilderOrder();
             case COOK -> this.acquireCookOrder();
             case MERCHANT -> {
-                this.workerCooldownTicks = 100;
-                this.transitionWorker(WorkerPhase.COOLDOWN, "market_open", this.workTarget);
+                if (this.workTarget == null) {
+                    this.blockWorker("worksite_missing");
+                } else if (this.distanceToSqr(Vec3.atCenterOf(this.workTarget)) > 4.0D) {
+                    this.transitionWorker(
+                            WorkerPhase.NAVIGATE_SOURCE,
+                            "open_market",
+                            this.workTarget);
+                } else {
+                    this.workerCooldownTicks = 100;
+                    this.transitionWorker(WorkerPhase.COOLDOWN, "market_open", this.workTarget);
+                }
             }
             case COURIER -> this.acquireCourierOrder();
         }
@@ -2894,6 +3579,7 @@ public class GalacticRecruitEntity extends TamableAnimal
     }
 
     private void releaseCurrentWorkOrder(boolean cancel) {
+        this.releaseActiveSupplyReservation();
         if (this.level() instanceof ServerLevel serverLevel
                 && this.getOwnerReference() != null
                 && this.workOrderId != null) {
@@ -2910,30 +3596,123 @@ public class GalacticRecruitEntity extends TamableAnimal
         this.workOrderId = null;
     }
 
+    private boolean hasCarriedProfessionOutput(WorkerProfession profession) {
+        return this.workerInventory.stream()
+                .filter(stack -> !stack.isEmpty())
+                .anyMatch(stack -> !this.isProfessionInput(profession, stack));
+    }
+
+    private boolean isProfessionInput(
+            WorkerProfession profession,
+            ItemStack stack
+    ) {
+        return switch (profession) {
+            case FARMER -> configuredFarmerSeeds(this.authoritativeWorksite()
+                            .map(WorksiteRecord::configuration)
+                            .orElseGet(() -> WorkAreaConfiguration.defaults(
+                                    this.workRadius)))
+                    .contains(stack.getItem());
+            case LUMBERJACK -> stack.is(ItemTags.SAPLINGS);
+            case MINER -> stack.is(Items.COBBLESTONE) || stack.is(Items.TORCH);
+            default -> false;
+        };
+    }
+
+    private boolean releaseActiveSupplyReservation() {
+        UUID reservationId = this.workerExecutionState.supplyReservationId().orElse(null);
+        if (reservationId == null
+                || !(this.level() instanceof ServerLevel serverLevel)
+                || this.getOwnerReference() == null) {
+            if (reservationId != null) {
+                this.workerExecutionState =
+                        this.workerExecutionState.withSupplyReservation(Optional.empty());
+            }
+            return reservationId == null;
+        }
+        KingdomSavedData data = KingdomSavedData.get(serverLevel);
+        KingdomRecord kingdom = data.kingdomForRecruit(this.getUUID()).orElse(null);
+        boolean released = false;
+        if (kingdom != null) {
+            for (galacticwars.clonewars.kingdom.SettlementRecord settlement
+                    : kingdom.settlements()) {
+                boolean ownsReservation = data.supplyLedger(settlement.id())
+                        .flatMap(ledger -> ledger.reservation(reservationId))
+                        .filter(reservation -> reservation.workerId().equals(this.getUUID()))
+                        .isPresent();
+                if (ownsReservation) {
+                    released = data.releaseSupply(
+                            kingdom.ownerId(),
+                            settlement.id(),
+                            reservationId,
+                            this.getUUID());
+                    break;
+                }
+            }
+        }
+        this.workerExecutionState =
+                this.workerExecutionState.withSupplyReservation(Optional.empty());
+        return released;
+    }
+
     private void tickFindTarget() {
-        if (this.workTarget == null) {
-            this.blockWorker("worksite_missing");
+        WorksiteRecord worksite = this.authoritativeWorksite().orElse(null);
+        if (worksite == null || this.workTarget == null) {
+            this.blockWorker("permission_revoked");
             return;
         }
+        String dimensionId = this.level().dimension().identifier().toString();
+        if (!worksite.dimensionId().equals(dimensionId)) {
+            this.blockWorker("worksite_wrong_dimension");
+            return;
+        }
+        BlockPos authoritativeCenter = new BlockPos(worksite.x(), worksite.y(), worksite.z());
+        if (!authoritativeCenter.equals(this.workTarget)) {
+            this.setWorkTarget(authoritativeCenter);
+        }
         WorkerProfession profession = this.getWorkerProfession().orElseThrow();
-        int radius = this.worksiteScanRadius();
-        int side = radius * 2 + 1;
-        int layers = 5;
-        int totalPositions = side * side * layers;
+        WorkAreaConfiguration configuration = worksite.configuration();
+        int width = configuration.bounds().width();
+        int height = configuration.bounds().height();
+        int depth = configuration.bounds().depth();
+        int totalPositions = width * height * depth;
         int scanBudget = Math.min(128, totalPositions);
 
         for (int checked = 0; checked < scanBudget; checked++) {
             int index = this.workerScanCursor;
             this.workerScanCursor = (this.workerScanCursor + 1) % totalPositions;
-            int xOffset = index % side - radius;
-            int zOffset = index / side % side - radius;
-            int yOffset = index / (side * side) - 1;
+            int xOffset = index % width - (width - 1) / 2;
+            int zOffset = index / width % depth - (depth - 1) / 2;
+            int yOffset = index / (width * depth) - (height - 1) / 2;
             BlockPos candidate = this.workTarget.offset(xOffset, yOffset, zOffset);
             if (candidate.equals(this.blacklistedWorkTarget)) {
                 continue;
             }
             BlockState state = this.level().getBlockState(candidate);
-            if (this.isWorkerTarget(profession, state)) {
+            if (this.isWorkerTarget(profession, candidate, state, worksite)) {
+                if (profession == WorkerProfession.LUMBERJACK) {
+                    net.minecraft.world.item.Item matchingSapling = matchingSaplingForLog(state);
+                    if (matchingSapling == null) {
+                        this.blacklistedWorkTarget = candidate.immutable();
+                        this.blacklistedWorkTargetTicks = 600;
+                        continue;
+                    }
+                    if (!this.workerInventoryContains(matchingSapling)) {
+                        this.workerRequiredItemId =
+                                BuiltInRegistries.ITEM.getKey(matchingSapling).toString();
+                        if (this.storageTarget != null
+                                && this.containerContains(this.storageTarget, matchingSapling)) {
+                            this.workerScanCursor = 0;
+                            this.transitionWorker(
+                                    WorkerPhase.NAVIGATE_SOURCE,
+                                    "withdraw_matching_sapling",
+                                    this.storageTarget);
+                        } else {
+                            this.requestWorkerSupply(matchingSapling, 1);
+                            this.blockWorker("matching_sapling_required");
+                        }
+                        return;
+                    }
+                }
                 this.workerScanCursor = 0;
                 this.transitionWorker(WorkerPhase.NAVIGATE_SOURCE, "navigate_work_target", candidate.immutable());
                 return;
@@ -2993,11 +3772,14 @@ public class GalacticRecruitEntity extends TamableAnimal
             return;
         }
         switch (this.workerReason) {
-            case "withdraw_sapling" -> {
-                if (this.withdrawSpecificItem(this.activeWorkTarget, Items.OAK_SAPLING, 1)) {
+            case "withdraw_matching_sapling", "withdraw_farmer_seed" -> {
+                net.minecraft.world.item.Item required = resolveItem(this.workerRequiredItemId);
+                if (required != null && this.withdrawSpecificItem(this.activeWorkTarget, required, 1)) {
                     this.transitionWorker(WorkerPhase.ACQUIRE_ORDER, "sapling_ready", null);
                 } else {
-                    this.blockWorker("matching_sapling_required");
+                    this.blockWorker(this.workerReason.equals("withdraw_farmer_seed")
+                            ? "missing_seed"
+                            : "matching_sapling_required");
                 }
             }
             case "withdraw_build_material" -> {
@@ -3014,7 +3796,17 @@ public class GalacticRecruitEntity extends TamableAnimal
                     this.blockWorker("courier_source_empty");
                 }
             }
+            case "automatic_supply_withdraw" -> this.executeAutomaticSupplyWithdraw();
+            case "automatic_supply_deliver" -> this.executeAutomaticSupplyDelivery();
             case "courier_route_action" -> this.executeCourierRouteAction();
+            case "open_market" -> {
+                if (this.authoritativeWorksite().isEmpty()) {
+                    this.blockWorker("permission_revoked");
+                } else {
+                    this.workerCooldownTicks = 100;
+                    this.transitionWorker(WorkerPhase.COOLDOWN, "market_open", this.workTarget);
+                }
+            }
             case "withdraw_animal_feed" -> {
                 net.minecraft.world.item.Item feed = this.requiredAnimalFeed();
                 if (feed != null && this.withdrawSpecificItem(this.activeWorkTarget, feed, 2)) {
@@ -3033,7 +3825,8 @@ public class GalacticRecruitEntity extends TamableAnimal
             }
             case "feed_animals" -> this.feedAnimalPair(level);
             case "harvest_animal" -> this.harvestExcessAnimal(level);
-            case "cook_food" -> this.cookStoredFood();
+            case "cook_station_wait" -> this.tickCookStationInteraction(level);
+            case "fishing_wait" -> this.tickFishingInteraction(level);
             case "build_place" -> this.placeCurrentBuildBlock();
             case "navigate_work_target" -> this.performGatheringInteraction(level);
             default -> this.blockWorker("unknown_worker_action");
@@ -3102,34 +3895,65 @@ public class GalacticRecruitEntity extends TamableAnimal
             this.blockWorker("target_outside_claim");
             return;
         }
+        WorksiteRecord worksite = this.authoritativeWorksite().orElse(null);
+        if (worksite == null) {
+            this.blockWorker("permission_revoked");
+            return;
+        }
         BlockState state = level.getBlockState(target);
-        if (!this.isWorkerTarget(profession, state)) {
+        if (!this.isWorkerTarget(profession, target, state, worksite)) {
             this.transitionWorker(WorkerPhase.ACQUIRE_ORDER, "target_changed", null);
             return;
         }
 
-        if (profession == WorkerProfession.FISHERMAN) {
-            NonNullList<ItemStack> nextInventory = this.copyWorkerInventory();
-            ItemStack catchStack = new ItemStack(
-                    Math.floorMod(this.getUUID().hashCode() + this.tickCount, 4) == 0
-                            ? Items.SALMON
-                            : Items.COD);
-            if (!mergeAll(nextInventory, List.of(catchStack))) {
-                this.blockWorker("worker_inventory_full");
+        if (profession == WorkerProfession.FARMER) {
+            this.performFarmerInteraction(level, target, state);
+            return;
+        }
+        if (profession == WorkerProfession.LUMBERJACK) {
+            this.performLumberjackInteraction(level, target, state, worksite);
+            return;
+        }
+        if (profession == WorkerProfession.COOK) {
+            if (!(level.getBlockEntity(target) instanceof AbstractFurnaceBlockEntity)) {
+                this.transitionWorker(WorkerPhase.FIND_TARGET, "cooking_station_changed", null);
                 return;
             }
+            this.workerCooldownTicks = 20;
+            this.swing(InteractionHand.MAIN_HAND);
+            this.transitionWorker(WorkerPhase.INTERACT, "cook_station_wait", target);
+            return;
+        }
+
+        if (profession == WorkerProfession.FISHERMAN) {
             ItemStack rod = this.getMainHandItem();
             if (!rod.is(Items.FISHING_ROD)) {
                 this.blockWorker("fishing_rod_required");
                 return;
             }
-            rod.hurtAndBreak(1, this, EquipmentSlot.MAINHAND);
-            this.workerInventory = nextInventory;
-            this.transitionWorker(WorkerPhase.COLLECT, "fish_caught", null);
+            this.workerCooldownTicks = 100 + this.getRandom().nextInt(81);
+            this.swing(InteractionHand.MAIN_HAND);
+            level.playSound(
+                    null,
+                    target,
+                    SoundEvents.FISHING_BOBBER_THROW,
+                    SoundSource.NEUTRAL,
+                    1.0F,
+                    1.0F);
+            this.transitionWorker(WorkerPhase.INTERACT, "fishing_wait", target);
             return;
         }
 
         ItemStack tool = this.getMainHandItem();
+        boolean requiresFill = profession == WorkerProfession.MINER
+                && this.miningTargetNeedsFill(level, target);
+        if (requiresFill && !this.workerInventoryContains(Items.COBBLESTONE)) {
+            this.workerRequiredItemId =
+                    BuiltInRegistries.ITEM.getKey(Items.COBBLESTONE).toString();
+            this.requestWorkerSupply(Items.COBBLESTONE, 8);
+            this.blockWorker("missing_fill_material");
+            return;
+        }
         List<ItemStack> drops = new ArrayList<>(Block.getDrops(
                 state,
                 level,
@@ -3138,16 +3962,10 @@ public class GalacticRecruitEntity extends TamableAnimal
                 this,
                 tool));
         NonNullList<ItemStack> nextInventory = this.copyWorkerInventory();
-
-        if (profession == WorkerProfession.FARMER) {
-            if (!removeOneFromStacks(drops, Items.WHEAT_SEEDS)
-                    && !removeOneFromStacks(nextInventory, Items.WHEAT_SEEDS)) {
-                this.blockWorker("replant_seed_missing");
-                return;
-            }
-        } else if (profession == WorkerProfession.LUMBERJACK
-                && !removeOneFromStacks(nextInventory, Items.OAK_SAPLING)) {
-            this.blockWorker("matching_sapling_required");
+        if (profession == WorkerProfession.MINER
+                && state.requiresCorrectToolForDrops()
+                && !tool.isCorrectToolForDrops(state)) {
+            this.blockWorker("missing_tool");
             return;
         }
 
@@ -3159,16 +3977,253 @@ public class GalacticRecruitEntity extends TamableAnimal
             this.blockWorker("world_change_rejected");
             return;
         }
-        if (profession == WorkerProfession.FARMER && state.getBlock() instanceof CropBlock cropBlock) {
-            level.setBlock(target, cropBlock.getStateForAge(0), 3);
-        } else if (profession == WorkerProfession.LUMBERJACK) {
-            level.setBlock(target, Blocks.OAK_SAPLING.defaultBlockState(), 3);
-        }
         this.workerInventory = nextInventory;
         if (!tool.isEmpty()) {
             tool.hurtAndBreak(1, this, EquipmentSlot.MAINHAND);
         }
-        this.transitionWorker(WorkerPhase.COLLECT, "resource_collected", null);
+        if (requiresFill) {
+            if (!level.setBlock(target, Blocks.COBBLESTONE.defaultBlockState(), 3)
+                    || !removeOneFromStacks(this.workerInventory, Items.COBBLESTONE)) {
+                this.blockWorker("fill_placement_failed");
+                return;
+            }
+        }
+        boolean torchRequested = false;
+        if (profession == WorkerProfession.MINER && !requiresFill
+                && level.getMaxLocalRawBrightness(target) <= 7) {
+            BlockState torch = Blocks.TORCH.defaultBlockState();
+            if (this.workerInventoryContains(Items.TORCH)
+                    && torch.canSurvive(level, target)
+                    && level.setBlock(target, torch, 3)) {
+                removeOneFromStacks(this.workerInventory, Items.TORCH);
+            } else {
+                this.workerRequiredItemId =
+                        BuiltInRegistries.ITEM.getKey(Items.TORCH).toString();
+                torchRequested = this.requestWorkerSupply(Items.TORCH, 16);
+            }
+        }
+        this.transitionWorker(
+                WorkerPhase.COLLECT,
+                torchRequested ? "resource_collected_torch_requested" : "resource_collected",
+                null);
+    }
+
+    private boolean miningTargetNeedsFill(ServerLevel level, BlockPos target) {
+        for (Direction direction : Direction.values()) {
+            if (!level.getFluidState(target.relative(direction)).isEmpty()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private void tickFishingInteraction(ServerLevel level) {
+        BlockPos target = this.activeWorkTarget;
+        ItemStack rod = this.getMainHandItem();
+        if (target == null
+                || !this.canModifyWorkerTarget(target)
+                || !level.getFluidState(target).is(FluidTags.WATER)
+                || !level.getFluidState(target).isSource()) {
+            this.transitionWorker(WorkerPhase.ACQUIRE_ORDER, "fishing_target_changed", null);
+            return;
+        }
+        if (!rod.is(Items.FISHING_ROD)) {
+            this.blockWorker("fishing_rod_required");
+            return;
+        }
+        this.getLookControl().setLookAt(Vec3.atCenterOf(target));
+        if (this.workerCooldownTicks > 0) {
+            this.workerCooldownTicks--;
+            if (this.workerCooldownTicks % 20 == 0) {
+                this.swing(InteractionHand.MAIN_HAND);
+                level.sendParticles(
+                        ParticleTypes.SPLASH,
+                        target.getX() + 0.5D,
+                        target.getY() + 1.0D,
+                        target.getZ() + 0.5D,
+                        2,
+                        0.15D,
+                        0.05D,
+                        0.15D,
+                        0.02D);
+            }
+            return;
+        }
+
+        LootParams params = new LootParams.Builder(level)
+                .withParameter(LootContextParams.ORIGIN, Vec3.atCenterOf(target))
+                .withParameter(LootContextParams.TOOL, rod)
+                .withParameter(LootContextParams.THIS_ENTITY, this)
+                .withParameter(LootContextParams.ATTACKING_ENTITY, this)
+                .create(LootContextParamSets.FISHING);
+        LootTable lootTable = level.getServer()
+                .reloadableRegistries()
+                .getLootTable(BuiltInLootTables.FISHING);
+        List<ItemStack> catches = lootTable.getRandomItems(params, this.getRandom());
+        NonNullList<ItemStack> nextInventory = this.copyWorkerInventory();
+        if (catches.isEmpty() || !mergeAll(nextInventory, catches)) {
+            this.blockWorker(catches.isEmpty()
+                    ? "fishing_loot_empty"
+                    : "worker_inventory_full");
+            return;
+        }
+        this.workerInventory = nextInventory;
+        rod.hurtAndBreak(1, this, EquipmentSlot.MAINHAND);
+        this.swing(InteractionHand.MAIN_HAND);
+        level.playSound(
+                null,
+                target,
+                SoundEvents.FISHING_BOBBER_RETRIEVE,
+                SoundSource.NEUTRAL,
+                1.0F,
+                1.0F);
+        this.transitionWorker(WorkerPhase.COLLECT, "fish_caught", null);
+    }
+
+    private void performFarmerInteraction(ServerLevel level, BlockPos target, BlockState state) {
+        ItemStack tool = this.getMainHandItem();
+        if (state.getBlock() instanceof CropBlock cropBlock && cropBlock.isMaxAge(state)) {
+            net.minecraft.world.item.Item seed = seedForCrop(state);
+            if (seed == null) {
+                this.blockWorker("unsupported_crop");
+                return;
+            }
+            List<ItemStack> drops = new ArrayList<>(Block.getDrops(
+                    state, level, target, level.getBlockEntity(target), this, tool));
+            NonNullList<ItemStack> nextInventory = this.copyWorkerInventory();
+            if (!removeOneFromStacks(drops, seed)
+                    && !removeOneFromStacks(nextInventory, seed)) {
+                this.workerRequiredItemId = BuiltInRegistries.ITEM.getKey(seed).toString();
+                this.requestWorkerSupply(seed, 1);
+                this.blockWorker("missing_seed");
+                return;
+            }
+            if (!mergeAll(nextInventory, drops)) {
+                this.blockWorker("worker_inventory_full");
+                return;
+            }
+            if (!level.setBlock(target, cropBlock.getStateForAge(0), 3)) {
+                this.blockWorker("world_change_rejected");
+                return;
+            }
+            this.workerInventory = nextInventory;
+            if (!tool.isEmpty()) {
+                tool.hurtAndBreak(1, this, EquipmentSlot.MAINHAND);
+            }
+            this.workerRequiredItemId = "";
+            this.transitionWorker(WorkerPhase.COLLECT, "crop_harvested", null);
+            return;
+        }
+
+        net.minecraft.world.item.Item seed = this.availableCarriedFarmerSeed();
+        BlockState crop = cropStateForSeed(seed);
+        if (seed == null || crop == null) {
+            if (seed != null) {
+                this.workerRequiredItemId = BuiltInRegistries.ITEM.getKey(seed).toString();
+            }
+            this.blockWorker("missing_seed");
+            return;
+        }
+        if (!state.is(Blocks.FARMLAND)) {
+            if (tool.isEmpty()) {
+                this.blockWorker("missing_tool");
+                return;
+            }
+            if (!level.setBlock(target, Blocks.FARMLAND.defaultBlockState(), 3)) {
+                this.blockWorker("world_change_rejected");
+                return;
+            }
+            tool.hurtAndBreak(1, this, EquipmentSlot.MAINHAND);
+        }
+        if (!crop.canSurvive(level, target.above())
+                || !level.setBlock(target.above(), crop, 3)
+                || !removeOneFromStacks(this.workerInventory, seed)) {
+            this.blockWorker("planting_failed");
+            return;
+        }
+        this.workerRequiredItemId = "";
+        if (!this.progressCurrentWorkOrder(1)) {
+            this.blockWorker("work_order_persistence_failed");
+            return;
+        }
+        this.workerCooldownTicks = this.factionProductionCooldownTicks(20);
+        this.transitionWorker(WorkerPhase.COOLDOWN, "crop_planted", null);
+    }
+
+    private void performLumberjackInteraction(
+            ServerLevel level,
+            BlockPos target,
+            BlockState state,
+            WorksiteRecord worksite
+    ) {
+        net.minecraft.world.item.Item sapling = matchingSaplingForLog(state);
+        if (sapling == null || !this.workerInventoryContains(sapling)) {
+            if (sapling != null) {
+                this.workerRequiredItemId = BuiltInRegistries.ITEM.getKey(sapling).toString();
+                this.requestWorkerSupply(sapling, 1);
+            }
+            this.blockWorker("matching_sapling_required");
+            return;
+        }
+        List<BlockPos> treeLogs = this.connectedTreeLogs(target, worksite, 128);
+        if (treeLogs.isEmpty()) {
+            this.transitionWorker(WorkerPhase.ACQUIRE_ORDER, "target_changed", null);
+            return;
+        }
+        ItemStack tool = this.getMainHandItem();
+        NonNullList<ItemStack> nextInventory = this.copyWorkerInventory();
+        List<ItemStack> drops = new ArrayList<>();
+        List<BlockState> originalStates = new ArrayList<>();
+        for (BlockPos logPos : treeLogs) {
+            BlockState logState = level.getBlockState(logPos);
+            if (!logState.is(ModBlockTags.WORKER_LOGS)
+                    || !this.canModifyWorkerTarget(logPos)) {
+                this.blockWorker("tree_changed");
+                return;
+            }
+            originalStates.add(logState);
+            drops.addAll(Block.getDrops(
+                    logState, level, logPos, level.getBlockEntity(logPos), this, tool));
+        }
+        if (!mergeAll(nextInventory, drops)) {
+            this.blockWorker("worker_inventory_full");
+            return;
+        }
+        Block saplingBlock = Block.byItem(sapling);
+        BlockState saplingState = saplingBlock.defaultBlockState();
+        if (saplingBlock == Blocks.AIR || !saplingState.canSurvive(level, target)) {
+            this.blockWorker("replant_failed");
+            return;
+        }
+        for (int index = 0; index < treeLogs.size(); index++) {
+            if (!level.setBlock(treeLogs.get(index), Blocks.AIR.defaultBlockState(), 3)) {
+                for (int restoreIndex = 0; restoreIndex < index; restoreIndex++) {
+                    level.setBlock(treeLogs.get(restoreIndex), originalStates.get(restoreIndex), 3);
+                }
+                this.blockWorker("world_change_rejected");
+                return;
+            }
+        }
+        if (!level.setBlock(target, saplingState, 3)) {
+            for (int index = 0; index < treeLogs.size(); index++) {
+                level.setBlock(treeLogs.get(index), originalStates.get(index), 3);
+            }
+            this.blockWorker("replant_failed");
+            return;
+        }
+        if (!removeOneFromStacks(nextInventory, sapling)) {
+            for (int index = 0; index < treeLogs.size(); index++) {
+                level.setBlock(treeLogs.get(index), originalStates.get(index), 3);
+            }
+            this.blockWorker("matching_sapling_required");
+            return;
+        }
+        this.workerInventory = nextInventory;
+        if (!tool.isEmpty()) {
+            tool.hurtAndBreak(treeLogs.size(), this, EquipmentSlot.MAINHAND);
+        }
+        this.workerRequiredItemId = "";
+        this.transitionWorker(WorkerPhase.COLLECT, "tree_harvested", null);
     }
 
     private void acquireBuilderOrder() {
@@ -3219,9 +4274,14 @@ public class GalacticRecruitEntity extends TamableAnimal
                 return;
             }
             if (this.storageTarget == null || !this.containerContains(this.storageTarget, block.get().asItem())) {
+                this.workerRequiredItemId =
+                        BuiltInRegistries.ITEM.getKey(block.get().asItem()).toString();
+                this.requestWorkerSupply(block.get().asItem(), 1);
                 this.blockWorker("build_material_missing");
                 return;
             }
+            this.workerRequiredItemId =
+                    BuiltInRegistries.ITEM.getKey(block.get().asItem()).toString();
             this.transitionWorker(WorkerPhase.NAVIGATE_SOURCE, "withdraw_build_material", this.storageTarget);
             return;
         }
@@ -3229,6 +4289,16 @@ public class GalacticRecruitEntity extends TamableAnimal
     }
 
     private void acquireCourierOrder() {
+        CourierDispatchMode dispatchMode = this.authoritativeCourierDispatchMode();
+        if (dispatchMode != CourierDispatchMode.MANUAL
+                && this.acquireAutomaticSupplyDelivery()) {
+            return;
+        }
+        if (dispatchMode == CourierDispatchMode.AUTOMATIC) {
+            this.workerCooldownTicks = 40;
+            this.transitionWorker(WorkerPhase.COOLDOWN, "awaiting_supply_demand", null);
+            return;
+        }
         Optional<CourierRoutePlan> configuredRoute = this.authoritativeCourierRoute();
         if (configuredRoute.isPresent()) {
             CourierRoutePlan route = configuredRoute.orElseThrow();
@@ -3461,6 +4531,329 @@ public class GalacticRecruitEntity extends TamableAnimal
                 .flatMap(configuration -> configuration.courierRoutePlan());
     }
 
+    private CourierDispatchMode authoritativeCourierDispatchMode() {
+        return this.authoritativeWorksite()
+                .filter(worksite -> worksite.accepts(WorkerProfession.COURIER))
+                .map(WorksiteRecord::configuration)
+                .map(WorkAreaConfiguration::courierDispatchMode)
+                .orElse(CourierDispatchMode.AUTOMATIC);
+    }
+
+    private boolean acquireAutomaticSupplyDelivery() {
+        AutomaticSupplyContext existing = this.automaticSupplyContext().orElse(null);
+        if (existing != null) {
+            this.workerRequiredItemId = existing.demand().itemId();
+            if (this.workerInventoryCount(existing.item()) >= existing.reservation().quantity()) {
+                this.transitionWorker(
+                        WorkerPhase.NAVIGATE_SOURCE,
+                        "automatic_supply_deliver",
+                        existing.requester().blockPosition());
+            } else {
+                StorageEndpoint endpoint = existing.reservation().endpoint();
+                this.transitionWorker(
+                        WorkerPhase.NAVIGATE_SOURCE,
+                        "automatic_supply_withdraw",
+                        new BlockPos(endpoint.x(), endpoint.y(), endpoint.z()));
+            }
+            return true;
+        }
+        if (this.workerExecutionState.supplyReservationId().isPresent()) {
+            this.workerExecutionState = this.workerExecutionState.withSupplyReservation(Optional.empty());
+        }
+        if (!(this.level() instanceof ServerLevel serverLevel)
+                || this.getOwnerReference() == null) {
+            return false;
+        }
+        KingdomSavedData data = KingdomSavedData.get(serverLevel);
+        KingdomRecord kingdom = data.kingdomForRecruit(this.getUUID()).orElse(null);
+        galacticwars.clonewars.kingdom.SettlementRecord settlement = kingdom == null
+                ? null
+                : kingdom.settlements().stream()
+                        .filter(candidate -> candidate.containsRecruit(this.getUUID()))
+                        .findFirst()
+                        .orElse(null);
+        SettlementSupplyLedger ledger = settlement == null
+                ? null
+                : data.supplyLedger(settlement.id()).orElse(null);
+        if (kingdom == null || settlement == null || ledger == null) {
+            return false;
+        }
+        List<SupplyDemand> demands = ledger.demands().stream()
+                .filter(demand -> !demand.complete())
+                .sorted(java.util.Comparator.comparingInt(SupplyDemand::priority).reversed()
+                        .thenComparing(demand -> demand.id().toString()))
+                .toList();
+        for (SupplyDemand demand : demands) {
+            GalacticRecruitEntity requester = this.supplyRequester(serverLevel, demand).orElse(null);
+            net.minecraft.world.item.Item item = resolveItem(demand.itemId());
+            if (requester == null || requester == this || item == null) {
+                continue;
+            }
+            for (StorageEndpoint endpoint : data.registeredStorageEndpoints(kingdom.ownerId())) {
+                if (!endpoint.dimensionId().equals(serverLevel.dimension().identifier().toString())) {
+                    continue;
+                }
+                BlockPos endpointPos = new BlockPos(endpoint.x(), endpoint.y(), endpoint.z());
+                Container container = this.findContainer(endpointPos).orElse(null);
+                if (container == null) {
+                    continue;
+                }
+                int slots = Math.min(endpoint.slots(), container.getContainerSize());
+                int stock = countItem(container, item, slots);
+                if (stock <= 0) {
+                    continue;
+                }
+                SettlementSupplyLedger.ReservationDecision decision = data.reserveSupply(
+                        kingdom.ownerId(),
+                        settlement.id(),
+                        demand.id(),
+                        this.getUUID(),
+                        endpoint,
+                        Math.min(demand.outstandingQuantity(), item.getDefaultMaxStackSize()),
+                        stock,
+                        serverLevel.getGameTime(),
+                        1200L);
+                if (!decision.accepted()) {
+                    continue;
+                }
+                SupplyReservation reservation = decision.reservation().orElseThrow();
+                this.workerExecutionState = this.workerExecutionState.withSupplyReservation(
+                        Optional.of(reservation.id()));
+                this.workerRequiredItemId = demand.itemId();
+                this.transitionWorker(
+                        WorkerPhase.NAVIGATE_SOURCE,
+                        "automatic_supply_withdraw",
+                        endpointPos);
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private Optional<AutomaticSupplyContext> automaticSupplyContext() {
+        if (!(this.level() instanceof ServerLevel serverLevel)
+                || this.getOwnerReference() == null
+                || this.workerExecutionState.supplyReservationId().isEmpty()) {
+            return Optional.empty();
+        }
+        KingdomSavedData data = KingdomSavedData.get(serverLevel);
+        KingdomRecord kingdom = data.kingdomForRecruit(this.getUUID()).orElse(null);
+        galacticwars.clonewars.kingdom.SettlementRecord settlement = kingdom == null
+                ? null
+                : kingdom.settlements().stream()
+                        .filter(candidate -> candidate.containsRecruit(this.getUUID()))
+                        .findFirst()
+                        .orElse(null);
+        SettlementSupplyLedger ledger = settlement == null
+                ? null
+                : data.supplyLedger(settlement.id()).orElse(null);
+        UUID reservationId = this.workerExecutionState.supplyReservationId().orElseThrow();
+        SupplyReservation reservation = ledger == null
+                ? null
+                : ledger.reservation(reservationId)
+                        .filter(candidate -> candidate.workerId().equals(this.getUUID()))
+                        .filter(candidate -> candidate.active(serverLevel.getGameTime()))
+                        .orElse(null);
+        SupplyDemand demand = reservation == null
+                ? null
+                : ledger.demands().stream()
+                        .filter(candidate -> candidate.id().equals(reservation.demandId()))
+                        .findFirst()
+                        .orElse(null);
+        GalacticRecruitEntity requester = demand == null
+                ? null
+                : this.supplyRequester(serverLevel, demand).orElse(null);
+        net.minecraft.world.item.Item item = demand == null ? null : resolveItem(demand.itemId());
+        if (kingdom == null || settlement == null || ledger == null
+                || reservation == null || demand == null || requester == null || item == null) {
+            if (kingdom != null && settlement != null) {
+                data.releaseSupply(
+                        kingdom.ownerId(), settlement.id(), reservationId, this.getUUID());
+            }
+            this.workerExecutionState = this.workerExecutionState.withSupplyReservation(Optional.empty());
+            return Optional.empty();
+        }
+        return Optional.of(new AutomaticSupplyContext(
+                kingdom,
+                settlement.id(),
+                ledger,
+                reservation,
+                demand,
+                item,
+                requester));
+    }
+
+    private Optional<GalacticRecruitEntity> supplyRequester(
+            ServerLevel level,
+            SupplyDemand demand
+    ) {
+        String[] sourceParts = demand.sourceId().split("/", 3);
+        if (sourceParts.length != 3
+                || (!sourceParts[0].equals("worker") && !sourceParts[0].equals("recruit"))) {
+            return Optional.empty();
+        }
+        try {
+            Entity entity = level.getEntity(UUID.fromString(sourceParts[1]));
+            return entity instanceof GalacticRecruitEntity recruit
+                    && recruit.isAlive()
+                    && recruit.level() == this.level()
+                    ? Optional.of(recruit)
+                    : Optional.empty();
+        } catch (IllegalArgumentException ignored) {
+            return Optional.empty();
+        }
+    }
+
+    private void executeAutomaticSupplyWithdraw() {
+        AutomaticSupplyContext context = this.automaticSupplyContext().orElse(null);
+        if (context == null || this.activeWorkTarget == null) {
+            this.blockWorker("reservation_expired");
+            return;
+        }
+        StorageEndpoint endpoint = context.reservation().endpoint();
+        BlockPos endpointPos = new BlockPos(endpoint.x(), endpoint.y(), endpoint.z());
+        Container container = this.findContainer(endpointPos).orElse(null);
+        int transferred = container == null
+                ? 0
+                : this.transferPhysicalQuantity(
+                        endpointPos,
+                        container,
+                        endpoint.slots(),
+                        new ItemStack(context.item()),
+                        context.reservation().quantity(),
+                        true,
+                        LogisticsTransferRequest.Fulfillment.REQUIRE_EXACT);
+        if (transferred != context.reservation().quantity()) {
+            this.workerCooldownTicks = 20;
+            this.transitionWorker(WorkerPhase.COOLDOWN, "physical_stock_unavailable", null);
+            return;
+        }
+        this.transitionWorker(
+                WorkerPhase.ACQUIRE_ORDER,
+                "automatic_supply_loaded",
+                null);
+    }
+
+    private void executeAutomaticSupplyDelivery() {
+        AutomaticSupplyContext context = this.automaticSupplyContext().orElse(null);
+        if (context == null) {
+            this.blockWorker("reservation_expired");
+            return;
+        }
+        int transferred = this.transferCargoToRecruit(
+                context.requester(),
+                context.item(),
+                context.reservation().quantity());
+        if (transferred != context.reservation().quantity()) {
+            this.workerCooldownTicks = 20;
+            this.transitionWorker(WorkerPhase.COOLDOWN, "recipient_inventory_full", null);
+            return;
+        }
+        KingdomSavedData data = KingdomSavedData.get((ServerLevel) this.level());
+        if (!data.completeSupply(
+                context.kingdom().ownerId(),
+                context.settlementId(),
+                context.reservation().id(),
+                this.getUUID(),
+                transferred,
+                this.level().getGameTime())) {
+            int rolledBack = this.transferCargoBetween(
+                    context.requester(),
+                    this,
+                    context.item(),
+                    transferred);
+            if (rolledBack == transferred) {
+                data.releaseSupply(
+                        context.kingdom().ownerId(),
+                        context.settlementId(),
+                        context.reservation().id(),
+                        this.getUUID());
+                this.workerExecutionState = this.workerExecutionState.withSupplyReservation(Optional.empty());
+                this.blockWorker("reservation_expired");
+            } else {
+                this.blockWorker("delivery_rollback_failed");
+            }
+            return;
+        }
+        this.workerExecutionState = this.workerExecutionState.withSupplyReservation(Optional.empty());
+        this.workerRequiredItemId = "";
+        if (!this.progressCurrentWorkOrder(1)) {
+            this.blockWorker("work_order_persistence_failed");
+            return;
+        }
+        this.workerCooldownTicks = 20;
+        this.transitionWorker(WorkerPhase.COOLDOWN, "automatic_supply_delivered", null);
+    }
+
+    private int transferCargoToRecruit(
+            GalacticRecruitEntity destinationRecruit,
+            net.minecraft.world.item.Item item,
+            int quantity
+    ) {
+        return this.transferCargoBetween(this, destinationRecruit, item, quantity);
+    }
+
+    private int transferCargoBetween(
+            GalacticRecruitEntity sourceRecruit,
+            GalacticRecruitEntity destinationRecruit,
+            net.minecraft.world.item.Item item,
+            int quantity
+    ) {
+        if (!(sourceRecruit.level() instanceof ServerLevel serverLevel)
+                || sourceRecruit.getOwnerReference() == null
+                || destinationRecruit.getOwnerReference() == null
+                || !sourceRecruit.getOwnerReference().getUUID().equals(
+                        destinationRecruit.getOwnerReference().getUUID())
+                || quantity <= 0) {
+            return 0;
+        }
+        UUID ownerId = sourceRecruit.getOwnerReference().getUUID();
+        LogisticsEndpointIdentity sourceIdentity = new LogisticsEndpointIdentity(
+                "recruit:" + sourceRecruit.getUUID() + ":cargo");
+        LogisticsEndpointIdentity destinationIdentity = new LogisticsEndpointIdentity(
+                "recruit:" + destinationRecruit.getUUID() + ":cargo");
+        LogisticsAccessPolicy policy = (actorId, endpoint, counterpart, operation, slot, stack) ->
+                actorId.equals(ownerId)
+                        && sourceRecruit.isAlive()
+                        && destinationRecruit.isAlive()
+                        && sourceRecruit.level() == serverLevel
+                        && destinationRecruit.level() == serverLevel
+                        && (endpoint.equals(sourceIdentity) || endpoint.equals(destinationIdentity));
+        LogisticsEndpoint source = LogisticsEndpoint.container(
+                sourceIdentity,
+                sourceRecruit.createCargoContainer(),
+                ArmyMemberSnapshot.CARGO_SLOT_COUNT,
+                policy);
+        LogisticsEndpoint destination = LogisticsEndpoint.container(
+                destinationIdentity,
+                destinationRecruit.createCargoContainer(),
+                ArmyMemberSnapshot.CARGO_SLOT_COUNT,
+                policy);
+        PhysicalLogisticsTransaction.Result result = PhysicalLogisticsTransaction.transfer(
+                source,
+                destination,
+                new LogisticsTransferAuthority(
+                        ownerId,
+                        source.identity(),
+                        destination.identity()),
+                new LogisticsTransferRequest(
+                        new ItemStack(item),
+                        quantity,
+                        LogisticsTransferRequest.Fulfillment.REQUIRE_EXACT));
+        return result.committed() ? result.transferredQuantity() : 0;
+    }
+
+    private record AutomaticSupplyContext(
+            KingdomRecord kingdom,
+            UUID settlementId,
+            SettlementSupplyLedger ledger,
+            SupplyReservation reservation,
+            SupplyDemand demand,
+            net.minecraft.world.item.Item item,
+            GalacticRecruitEntity requester
+    ) {
+    }
+
     private boolean isAuthoritativeCourierWaypoint(BlockPos pos) {
         if (!(this.level() instanceof ServerLevel serverLevel) || this.getOwnerReference() == null) {
             return false;
@@ -3530,8 +4923,11 @@ public class GalacticRecruitEntity extends TamableAnimal
         }
         if (this.workerInventoryCount(feed) < 2) {
             if (this.storageTarget == null || !this.containerContains(this.storageTarget, feed)) {
+                this.workerRequiredItemId = BuiltInRegistries.ITEM.getKey(feed).toString();
+                this.requestWorkerSupply(feed, 2);
                 this.blockWorker("animal_feed_missing");
             } else {
+                this.workerRequiredItemId = BuiltInRegistries.ITEM.getKey(feed).toString();
                 this.transitionWorker(WorkerPhase.NAVIGATE_SOURCE, "withdraw_animal_feed", this.storageTarget);
             }
             return;
@@ -3541,25 +4937,7 @@ public class GalacticRecruitEntity extends TamableAnimal
     }
 
     private void acquireCookOrder() {
-        net.minecraft.world.item.Item rawFood = this.availableRawCookingInput();
-        net.minecraft.world.item.Item missing = rawFood == null ? this.availableStoredRawCookingInput() : null;
-        if (rawFood == null && missing == null) {
-            this.blockWorker("raw_food_missing");
-            return;
-        }
-        if (rawFood == null) {
-            this.transitionWorker(WorkerPhase.NAVIGATE_SOURCE, "withdraw_cooking_ingredient", this.storageTarget);
-            return;
-        }
-        if (!this.workerInventoryContains(Items.COAL)) {
-            if (this.storageTarget == null || !this.containerContains(this.storageTarget, Items.COAL)) {
-                this.blockWorker("cooking_fuel_missing");
-            } else {
-                this.transitionWorker(WorkerPhase.NAVIGATE_SOURCE, "withdraw_cooking_ingredient", this.storageTarget);
-            }
-            return;
-        }
-        this.transitionWorker(WorkerPhase.NAVIGATE_SOURCE, "cook_food", this.workTarget);
+        this.transitionWorker(WorkerPhase.FIND_TARGET, "scan_cooking_station", null);
     }
 
     private void feedAnimalPair(ServerLevel level) {
@@ -3591,50 +4969,173 @@ public class GalacticRecruitEntity extends TamableAnimal
             this.blockWorker("population_within_limit");
             return;
         }
-        List<ItemStack> products = new ArrayList<>();
-        EntityType<?> livestockType = animal.getType();
-        if (livestockType == net.minecraft.world.entity.EntityTypes.SHEEP) {
-            products.add(new ItemStack(Items.MUTTON, 2));
-            products.add(new ItemStack(Items.STRING, 2));
-        } else if (livestockType == net.minecraft.world.entity.EntityTypes.PIG) {
-            products.add(new ItemStack(Items.PORKCHOP, 2));
-        } else if (livestockType == net.minecraft.world.entity.EntityTypes.CHICKEN) {
-            products.add(new ItemStack(Items.CHICKEN));
-            products.add(new ItemStack(Items.FEATHER, 2));
-        } else if (livestockType == net.minecraft.world.entity.EntityTypes.COW
-                || livestockType == net.minecraft.world.entity.EntityTypes.MOOSHROOM) {
-            products.add(new ItemStack(Items.BEEF, 2));
-            products.add(new ItemStack(Items.LEATHER));
-        } else {
+        var lootTable = animal.getLootTable().orElse(null);
+        if (lootTable == null) {
             this.blockWorker("unsupported_livestock_type");
             return;
         }
+        List<ItemStack> products = new ArrayList<>();
+        animal.dropFromLootTable(
+                level,
+                this.damageSources().mobAttack(this),
+                false,
+                lootTable,
+                stack -> products.add(stack.copy()));
         NonNullList<ItemStack> nextInventory = this.copyWorkerInventory();
         if (!mergeAll(nextInventory, products)) {
             this.blockWorker("worker_inventory_full");
             return;
         }
+        this.swing(InteractionHand.MAIN_HAND);
+        level.playSound(
+                null,
+                animal.blockPosition(),
+                SoundEvents.GENERIC_DEATH,
+                SoundSource.NEUTRAL,
+                1.0F,
+                1.0F);
         animal.discard();
         this.workerInventory = nextInventory;
         this.transitionWorker(WorkerPhase.COLLECT, "livestock_harvested", null);
     }
 
-    private void cookStoredFood() {
-        net.minecraft.world.item.Item raw = this.availableRawCookingInput();
-        net.minecraft.world.item.Item cooked = cookedFoodFor(raw);
-        if (raw == null || cooked == null || !this.workerInventoryContains(Items.COAL)) {
-            this.blockWorker("cooking_ingredient_missing");
+    private void tickCookStationInteraction(ServerLevel level) {
+        BlockPos stationPos = this.activeWorkTarget;
+        if (stationPos == null
+                || !this.canModifyWorkerTarget(stationPos)
+                || !(level.getBlockEntity(stationPos) instanceof AbstractFurnaceBlockEntity furnace)) {
+            this.transitionWorker(WorkerPhase.FIND_TARGET, "cooking_station_changed", null);
+            return;
+        }
+        this.getLookControl().setLookAt(Vec3.atCenterOf(stationPos));
+        if (this.workerCooldownTicks > 0) {
+            this.workerCooldownTicks--;
+            if (this.workerCooldownTicks % 5 == 0) {
+                this.swing(InteractionHand.MAIN_HAND);
+            }
+            return;
+        }
+
+        ItemStack output = furnace.getItem(2);
+        if (!output.isEmpty()) {
+            NonNullList<ItemStack> nextInventory = this.copyWorkerInventory();
+            if (!mergeAll(nextInventory, List.of(output.copy()))) {
+                this.blockWorker("worker_inventory_full");
+                return;
+            }
+            furnace.setItem(2, ItemStack.EMPTY);
+            furnace.setChanged();
+            this.workerInventory = nextInventory;
+            level.playSound(
+                    null,
+                    stationPos,
+                    SoundEvents.ARMOR_EQUIP_IRON.value(),
+                    SoundSource.NEUTRAL,
+                    0.6F,
+                    1.2F);
+            this.transitionWorker(WorkerPhase.COLLECT, "cooked_food_collected", null);
+            return;
+        }
+
+        if (!furnace.getItem(0).isEmpty()) {
+            if (furnace.getItem(1).isEmpty()) {
+                net.minecraft.world.item.Item fuel = this.availableCarriedCookingFuel(level);
+                if (fuel == null) {
+                    net.minecraft.world.item.Item storedFuel =
+                            this.availableStoredCookingFuel(level);
+                    if (storedFuel != null && this.storageTarget != null) {
+                        this.workerRequiredItemId =
+                                BuiltInRegistries.ITEM.getKey(storedFuel).toString();
+                        this.transitionWorker(
+                                WorkerPhase.NAVIGATE_SOURCE,
+                                "withdraw_cooking_ingredient",
+                                this.storageTarget);
+                    } else {
+                        this.workerRequiredItemId =
+                                BuiltInRegistries.ITEM.getKey(Items.COAL).toString();
+                        this.requestWorkerSupply(Items.COAL, 1);
+                        this.blockWorker("cooking_fuel_missing");
+                    }
+                    return;
+                }
+                NonNullList<ItemStack> nextInventory = this.copyWorkerInventory();
+                if (!removeOneFromStacks(nextInventory, fuel)) {
+                    this.blockWorker("cooking_fuel_missing");
+                    return;
+                }
+                furnace.setItem(1, new ItemStack(fuel));
+                this.workerInventory = nextInventory;
+            }
+            this.workerCooldownTicks = 40;
+            this.transitionWorker(WorkerPhase.COOLDOWN, "cooking_in_progress", null);
+            return;
+        }
+        net.minecraft.world.item.Item input = this.availableCarriedCookingInputForStation(
+                level, level.getBlockState(stationPos));
+        net.minecraft.world.item.Item fuel = this.availableCarriedCookingFuel(level);
+        if (input == null) {
+            net.minecraft.world.item.Item storedInput =
+                    this.availableStoredCookingInput(level);
+            if (storedInput != null && this.storageTarget != null) {
+                this.workerRequiredItemId =
+                        BuiltInRegistries.ITEM.getKey(storedInput).toString();
+                this.transitionWorker(
+                        WorkerPhase.NAVIGATE_SOURCE,
+                        "withdraw_cooking_ingredient",
+                        this.storageTarget);
+            } else {
+                net.minecraft.world.item.Item requested =
+                        this.configuredCookingDemand(level);
+                if (requested != null) {
+                    this.workerRequiredItemId =
+                            BuiltInRegistries.ITEM.getKey(requested).toString();
+                    this.requestWorkerSupply(requested, 1);
+                }
+                this.blockWorker("cooking_input_required");
+            }
+            return;
+        }
+        if (fuel == null) {
+            net.minecraft.world.item.Item storedFuel =
+                    this.availableStoredCookingFuel(level);
+            if (storedFuel != null && this.storageTarget != null) {
+                this.workerRequiredItemId =
+                        BuiltInRegistries.ITEM.getKey(storedFuel).toString();
+                this.transitionWorker(
+                        WorkerPhase.NAVIGATE_SOURCE,
+                        "withdraw_cooking_ingredient",
+                        this.storageTarget);
+            } else {
+                this.workerRequiredItemId =
+                        BuiltInRegistries.ITEM.getKey(Items.COAL).toString();
+                this.requestWorkerSupply(Items.COAL, 1);
+                this.blockWorker("cooking_fuel_missing");
+            }
+            return;
+        }
+        ItemStack inputStack = new ItemStack(input);
+        ItemStack fuelStack = new ItemStack(fuel);
+        if (!furnace.canPlaceItem(0, inputStack)
+                || (!furnace.getItem(1).isEmpty() && !furnace.getItem(1).is(fuel))) {
+            this.blockWorker("cooking_station_busy");
             return;
         }
         NonNullList<ItemStack> nextInventory = this.copyWorkerInventory();
-        if (!removeOneFromStacks(nextInventory, raw)
-                || !removeOneFromStacks(nextInventory, Items.COAL)
-                || !mergeAll(nextInventory, List.of(new ItemStack(cooked)))) {
-            this.blockWorker("worker_inventory_full");
+        if (!removeOneFromStacks(nextInventory, input)
+                || !removeOneFromStacks(nextInventory, fuel)) {
+            this.blockWorker("cooking_ingredient_missing");
             return;
         }
+        furnace.setItem(0, inputStack);
+        if (furnace.getItem(1).isEmpty()) {
+            furnace.setItem(1, fuelStack);
+        } else {
+            furnace.getItem(1).grow(1);
+            furnace.setChanged();
+        }
         this.workerInventory = nextInventory;
-        this.transitionWorker(WorkerPhase.COLLECT, "food_cooked", null);
+        this.workerCooldownTicks = 40;
+        this.transitionWorker(WorkerPhase.COOLDOWN, "cooking_started", null);
     }
 
     private void finishCompletedBlueprint() {
@@ -3753,15 +5254,25 @@ public class GalacticRecruitEntity extends TamableAnimal
             this.blockWorker("blueprint_position_blocked");
             return;
         }
+        NonNullList<ItemStack> nextInventory = this.copyWorkerInventory();
+        if (!removeOneFromStacks(nextInventory, block.get().asItem())) {
+            this.workerRequiredItemId =
+                    BuiltInRegistries.ITEM.getKey(block.get().asItem()).toString();
+            this.requestWorkerSupply(block.get().asItem(), 1);
+            this.blockWorker("build_material_missing");
+            return;
+        }
         if (!this.level().setBlock(expected, safeConstructionState(placement.blockState()), 3)) {
             this.blockWorker("world_change_rejected");
             return;
         }
-        removeOneFromStacks(this.workerInventory, block.get().asItem());
         if (!this.persistBuildPlacement(project, this.starterBaseCompletedBlocks)) {
+            this.level().setBlock(expected, current, 3);
             this.blockWorker("project_persistence_failed");
             return;
         }
+        this.workerInventory = nextInventory;
+        this.workerRequiredItemId = "";
         this.starterBaseCompletedBlocks++;
         this.workerCooldownTicks = this.factionProductionCooldownTicks(20);
         this.transitionWorker(WorkerPhase.COOLDOWN, "placement_complete", null);
@@ -3798,18 +5309,292 @@ public class GalacticRecruitEntity extends TamableAnimal
                 .orElse(false);
     }
 
-    private boolean isWorkerTarget(WorkerProfession profession, BlockState state) {
+    private boolean isWorkerTarget(
+            WorkerProfession profession,
+            BlockPos target,
+            BlockState state,
+            WorksiteRecord worksite
+    ) {
+        if (!this.isInsideWorksiteBounds(target, worksite)) {
+            return false;
+        }
+        if ((profession == WorkerProfession.FARMER
+                || profession == WorkerProfession.LUMBERJACK
+                || profession == WorkerProfession.MINER)
+                && !this.matchesWorksiteFilter(
+                        profession, target, state, worksite.configuration())) {
+            return false;
+        }
         return switch (profession) {
-            case FARMER -> state.getBlock() instanceof CropBlock cropBlock && cropBlock.isMaxAge(state);
-            case LUMBERJACK -> state.is(ModBlockTags.WORKER_LOGS);
-            case FISHERMAN -> state.getFluidState().is(FluidTags.WATER) && state.getFluidState().isSource();
-            case MINER -> state.is(ModBlockTags.WORKER_MINEABLE);
+            case FARMER -> state.getBlock() instanceof CropBlock cropBlock && cropBlock.isMaxAge(state)
+                    || this.isPlantingTarget(target, state);
+            case LUMBERJACK -> state.is(ModBlockTags.WORKER_LOGS)
+                    && !this.level().getBlockState(target.below()).is(ModBlockTags.WORKER_LOGS);
+            case FISHERMAN -> state.getFluidState().is(FluidTags.WATER)
+                    && state.getFluidState().isSource();
+            case MINER -> state.is(ModBlockTags.WORKER_MINEABLE)
+                    && (!worksite.configuration().itemFilters().isEmpty()
+                    || isDefaultMinerTarget(state));
+            case COOK -> (state.is(Blocks.FURNACE) || state.is(Blocks.SMOKER))
+                    && this.level().getBlockEntity(target)
+                            instanceof AbstractFurnaceBlockEntity;
             default -> false;
         };
     }
 
+    private boolean matchesWorksiteFilter(
+            WorkerProfession profession,
+            BlockPos target,
+            BlockState state,
+            WorkAreaConfiguration configuration
+    ) {
+        if (configuration.itemFilters().isEmpty()) {
+            return true;
+        }
+        if (profession == WorkerProfession.FARMER && this.isPlantingTarget(target, state)) {
+            return configuredFarmerSeeds(configuration).stream()
+                    .anyMatch(this::workerInventoryContains);
+        }
+        String blockId = BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString();
+        String itemId = BuiltInRegistries.ITEM.getKey(state.getBlock().asItem()).toString();
+        for (String filter : configuration.itemFilters()) {
+            if (filter.equals(blockId) || filter.equals(itemId)) {
+                return true;
+            }
+            if (!filter.startsWith("#")) {
+                continue;
+            }
+            try {
+                TagKey<Block> tag = TagKey.create(
+                        Registries.BLOCK,
+                        Identifier.parse(filter.substring(1)));
+                if (state.is(tag)) {
+                    return true;
+                }
+            } catch (RuntimeException ignored) {
+                // Invalid filters are rejected by the UI service and ignored defensively here.
+            }
+        }
+        return false;
+    }
+
+    private boolean isPlantingTarget(BlockPos target, BlockState state) {
+        if (!this.level().getBlockState(target.above()).isAir()
+                || this.availableCarriedFarmerSeed() == null) {
+            return false;
+        }
+        return state.is(Blocks.FARMLAND)
+                || state.is(Blocks.DIRT)
+                || state.is(Blocks.GRASS_BLOCK)
+                || state.is(Blocks.DIRT_PATH);
+    }
+
+    private static boolean isDefaultMinerTarget(BlockState state) {
+        Identifier id = BuiltInRegistries.BLOCK.getKey(state.getBlock());
+        String path = id.getPath();
+        return path.endsWith("_ore")
+                || path.equals("ancient_debris")
+                || path.equals("raw_iron_block")
+                || path.equals("raw_copper_block")
+                || path.equals("raw_gold_block");
+    }
+
+    private Optional<WorksiteRecord> authoritativeWorksite() {
+        if (!(this.level() instanceof ServerLevel serverLevel)
+                || this.getOwnerReference() == null) {
+            return Optional.empty();
+        }
+        return KingdomSavedData.get(serverLevel)
+                .assignedWorksite(this.getOwnerReference().getUUID(), this.getUUID());
+    }
+
+    private boolean isInsideWorksiteBounds(BlockPos target, WorksiteRecord worksite) {
+        if (!worksite.dimensionId().equals(this.level().dimension().identifier().toString())) {
+            return false;
+        }
+        return worksite.configuration().bounds().contains(
+                new BlockPos(worksite.x(), worksite.y(), worksite.z()),
+                target);
+    }
+
+    private net.minecraft.world.item.Item availableCarriedFarmerSeed() {
+        return configuredFarmerSeeds(this.authoritativeWorksite()
+                        .map(WorksiteRecord::configuration)
+                        .orElseGet(() -> WorkAreaConfiguration.defaults(this.workRadius)))
+                .stream()
+                .filter(this::workerInventoryContains)
+                .findFirst()
+                .orElse(null);
+    }
+
+    private net.minecraft.world.item.Item availableStoredFarmerSeed() {
+        if (this.storageTarget == null) {
+            return null;
+        }
+        return configuredFarmerSeeds(this.authoritativeWorksite()
+                        .map(WorksiteRecord::configuration)
+                        .orElseGet(() -> WorkAreaConfiguration.defaults(this.workRadius)))
+                .stream()
+                .filter(seed -> this.containerContains(this.storageTarget, seed))
+                .findFirst()
+                .orElse(null);
+    }
+
+    private static List<net.minecraft.world.item.Item> configuredFarmerSeeds(
+            WorkAreaConfiguration configuration
+    ) {
+        List<net.minecraft.world.item.Item> supported = List.of(
+                Items.WHEAT_SEEDS,
+                Items.CARROT,
+                Items.POTATO,
+                Items.BEETROOT_SEEDS);
+        if (configuration.itemFilters().isEmpty()) {
+            return supported;
+        }
+        return supported.stream()
+                .filter(seed -> configuration.itemFilters().contains(
+                        BuiltInRegistries.ITEM.getKey(seed).toString())
+                        || configuration.itemFilters().contains(
+                        BuiltInRegistries.BLOCK.getKey(
+                                Objects.requireNonNull(cropStateForSeed(seed)).getBlock()).toString()))
+                .toList();
+    }
+
+    private static net.minecraft.world.item.Item seedForCrop(BlockState state) {
+        if (state.is(Blocks.WHEAT)) return Items.WHEAT_SEEDS;
+        if (state.is(Blocks.CARROTS)) return Items.CARROT;
+        if (state.is(Blocks.POTATOES)) return Items.POTATO;
+        if (state.is(Blocks.BEETROOTS)) return Items.BEETROOT_SEEDS;
+        return null;
+    }
+
+    private static BlockState cropStateForSeed(@Nullable Item seed) {
+        if (seed == Items.WHEAT_SEEDS) return Blocks.WHEAT.defaultBlockState();
+        if (seed == Items.CARROT) return Blocks.CARROTS.defaultBlockState();
+        if (seed == Items.POTATO) return Blocks.POTATOES.defaultBlockState();
+        if (seed == Items.BEETROOT_SEEDS) return Blocks.BEETROOTS.defaultBlockState();
+        return null;
+    }
+
+    private static net.minecraft.world.item.Item matchingSaplingForLog(BlockState state) {
+        Identifier logId = BuiltInRegistries.BLOCK.getKey(state.getBlock());
+        String path = logId.getPath();
+        if (path.startsWith("stripped_")) {
+            path = path.substring("stripped_".length());
+        }
+        String species;
+        if (path.endsWith("_log")) {
+            species = path.substring(0, path.length() - "_log".length());
+        } else if (path.endsWith("_wood")) {
+            species = path.substring(0, path.length() - "_wood".length());
+        } else {
+            return null;
+        }
+        String saplingPath = species.equals("mangrove")
+                ? "mangrove_propagule"
+                : species + "_sapling";
+        net.minecraft.world.item.Item sapling = BuiltInRegistries.ITEM.getValue(
+                Identifier.fromNamespaceAndPath(logId.getNamespace(), saplingPath));
+        return sapling == Items.AIR ? null : sapling;
+    }
+
+    private List<BlockPos> connectedTreeLogs(
+            BlockPos root,
+            WorksiteRecord worksite,
+            int limit
+    ) {
+        net.minecraft.world.item.Item species = matchingSaplingForLog(this.level().getBlockState(root));
+        if (species == null) {
+            return List.of();
+        }
+        ArrayDeque<BlockPos> pending = new ArrayDeque<>();
+        HashSet<BlockPos> visited = new HashSet<>();
+        ArrayList<BlockPos> logs = new ArrayList<>();
+        pending.add(root.immutable());
+        while (!pending.isEmpty() && logs.size() < limit) {
+            BlockPos current = pending.removeFirst();
+            if (!visited.add(current) || !this.isInsideWorksiteBounds(current, worksite)) {
+                continue;
+            }
+            BlockState state = this.level().getBlockState(current);
+            if (!state.is(ModBlockTags.WORKER_LOGS)
+                    || matchingSaplingForLog(state) != species) {
+                continue;
+            }
+            logs.add(current.immutable());
+            pending.add(current.above());
+            pending.add(current.below());
+            pending.add(current.north());
+            pending.add(current.south());
+            pending.add(current.east());
+            pending.add(current.west());
+        }
+        return List.copyOf(logs);
+    }
+
+    private boolean requestWorkerSupply(net.minecraft.world.item.Item item, int quantity) {
+        if (!(this.level() instanceof ServerLevel serverLevel)
+                || this.getOwnerReference() == null
+                || this.workOrderId == null
+                || quantity <= 0) {
+            return false;
+        }
+        KingdomSavedData data = KingdomSavedData.get(serverLevel);
+        KingdomRecord kingdom = data.kingdomForRecruit(this.getUUID()).orElse(null);
+        if (kingdom == null) {
+            return false;
+        }
+        galacticwars.clonewars.kingdom.SettlementRecord settlement = kingdom.settlements().stream()
+                .filter(candidate -> candidate.containsRecruit(this.getUUID()))
+                .findFirst()
+                .orElse(null);
+        if (settlement == null) {
+            return false;
+        }
+        String itemId = BuiltInRegistries.ITEM.getKey(item).toString();
+        String sourceId = "worker/" + this.getUUID() + "/" + this.workOrderId;
+        UUID demandId = UUID.nameUUIDFromBytes(
+                (settlement.id() + ":" + sourceId + ":" + itemId)
+                        .getBytes(StandardCharsets.UTF_8));
+        int priority = this.authoritativeWorksite()
+                .map(WorksiteRecord::configuration)
+                .map(WorkAreaConfiguration::priority)
+                .orElse(50);
+        return data.requestSupply(
+                kingdom.ownerId(),
+                settlement.id(),
+                new SupplyDemand(
+                        demandId,
+                        SupplyCategory.WORKER_INPUT,
+                        itemId,
+                        quantity,
+                        0,
+                        priority,
+                        sourceId));
+    }
+
     private List<Animal> livestockInWorkArea() {
-        return this.livestockNear(this.workTarget, this.worksiteScanRadius());
+        WorksiteRecord worksite = this.authoritativeWorksite().orElse(null);
+        if (worksite == null || !(this.level() instanceof ServerLevel serverLevel)) {
+            return List.of();
+        }
+        WorkAreaBounds bounds = worksite.configuration().bounds();
+        double minX = worksite.x() - (bounds.width() - 1) / 2.0D;
+        double minY = worksite.y() - (bounds.height() - 1) / 2.0D;
+        double minZ = worksite.z() - (bounds.depth() - 1) / 2.0D;
+        AABB area = new AABB(
+                minX,
+                minY,
+                minZ,
+                minX + bounds.width(),
+                minY + bounds.height(),
+                minZ + bounds.depth());
+        return serverLevel.getEntitiesOfClass(
+                Animal.class,
+                area,
+                animal -> animal.isAlive()
+                        && !(animal instanceof GalacticRecruitEntity)
+                        && this.isConfiguredLivestock(animal));
     }
 
     private List<Animal> livestockNear(@Nullable BlockPos center, double radius) {
@@ -3826,7 +5611,9 @@ public class GalacticRecruitEntity extends TamableAnimal
             return List.of();
         }
         return serverLevel.getEntitiesOfClass(Animal.class, this.getBoundingBox().inflate(radius), animal ->
-                animal.isAlive() && !(animal instanceof GalacticRecruitEntity));
+                animal.isAlive()
+                        && !(animal instanceof GalacticRecruitEntity)
+                        && this.isConfiguredLivestock(animal));
     }
 
     private net.minecraft.world.item.Item requiredAnimalFeed() {
@@ -3834,7 +5621,14 @@ public class GalacticRecruitEntity extends TamableAnimal
     }
 
     private net.minecraft.world.item.Item requiredAnimalFeed(List<Animal> livestock) {
-        for (net.minecraft.world.item.Item feed : List.of(Items.WHEAT, Items.CARROT, Items.WHEAT_SEEDS)) {
+        for (net.minecraft.world.item.Item feed : List.of(
+                Items.WHEAT,
+                Items.CARROT,
+                Items.POTATO,
+                Items.WHEAT_SEEDS,
+                Items.BEETROOT_SEEDS,
+                Items.MELON_SEEDS,
+                Items.PUMPKIN_SEEDS)) {
             if (!this.breedingPair(livestock, feed).isEmpty()) {
                 return feed;
             }
@@ -3862,51 +5656,206 @@ public class GalacticRecruitEntity extends TamableAnimal
         return List.of();
     }
 
-    private net.minecraft.world.item.Item availableStoredRawCookingInput() {
+    private boolean isConfiguredLivestock(Animal animal) {
+        WorkAreaConfiguration configuration = this.authoritativeWorksite()
+                .map(WorksiteRecord::configuration)
+                .orElseGet(() -> WorkAreaConfiguration.defaults(this.workRadius));
+        List<EntityType<?>> configuredTypes = new ArrayList<>();
+        for (String filter : configuration.itemFilters()) {
+            if (filter.startsWith("#")) {
+                continue;
+            }
+            try {
+                Identifier id = Identifier.parse(filter);
+                EntityType<?> type = BuiltInRegistries.ENTITY_TYPE.getValue(id);
+                if (type != null && id.equals(BuiltInRegistries.ENTITY_TYPE.getKey(type))) {
+                    configuredTypes.add(type);
+                }
+            } catch (RuntimeException ignored) {
+                // Invalid legacy filters are ignored by the runtime and can be removed in the UI.
+            }
+        }
+        return configuredTypes.isEmpty() || configuredTypes.contains(animal.getType());
+    }
+
+    private net.minecraft.world.item.Item availableStoredCookingInput(ServerLevel level) {
         if (this.storageTarget == null) {
             return null;
         }
-        return rawCookingInputs().stream()
-                .filter(item -> this.containerContains(this.storageTarget, item))
-                .findFirst().orElse(null);
-    }
-
-    private net.minecraft.world.item.Item availableRawCookingInput() {
-        return rawCookingInputs().stream()
-                .filter(this::workerInventoryContains)
-                .findFirst().orElse(null);
-    }
-
-    private net.minecraft.world.item.Item missingCookingIngredient() {
-        net.minecraft.world.item.Item carriedRaw = this.availableRawCookingInput();
-        if (carriedRaw == null) {
-            return this.availableStoredRawCookingInput();
+        Container container = this.findContainer(this.storageTarget).orElse(null);
+        if (container == null) {
+            return null;
         }
-        return this.workerInventoryContains(Items.COAL) ? null : Items.COAL;
-    }
-
-    private static List<net.minecraft.world.item.Item> rawCookingInputs() {
-        return List.of(Items.BEEF, Items.PORKCHOP, Items.CHICKEN, Items.COD, Items.SALMON, Items.POTATO);
-    }
-
-    private static net.minecraft.world.item.Item cookedFoodFor(net.minecraft.world.item.Item raw) {
-        if (raw == Items.BEEF) return Items.COOKED_BEEF;
-        if (raw == Items.PORKCHOP) return Items.COOKED_PORKCHOP;
-        if (raw == Items.CHICKEN) return Items.COOKED_CHICKEN;
-        if (raw == Items.COD) return Items.COOKED_COD;
-        if (raw == Items.SALMON) return Items.COOKED_SALMON;
-        if (raw == Items.POTATO) return Items.BAKED_POTATO;
+        int slotLimit = Math.min(container.getContainerSize(),
+                this.registeredStorageSlots(this.storageTarget));
+        for (int slot = 0; slot < slotLimit; slot++) {
+            ItemStack stack = container.getItem(slot);
+            if (!stack.isEmpty()
+                    && this.matchesConfiguredCookingInput(stack)
+                    && this.hasAnyCookingRecipe(level, stack)) {
+                return stack.getItem();
+            }
+        }
         return null;
     }
 
-    private boolean canModifyWorkerTarget(BlockPos target) {
-        if (this.workTarget == null || !this.level().isLoaded(target)) {
-            return false;
+    private net.minecraft.world.item.Item availableCarriedCookingInput(ServerLevel level) {
+        for (ItemStack stack : this.workerInventory) {
+            if (!stack.isEmpty()
+                    && this.matchesConfiguredCookingInput(stack)
+                    && this.hasAnyCookingRecipe(level, stack)) {
+                return stack.getItem();
+            }
         }
-        int radius = this.worksiteScanRadius();
-        if (Math.abs(target.getX() - this.workTarget.getX()) > radius
-                || Math.abs(target.getZ() - this.workTarget.getZ()) > radius
-                || Math.abs(target.getY() - this.workTarget.getY()) > 4) {
+        return null;
+    }
+
+    private net.minecraft.world.item.Item availableCarriedCookingInputForStation(
+            ServerLevel level,
+            BlockState station
+    ) {
+        for (ItemStack stack : this.workerInventory) {
+            if (!stack.isEmpty()
+                    && this.matchesConfiguredCookingInput(stack)
+                    && this.hasCookingRecipeForStation(level, station, stack)) {
+                return stack.getItem();
+            }
+        }
+        return null;
+    }
+
+    private net.minecraft.world.item.Item missingCookingIngredient() {
+        if (!(this.level() instanceof ServerLevel serverLevel)) {
+            return null;
+        }
+        net.minecraft.world.item.Item carriedInput =
+                this.availableCarriedCookingInput(serverLevel);
+        if (carriedInput == null) {
+            return this.availableStoredCookingInput(serverLevel);
+        }
+        return this.availableCarriedCookingFuel(serverLevel) != null
+                ? null
+                : this.availableStoredCookingFuel(serverLevel);
+    }
+
+    private net.minecraft.world.item.Item availableCarriedCookingFuel(ServerLevel level) {
+        return this.workerInventory.stream()
+                .filter(stack -> !stack.isEmpty() && level.fuelValues().isFuel(stack))
+                .map(ItemStack::getItem)
+                .findFirst()
+                .orElse(null);
+    }
+
+    private net.minecraft.world.item.Item availableStoredCookingFuel(ServerLevel level) {
+        if (this.storageTarget == null) {
+            return null;
+        }
+        Container container = this.findContainer(this.storageTarget).orElse(null);
+        if (container == null) {
+            return null;
+        }
+        int slotLimit = Math.min(container.getContainerSize(),
+                this.registeredStorageSlots(this.storageTarget));
+        for (int slot = 0; slot < slotLimit; slot++) {
+            ItemStack stack = container.getItem(slot);
+            if (!stack.isEmpty() && level.fuelValues().isFuel(stack)) {
+                return stack.getItem();
+            }
+        }
+        return null;
+    }
+
+    private net.minecraft.world.item.Item configuredCookingDemand(ServerLevel level) {
+        WorkAreaConfiguration configuration = this.authoritativeWorksite()
+                .map(WorksiteRecord::configuration)
+                .orElseGet(() -> WorkAreaConfiguration.defaults(this.workRadius));
+        for (String filter : configuration.itemFilters()) {
+            if (!filter.startsWith("#")) {
+                net.minecraft.world.item.Item item = resolveItem(filter);
+                if (item != null && this.hasAnyCookingRecipe(level, new ItemStack(item))) {
+                    return item;
+                }
+                continue;
+            }
+            try {
+                TagKey<Item> tag = TagKey.create(
+                        Registries.ITEM,
+                        Identifier.parse(filter.substring(1)));
+                net.minecraft.world.item.Item item = BuiltInRegistries.ITEM.get(tag).stream()
+                        .map(net.minecraft.core.Holder::value)
+                        .filter(candidate -> this.hasAnyCookingRecipe(
+                                level, new ItemStack(candidate)))
+                        .findFirst()
+                        .orElse(null);
+                if (item != null) {
+                    return item;
+                }
+            } catch (RuntimeException ignored) {
+                // Worksite input validation drops malformed tag filters.
+            }
+        }
+        return configuration.itemFilters().isEmpty() ? Items.BEEF : null;
+    }
+
+    private boolean matchesConfiguredCookingInput(ItemStack stack) {
+        WorkAreaConfiguration configuration = this.authoritativeWorksite()
+                .map(WorksiteRecord::configuration)
+                .orElseGet(() -> WorkAreaConfiguration.defaults(this.workRadius));
+        if (configuration.itemFilters().isEmpty()) {
+            return true;
+        }
+        String itemId = BuiltInRegistries.ITEM.getKey(stack.getItem()).toString();
+        for (String filter : configuration.itemFilters()) {
+            if (filter.equals(itemId)) {
+                return true;
+            }
+            if (filter.startsWith("#")) {
+                try {
+                    TagKey<Item> tag = TagKey.create(
+                            Registries.ITEM,
+                            Identifier.parse(filter.substring(1)));
+                    if (stack.is(tag)) {
+                        return true;
+                    }
+                } catch (RuntimeException ignored) {
+                    // Invalid filters cannot authorize an item.
+                }
+            }
+        }
+        return false;
+    }
+
+    private boolean hasAnyCookingRecipe(ServerLevel level, ItemStack input) {
+        SingleRecipeInput recipeInput = new SingleRecipeInput(input);
+        return level.getServer().getRecipeManager()
+                .getRecipeFor(RecipeType.SMELTING, recipeInput, level).isPresent()
+                || level.getServer().getRecipeManager()
+                .getRecipeFor(RecipeType.SMOKING, recipeInput, level).isPresent();
+    }
+
+    private boolean hasCookingRecipeForStation(
+            ServerLevel level,
+            BlockState station,
+            ItemStack input
+    ) {
+        SingleRecipeInput recipeInput = new SingleRecipeInput(input);
+        if (station.is(Blocks.SMOKER)) {
+            return level.getServer().getRecipeManager()
+                    .getRecipeFor(RecipeType.SMOKING, recipeInput, level).isPresent();
+        }
+        if (station.is(Blocks.FURNACE)) {
+            return level.getServer().getRecipeManager()
+                    .getRecipeFor(RecipeType.SMELTING, recipeInput, level).isPresent();
+        }
+        return false;
+    }
+
+    private boolean canModifyWorkerTarget(BlockPos target) {
+        WorksiteRecord worksite = this.authoritativeWorksite().orElse(null);
+        if (worksite == null
+                || this.workTarget == null
+                || !this.level().isLoaded(target)
+                || !this.isInsideWorksiteBounds(target, worksite)) {
             return false;
         }
         return this.isInsideSettlementClaim(target);
@@ -4341,10 +6290,144 @@ public class GalacticRecruitEntity extends TamableAnimal
         this.workerPhase = phase;
         this.workerReason = reason;
         this.activeWorkTarget = target == null ? null : target.immutable();
+        Optional<WorkerTarget> executionTarget = Optional.ofNullable(this.activeWorkTarget)
+                .map(pos -> new WorkerTarget(
+                        this.level().dimension().identifier().toString(),
+                        pos.getX(),
+                        pos.getY(),
+                        pos.getZ()));
+        this.workerExecutionState = new WorkerExecutionState(
+                this.workerExecutionState.worksiteId(),
+                Optional.ofNullable(this.workOrderId),
+                phase,
+                executionTarget,
+                this.workerExecutionState.configurationRevision(),
+                this.workerNavigationFailures,
+                phase == WorkerPhase.BLOCKED
+                        ? Math.max(0L, this.level().getGameTime() + this.workerCooldownTicks)
+                        : 0L,
+                this.workerExecutionState.supplyReservationId(),
+                reason);
         this.entityData.set(DATA_WORKER_PHASE, phase.id());
         this.entityData.set(DATA_WORKER_REASON, reason);
         this.entityData.set(DATA_ACTIVE_WORK_TARGET, Optional.ofNullable(this.activeWorkTarget));
         this.syncRecruitStatusState();
+    }
+
+    public boolean isMarketAvailable() {
+        if (!(this.level() instanceof ServerLevel)
+                || !this.isAlive()
+                || this.getWorkerProfession().orElse(null) != WorkerProfession.MERCHANT
+                || this.storageTarget == null
+                || !this.isRegisteredStorageTarget(this.storageTarget)
+                || this.findContainer(this.storageTarget).isEmpty()) {
+            return false;
+        }
+        WorksiteRecord worksite = this.authoritativeWorksite().orElse(null);
+        return worksite != null
+                && this.distanceToSqr(
+                        worksite.x() + 0.5D,
+                        worksite.y() + 0.5D,
+                        worksite.z() + 0.5D) <= 9.0D
+                && (this.workerReason.equals("market_open")
+                        || this.workerReason.equals("open_market"));
+    }
+
+    public boolean hasMerchantStock(net.minecraft.world.item.Item item, int quantity) {
+        if (!this.isMarketAvailable() || item == null || quantity <= 0) {
+            return false;
+        }
+        Container storage = this.findContainer(this.storageTarget).orElse(null);
+        if (storage == null) {
+            return false;
+        }
+        int slotLimit = Math.min(
+                storage.getContainerSize(),
+                this.registeredStorageSlots(this.storageTarget));
+        return countItem(storage, item, slotLimit) >= quantity;
+    }
+
+    public ItemStack takeMerchantStock(net.minecraft.world.item.Item item, int quantity) {
+        if (!this.hasMerchantStock(item, quantity)) {
+            return ItemStack.EMPTY;
+        }
+        Container storage = this.findContainer(this.storageTarget).orElseThrow();
+        int slotLimit = Math.min(
+                storage.getContainerSize(),
+                this.registeredStorageSlots(this.storageTarget));
+        int remaining = quantity;
+        for (int slot = 0; slot < slotLimit && remaining > 0; slot++) {
+            ItemStack stack = storage.getItem(slot);
+            if (!stack.is(item)) {
+                continue;
+            }
+            int removed = Math.min(remaining, stack.getCount());
+            stack.shrink(removed);
+            remaining -= removed;
+        }
+        storage.setChanged();
+        return remaining == 0 ? new ItemStack(item, quantity) : ItemStack.EMPTY;
+    }
+
+    public boolean restoreMerchantStock(ItemStack stock) {
+        if (stock.isEmpty() || this.storageTarget == null) {
+            return stock.isEmpty();
+        }
+        Container storage = this.findContainer(this.storageTarget).orElse(null);
+        if (storage == null) {
+            return false;
+        }
+        int slotLimit = Math.min(
+                storage.getContainerSize(),
+                this.registeredStorageSlots(this.storageTarget));
+        ItemStack remaining = stock.copy();
+        for (int slot = 0; slot < slotLimit && !remaining.isEmpty(); slot++) {
+            ItemStack existing = storage.getItem(slot);
+            if (existing.isEmpty()) {
+                int inserted = Math.min(remaining.getCount(), remaining.getMaxStackSize());
+                storage.setItem(slot, remaining.copyWithCount(inserted));
+                remaining.shrink(inserted);
+            } else if (ItemStack.isSameItemSameComponents(existing, remaining)) {
+                int inserted = Math.min(
+                        remaining.getCount(),
+                        existing.getMaxStackSize() - existing.getCount());
+                existing.grow(inserted);
+                remaining.shrink(inserted);
+            }
+        }
+        storage.setChanged();
+        return remaining.isEmpty();
+    }
+
+    private WorkerExecutionState workerExecutionSnapshot() {
+        Optional<UUID> authoritativeWorksiteId = this.workerExecutionState.worksiteId();
+        long configurationRevision = this.workerExecutionState.configurationRevision();
+        if (this.level() instanceof ServerLevel serverLevel && this.getOwnerReference() != null) {
+            WorksiteRecord worksite = KingdomSavedData.get(serverLevel)
+                    .assignedWorksite(this.getOwnerReference().getUUID(), this.getUUID())
+                    .orElse(null);
+            if (worksite != null) {
+                authoritativeWorksiteId = Optional.of(worksite.id());
+                configurationRevision = worksite.configuration().revision();
+            }
+        }
+        Optional<WorkerTarget> target = Optional.ofNullable(this.activeWorkTarget)
+                .map(pos -> new WorkerTarget(
+                        this.level().dimension().identifier().toString(),
+                        pos.getX(),
+                        pos.getY(),
+                        pos.getZ()));
+        this.workerExecutionState = new WorkerExecutionState(
+                authoritativeWorksiteId,
+                Optional.ofNullable(this.workOrderId),
+                this.workerPhase,
+                target,
+                configurationRevision,
+                this.workerNavigationFailures,
+                this.workerExecutionState.retryAtGameTime(),
+                this.workerExecutionState.supplyReservationId(),
+                this.workerReason);
+        return this.workerExecutionState;
     }
 
     private void blockWorker(String reason) {
@@ -4360,7 +6443,15 @@ public class GalacticRecruitEntity extends TamableAnimal
     }
 
     private int worksiteScanRadius() {
-        return Math.max(MIN_WORK_RADIUS, Math.min(MAX_WORK_RADIUS, this.workRadius));
+        return this.authoritativeWorksite()
+                .map(WorksiteRecord::configuration)
+                .map(configuration -> Math.max(
+                        configuration.bounds().width(),
+                        configuration.bounds().depth()) / 2)
+                .map(radius -> Math.max(MIN_WORK_RADIUS, Math.min(MAX_WORK_RADIUS, radius)))
+                .orElseGet(() -> Math.max(
+                        MIN_WORK_RADIUS,
+                        Math.min(MAX_WORK_RADIUS, this.workRadius)));
     }
 
     private boolean tryHire(ServerPlayer player) {
@@ -5411,7 +7502,13 @@ public class GalacticRecruitEntity extends TamableAnimal
     }
 
     private void applyUnitEquipment(ArmyEquipmentLoadout equipment) {
-        this.setEquipmentFromData(EquipmentSlot.MAINHAND, equipment.mainHandItemId());
+        if (this.serviceBranch == NpcServiceBranch.CIVILIAN) {
+            this.inactiveDutyMainHand = equipmentStackFromData(
+                    equipment.mainHandItemId());
+        } else {
+            this.setEquipmentFromData(
+                    EquipmentSlot.MAINHAND, equipment.mainHandItemId());
+        }
         this.setEquipmentFromData(EquipmentSlot.HEAD, equipment.headItemId());
         this.setEquipmentFromData(EquipmentSlot.CHEST, equipment.chestItemId());
         this.setEquipmentFromData(EquipmentSlot.LEGS, equipment.legsItemId());
@@ -5696,7 +7793,8 @@ public class GalacticRecruitEntity extends TamableAnimal
             case SET_WORKSITE, RETURN_WORKSITE, CLEAR_WORKSITE, SET_STORAGE,
                     BUILD_STARTER_KEEP, WORK_RADIUS_DECREASE, WORK_RADIUS_INCREASE,
                     NEXT_BLUEPRINT, RETURN_TO_SOLDIER, CANCEL_BUILD,
-                    ASSIGN_WORKER_PROFESSION, ROTATE_BLUEPRINT -> true;
+                    ASSIGN_WORKER_PROFESSION, ROTATE_BLUEPRINT,
+                    OPEN_WORKSITE_CONFIGURATION -> true;
             default -> false;
         };
     }
@@ -6108,12 +8206,50 @@ public class GalacticRecruitEntity extends TamableAnimal
     }
 
     private void resumeWorkAfterProfessionAssignment() {
+        this.adoptAssignedWorksiteCursor();
         if (this.workTarget != null) {
             this.moveTarget = this.workTarget;
             this.setRecruitCommand(RecruitmentAction.WORK_AT_SITE);
             return;
         }
         this.setRecruitCommand(RecruitmentAction.FOLLOW_OWNER);
+    }
+
+    private void adoptAssignedWorksiteCursor() {
+        if (!(this.level() instanceof ServerLevel serverLevel)
+                || this.getOwnerReference() == null) {
+            return;
+        }
+        WorksiteRecord worksite = KingdomSavedData.get(serverLevel)
+                .assignedWorksite(this.getOwnerReference().getUUID(), this.getUUID())
+                .orElse(null);
+        if (worksite == null) {
+            return;
+        }
+        boolean sameWorksite = this.workerExecutionState.worksiteId()
+                .filter(worksite.id()::equals)
+                .isPresent();
+        boolean sameRevision = this.workerExecutionState.configurationRevision()
+                == worksite.configuration().revision();
+        if (sameWorksite && sameRevision) {
+            return;
+        }
+        this.releaseCurrentWorkOrder(false);
+        this.pauseWorkerNavigation();
+        this.workerNavigationFailures = 0;
+        this.workerCooldownTicks = 0;
+        this.workerExecutionState = new WorkerExecutionState(
+                Optional.of(worksite.id()),
+                Optional.empty(),
+                WorkerPhase.ACQUIRE_ORDER,
+                Optional.empty(),
+                worksite.configuration().revision(),
+                0,
+                0L,
+                Optional.empty(),
+                "assignment_updated");
+        this.legacyWorkerExecutionCursor = false;
+        this.transitionWorker(WorkerPhase.ACQUIRE_ORDER, "assignment_updated", null);
     }
 
     private void setWorkTarget(@Nullable BlockPos target) {

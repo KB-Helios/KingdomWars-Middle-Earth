@@ -82,6 +82,7 @@ public final class RecruitMeleeCombatBehaviour
         LivingEntity target = target(recruit);
         return recruit.getRecruitDuty() == galacticwars.clonewars.recruitment.RecruitDuty.SOLDIER
                 && !recruit.hasAuthoritativeArmyGroup()
+                && !recruit.isHazardAvoidanceActive()
                 && recruit.canUseLocalAttackTarget(target)
                 && !FactionRangedWeaponService.supportsRecruitRangedCombat(
                         recruit.getMainHandItem());

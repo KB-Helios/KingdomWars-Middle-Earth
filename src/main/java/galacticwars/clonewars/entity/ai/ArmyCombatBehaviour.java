@@ -142,6 +142,22 @@ public final class ArmyCombatBehaviour extends ExtendedBehaviour<GalacticRecruit
                             state.group().effectiveTactics().tightFormation() ? 1 : 2));
             return;
         }
+        double range = Math.max(
+                4.0D,
+                recruit.getAttributeValue(Attributes.FOLLOW_RANGE));
+        if (recruit.distanceToSqr(target) <= range * range
+                && recruit.getSensing().hasLineOfSight(target)) {
+            if (recruit.tickCount % 8 == 0) {
+                BrainUtil.setMemory(
+                        recruit,
+                        MemoryModuleType.WALK_TARGET,
+                        new WalkTarget(
+                                RecruitCombatMovement.coverOrDodge(recruit, target),
+                                1.1F,
+                                0));
+            }
+            return;
+        }
         int preferredRange = Math.max(4,
                 (int) Math.floor(recruit.getAttributeValue(Attributes.FOLLOW_RANGE) * 0.7D));
         BrainUtil.setMemory(recruit, MemoryModuleType.WALK_TARGET,
@@ -195,6 +211,7 @@ public final class ArmyCombatBehaviour extends ExtendedBehaviour<GalacticRecruit
         LivingEntity target = BrainUtil.getMemory(recruit, MemoryModuleType.ATTACK_TARGET);
         return state != null
                 && recruit.getRecruitDuty() != RecruitDuty.WORKER
+                && !recruit.isHazardAvoidanceActive()
                 && ArmyBrainSupport.canEngageGroupTarget(recruit, state, target);
     }
 

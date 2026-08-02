@@ -30,6 +30,8 @@ import galacticwars.clonewars.recruitment.NpcServiceBranch;
 import galacticwars.clonewars.workforce.WorkerProfession;
 import galacticwars.clonewars.workforce.CourierRouteMode;
 import galacticwars.clonewars.workforce.CourierWaypoint;
+import galacticwars.clonewars.workforce.CourierDispatchMode;
+import galacticwars.clonewars.workforce.WorkAreaBounds;
 import galacticwars.clonewars.workforce.SettlementSupplyLedger;
 import galacticwars.clonewars.workforce.SupplyDemand;
 import galacticwars.clonewars.workforce.WorkforceCodecs;
@@ -42,7 +44,7 @@ import net.minecraft.world.level.saveddata.SavedData;
 import net.minecraft.world.level.saveddata.SavedDataType;
 
 public final class KingdomSavedData extends SavedData {
-    public static final int CURRENT_SCHEMA_VERSION = 10;
+    public static final int CURRENT_SCHEMA_VERSION = 11;
     public static final Codec<KingdomSavedData> CODEC = RecordCodecBuilder.create(instance -> instance.group(
             Codec.INT.optionalFieldOf("schema_version", CURRENT_SCHEMA_VERSION).forGetter(KingdomSavedData::schemaVersion),
             KingdomCodecs.KINGDOM_RECORD.listOf().optionalFieldOf("kingdoms", List.of()).forGetter(KingdomSavedData::kingdoms),
@@ -372,6 +374,30 @@ public final class KingdomSavedData extends SavedData {
         } catch (IllegalArgumentException | IllegalStateException rejected) {
             return false;
         }
+    }
+
+    public boolean releaseSupply(
+            UUID ownerId,
+            UUID settlementId,
+            UUID reservationId,
+            UUID workerId
+    ) {
+        KingdomRecord kingdom = kingdomsByOwner.get(ownerId);
+        SettlementRecord settlement = kingdom == null ? null : kingdom.settlements().stream()
+                .filter(candidate -> candidate.id().equals(settlementId))
+                .findFirst()
+                .orElse(null);
+        SettlementSupplyLedger current = supplyLedgersBySettlement.get(settlementId);
+        if (settlement == null || current == null || !settlement.containsRecruit(workerId)) {
+            return false;
+        }
+        SettlementSupplyLedger updated = current.release(reservationId, workerId);
+        if (updated == current) {
+            return false;
+        }
+        supplyLedgersBySettlement.put(settlementId, updated);
+        this.setDirty();
+        return true;
     }
 
     public Optional<KingdomInvite> inviteMember(
@@ -1171,6 +1197,187 @@ public final class KingdomSavedData extends SavedData {
         storeKingdom(kingdom.withSettlement(updated));
         this.setDirty();
         return updated.assignedWorksite(recruitId);
+    }
+
+    public WorksiteUpdateResult configureWorksite(
+            UUID actorId,
+            UUID worksiteId,
+            long expectedConfigurationRevision,
+            WorkAreaBounds bounds,
+            boolean kingdomAccess,
+            int priority,
+            boolean overlayVisible,
+            List<String> itemFilters,
+            CourierDispatchMode dispatchMode
+    ) {
+        Objects.requireNonNull(actorId, "actorId");
+        Objects.requireNonNull(worksiteId, "worksiteId");
+        Objects.requireNonNull(bounds, "bounds");
+        Objects.requireNonNull(itemFilters, "itemFilters");
+        Objects.requireNonNull(dispatchMode, "dispatchMode");
+        KingdomRecord kingdom = kingdomForPlayer(actorId).orElse(null);
+        if (kingdom == null || inactiveHallOwners.contains(kingdom.ownerId())
+                || !kingdom.allows(actorId, KingdomPermission.MANAGE_WORKSITES)) {
+            return WorksiteUpdateResult.rejected("permission_denied");
+        }
+        SettlementRecord settlement = kingdom.settlements().stream()
+                .filter(candidate -> candidate.worksites().stream()
+                        .anyMatch(worksite -> worksite.id().equals(worksiteId)))
+                .findFirst()
+                .orElse(null);
+        if (settlement == null) {
+            return WorksiteUpdateResult.rejected("worksite_missing");
+        }
+        WorksiteRecord current = settlement.worksites().stream()
+                .filter(worksite -> worksite.id().equals(worksiteId))
+                .findFirst()
+                .orElseThrow();
+        if (!current.configuration().kingdomAccess()
+                && !kingdom.ownerId().equals(actorId)) {
+            return WorksiteUpdateResult.rejected("owner_only");
+        }
+        if (current.configuration().revision() != expectedConfigurationRevision) {
+            return WorksiteUpdateResult.rejected("stale_revision");
+        }
+        SettlementRecord updated = settlement.configureWorksite(
+                worksiteId,
+                expectedConfigurationRevision,
+                bounds,
+                kingdomAccess,
+                priority,
+                overlayVisible,
+                itemFilters,
+                dispatchMode);
+        if (updated == settlement) {
+            return WorksiteUpdateResult.rejected("unchanged");
+        }
+        WorksiteRecord configured = updated.worksites().stream()
+                .filter(worksite -> worksite.id().equals(worksiteId))
+                .findFirst()
+                .orElseThrow();
+        storeKingdom(kingdom.replaceSettlement(updated));
+        this.setDirty();
+        return WorksiteUpdateResult.accepted(configured);
+    }
+
+    public WorksiteUpdateResult configureWorksiteRoute(
+            UUID actorId,
+            UUID worksiteId,
+            long expectedConfigurationRevision,
+            List<CourierWaypoint> route,
+            CourierRouteMode mode
+    ) {
+        Objects.requireNonNull(actorId, "actorId");
+        Objects.requireNonNull(worksiteId, "worksiteId");
+        Objects.requireNonNull(route, "route");
+        Objects.requireNonNull(mode, "mode");
+        KingdomRecord kingdom = kingdomForPlayer(actorId).orElse(null);
+        if (kingdom == null || inactiveHallOwners.contains(kingdom.ownerId())
+                || !kingdom.allows(actorId, KingdomPermission.MANAGE_WORKSITES)
+                || !kingdom.allows(actorId, KingdomPermission.MANAGE_LOGISTICS)) {
+            return WorksiteUpdateResult.rejected("permission_denied");
+        }
+        SettlementRecord settlement = kingdom.settlements().stream()
+                .filter(candidate -> candidate.worksites().stream()
+                        .anyMatch(worksite -> worksite.id().equals(worksiteId)))
+                .findFirst()
+                .orElse(null);
+        if (settlement == null) {
+            return WorksiteUpdateResult.rejected("worksite_missing");
+        }
+        WorksiteRecord current = settlement.worksites().stream()
+                .filter(worksite -> worksite.id().equals(worksiteId))
+                .findFirst()
+                .orElseThrow();
+        if (!current.configuration().kingdomAccess()
+                && !kingdom.ownerId().equals(actorId)) {
+            return WorksiteUpdateResult.rejected("owner_only");
+        }
+        if (current.configuration().revision() != expectedConfigurationRevision) {
+            return WorksiteUpdateResult.rejected("stale_revision");
+        }
+        if (route.size() > galacticwars.clonewars.workforce.CourierRoutePlan.MAX_WAYPOINTS
+                || route.stream().anyMatch(waypoint ->
+                        !current.dimensionId().equals(waypoint.dimensionId()))
+                || route.stream().anyMatch(waypoint -> kingdom.claims().stream().noneMatch(claim ->
+                        claim.contains(waypoint.dimensionId(),
+                                waypoint.x() >> 4, waypoint.z() >> 4)))) {
+            return WorksiteUpdateResult.rejected("invalid_route");
+        }
+        SettlementRecord updated = settlement.configureWorksiteRoute(
+                worksiteId,
+                expectedConfigurationRevision,
+                route,
+                mode);
+        if (updated == settlement) {
+            return WorksiteUpdateResult.rejected("unchanged");
+        }
+        WorksiteRecord configured = updated.worksites().stream()
+                .filter(worksite -> worksite.id().equals(worksiteId))
+                .findFirst()
+                .orElseThrow();
+        storeKingdom(kingdom.replaceSettlement(updated));
+        this.setDirty();
+        return WorksiteUpdateResult.accepted(configured);
+    }
+
+    public WorksiteUpdateResult configureWorksiteStorage(
+            UUID actorId,
+            UUID worksiteId,
+            long expectedConfigurationRevision,
+            StorageEndpoint endpoint
+    ) {
+        Objects.requireNonNull(actorId, "actorId");
+        Objects.requireNonNull(worksiteId, "worksiteId");
+        Objects.requireNonNull(endpoint, "endpoint");
+        KingdomRecord kingdom = kingdomForPlayer(actorId).orElse(null);
+        if (kingdom == null
+                || inactiveHallOwners.contains(kingdom.ownerId())
+                || !kingdom.allows(actorId, KingdomPermission.MANAGE_WORKSITES)) {
+            return WorksiteUpdateResult.rejected("permission_denied");
+        }
+        SettlementRecord settlement = kingdom.settlements().stream()
+                .filter(candidate -> candidate.worksites().stream()
+                        .anyMatch(worksite -> worksite.id().equals(worksiteId)))
+                .findFirst()
+                .orElse(null);
+        if (settlement == null) {
+            return WorksiteUpdateResult.rejected("worksite_missing");
+        }
+        WorksiteRecord current = settlement.worksites().stream()
+                .filter(worksite -> worksite.id().equals(worksiteId))
+                .findFirst()
+                .orElseThrow();
+        if (!current.configuration().kingdomAccess()
+                && !kingdom.ownerId().equals(actorId)) {
+            return WorksiteUpdateResult.rejected("owner_only");
+        }
+        if (current.configuration().revision() != expectedConfigurationRevision) {
+            return WorksiteUpdateResult.rejected("stale_revision");
+        }
+        boolean registered = registeredStorageEndpoints(kingdom.ownerId()).stream()
+                .anyMatch(candidate -> candidate.dimensionId().equals(endpoint.dimensionId())
+                        && candidate.x() == endpoint.x()
+                        && candidate.y() == endpoint.y()
+                        && candidate.z() == endpoint.z()
+                        && candidate.slots() == endpoint.slots());
+        if (!registered || !current.dimensionId().equals(endpoint.dimensionId())) {
+            return WorksiteUpdateResult.rejected("registered_storage_required");
+        }
+        SettlementRecord updated = settlement.configureWorksiteStorage(
+                worksiteId,
+                expectedConfigurationRevision,
+                endpoint);
+        if (updated == settlement) {
+            return WorksiteUpdateResult.rejected("unchanged");
+        }
+        WorksiteRecord configured = updated.worksites().stream()
+                .filter(worksite -> worksite.id().equals(worksiteId))
+                .findFirst()
+                .orElseThrow();
+        storeKingdom(kingdom.replaceSettlement(updated));
+        this.setDirty();
+        return WorksiteUpdateResult.accepted(configured);
     }
 
     public boolean releaseWorksite(UUID actorId, UUID recruitId) {

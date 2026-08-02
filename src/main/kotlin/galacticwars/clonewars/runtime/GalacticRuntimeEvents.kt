@@ -15,6 +15,7 @@ import galacticwars.clonewars.kingdom.SiegeRuntimeEvents
 import galacticwars.clonewars.progression.MissionRuntimeEvents
 import galacticwars.clonewars.settlement.CommandCenterEvents
 import galacticwars.clonewars.survival.MountFiberRecoveryEvents
+import galacticwars.clonewars.workforce.WorksiteOverlayService
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
@@ -34,6 +35,7 @@ object GalacticRuntimeEvents {
         TickEvent.SERVER_POST.register(ForceRuntimeEvents::onServerTick)
         TickEvent.SERVER_POST.register(KingdomSimulationEvents::onServerTick)
         TickEvent.SERVER_POST.register(SiegeRuntimeEvents::onServerTick)
+        TickEvent.SERVER_POST.register(WorksiteOverlayService::onServerTick)
         MissionRuntimeEvents.register()
         PlayerClassRuntime.register()
 

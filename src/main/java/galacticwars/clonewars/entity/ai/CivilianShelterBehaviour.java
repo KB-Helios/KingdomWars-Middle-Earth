@@ -62,7 +62,8 @@ public final class CivilianShelterBehaviour
     }
 
     private static boolean shouldShelter(GalacticRecruitEntity civilian) {
-        return civilian.isNaturalFactionCivilian()
+        return !civilian.isHazardAvoidanceActive()
+                && civilian.isNaturalFactionCivilian()
                 && civilian.hasHome()
                 && !civilian.blockPosition().closerThan(civilian.getHomePosition(), 3.0D)
                 && (civilian.level().isDarkOutside()

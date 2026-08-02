@@ -48,12 +48,14 @@ public final class ArmyOrderBehaviour extends ExtendedBehaviour<GalacticRecruitE
 
     @Override
     protected boolean checkExtraStartConditions(ServerLevel level, GalacticRecruitEntity recruit) {
-        return !BrainUtil.hasMemory(recruit, MemoryModuleType.ATTACK_TARGET);
+        return !recruit.isHazardAvoidanceActive()
+                && !BrainUtil.hasMemory(recruit, MemoryModuleType.ATTACK_TARGET);
     }
 
     @Override
     protected boolean shouldKeepRunning(GalacticRecruitEntity recruit) {
         return BrainUtil.hasMemory(recruit, ArmyBrainMemoryTypes.ARMY_STATE)
+                && !recruit.isHazardAvoidanceActive()
                 && !BrainUtil.hasMemory(recruit, MemoryModuleType.ATTACK_TARGET);
     }
 

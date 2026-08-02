@@ -21,6 +21,7 @@ import galacticwars.clonewars.client.gui.RecruitCommandScreen
 import galacticwars.clonewars.client.gui.RecruitLoadoutScreen
 import galacticwars.clonewars.client.gui.StarterCampSetupScreen
 import galacticwars.clonewars.client.gui.VehicleHud
+import galacticwars.clonewars.client.gui.WorksiteConfigurationScreen
 import galacticwars.clonewars.client.render.BlasterClientExtensions
 import galacticwars.clonewars.client.render.LightsaberClientExtensions
 import galacticwars.clonewars.registry.ModEntityTypes
@@ -63,6 +64,10 @@ object GalacticWarsNeoForgeClient {
             ::CommandCenterOperationsScreen,
         )
         event.register(ModMenuTypes.FABRICATOR.get(), ::FabricatorScreen)
+        event.register(
+            ModMenuTypes.WORKSITE_CONFIGURATION.get(),
+            ::WorksiteConfigurationScreen,
+        )
     }
 
     @SubscribeEvent

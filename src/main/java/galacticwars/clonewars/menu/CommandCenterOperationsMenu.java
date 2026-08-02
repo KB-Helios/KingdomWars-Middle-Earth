@@ -79,6 +79,7 @@ public final class CommandCenterOperationsMenu extends AbstractContainerMenu {
     public static final int RESUME_WORKER = 74;
     public static final int RECALL_WORKER = 75;
     public static final int PAUSE_WORKER = 76;
+    public static final int CONFIGURE_WORKSITE = 77;
     public static final int PLAYER_CLASS = 90;
     public static final int REGISTER_OUTPOST = 30;
     public static final int INVITE_NEAREST = 31;
@@ -376,6 +377,32 @@ public final class CommandCenterOperationsMenu extends AbstractContainerMenu {
                     && buttonId != CREATE_SQUAD) {
                 reason = selectionReason(!groups.isEmpty(), primaryTargetId.isEmpty());
             }
+        } else if (buttonId == CONFIGURE_WORKSITE) {
+            var kingdom = data.kingdomForPlayer(player.getUUID()).orElse(null);
+            if (kingdom == null || !hall.canUse(player,
+                    galacticwars.clonewars.kingdom.KingdomPermission.MANAGE_WORKSITES)) {
+                return report(serverPlayer, false, "permission_denied");
+            }
+            List<WorkerSummary> workers = loadedWorkers(level, player, kingdom);
+            WorkerSummary selected = selectTarget(
+                    workers, primaryTargetId, WorkerSummary::entityId);
+            galacticwars.clonewars.entity.GalacticRecruitEntity worker =
+                    selected == null ? null
+                            : level.getEntity(selected.entityId())
+                                    instanceof galacticwars.clonewars.entity.GalacticRecruitEntity recruit
+                                            ? recruit
+                                            : null;
+            if (worker == null) {
+                return report(serverPlayer, false, selectionReason(
+                        !workers.isEmpty(), primaryTargetId.isEmpty()));
+            }
+            if (WorksiteConfigurationMenu.captureSnapshot(serverPlayer, worker).isEmpty()) {
+                return report(serverPlayer, false, "worksite_missing");
+            }
+            MenuRegistry.openExtendedMenu(
+                    serverPlayer,
+                    new WorksiteConfigurationMenuProvider(worker, hallPos));
+            return true;
         } else if (buttonId == RESUME_WORKER
                 || buttonId == RECALL_WORKER
                 || buttonId == PAUSE_WORKER) {

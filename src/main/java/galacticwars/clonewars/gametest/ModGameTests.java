@@ -131,6 +131,8 @@ import galacticwars.clonewars.settlement.StarterCampDeploymentPhase;
 import galacticwars.clonewars.settlement.StarterCampDeploymentService;
 import galacticwars.clonewars.workforce.WorkerPhase;
 import galacticwars.clonewars.workforce.WorkerProfession;
+import galacticwars.clonewars.workforce.CourierDispatchMode;
+import galacticwars.clonewars.workforce.WorkAreaBounds;
 import galacticwars.clonewars.world.PlanetTravelService;
 import galacticwars.clonewars.world.PlanetTravelGameTests;
 import galacticwars.clonewars.world.BlueprintSiteAnchorBlockEntity;
@@ -194,6 +196,7 @@ import net.minecraft.world.level.block.Rotation;
 import net.minecraft.world.level.block.entity.DispenserBlockEntity;
 import net.minecraft.world.level.block.entity.SpawnerBlockEntity;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
+import net.minecraft.world.level.block.state.properties.DoubleBlockHalf;
 import net.minecraft.world.level.storage.TagValueOutput;
 import net.minecraft.world.level.levelgen.structure.Structure;
 import net.minecraft.world.phys.AABB;
@@ -277,6 +280,12 @@ public final class ModGameTests {
         isolatedEnvironments.put(id("worker_safety_and_upkeep"), event.registerEnvironment(
                         id("worker_safety_and_upkeep_environment"),
                         new TestEnvironmentDefinition.AllOf(List.of())));
+        isolatedEnvironments.put(id("black_box_farmer_door_lifecycle"), event.registerEnvironment(
+                        id("black_box_farmer_door_lifecycle_environment"),
+                        new TestEnvironmentDefinition.AllOf(List.of())));
+        isolatedEnvironments.put(id("specialist_worker_loops"), event.registerEnvironment(
+                        id("specialist_worker_loops_environment"),
+                        new TestEnvironmentDefinition.AllOf(List.of())));
         isolatedEnvironments.put(id("planet_faction_outpost_runtime"), event.registerEnvironment(
                         id("planet_faction_outpost_runtime_environment"),
                         new TestEnvironmentDefinition.AllOf(List.of())));
@@ -303,6 +312,8 @@ public final class ModGameTests {
                 id("grouped_patrol_pause_runtime"),
                 id("grouped_protect_entity_runtime"),
                 id("worker_safety_and_upkeep"),
+                id("black_box_farmer_door_lifecycle"),
+                id("specialist_worker_loops"),
                 id("local_recruit_protect_owner"),
                 id("command_marker_runtime"));
         for (Identifier testId : TESTS.keySet()) {
@@ -333,6 +344,10 @@ public final class ModGameTests {
                                             ? 600
                                     : testId.equals(id("faction_ai_reaction_runtime"))
                                             ? 360
+                                    : testId.equals(id("black_box_farmer_door_lifecycle"))
+                                            ? 700
+                                    : testId.equals(id("specialist_worker_loops"))
+                                            ? 1_600
                                     : Set.of(
                                             id("local_recruit_protect_owner"),
                                             id("ungrouped_recruit_ranged_brain"),
@@ -418,6 +433,8 @@ public final class ModGameTests {
         tests.put(id("local_recruit_protect_owner"), ModGameTests::localRecruitProtectOwner);
         tests.put(id("worker_resource_conservation"), ModGameTests::workerResourceConservation);
         tests.put(id("worker_safety_and_upkeep"), ModGameTests::workerSafetyAndUpkeep);
+        tests.put(id("black_box_farmer_door_lifecycle"),
+                ModGameTests::blackBoxFarmerDoorLifecycle);
         tests.put(id("physical_logistics_transaction"),
                 PhysicalLogisticsGameTests::atomicPhysicalTransfer);
         tests.put(id("enabled_worker_loops"), ModGameTests::enabledWorkerLoops);
@@ -6435,6 +6452,170 @@ public final class ModGameTests {
         });
     }
 
+    /**
+     * Exercises the ordinary survival path without setting worker phases, invoking
+     * the controller, or moving the recruit after assignment.
+     */
+    private static void blackBoxFarmerDoorLifecycle(GameTestHelper helper) {
+        SmartBrainTestArea area = prepareSmartBrainTestAreaAt(
+                helper,
+                GameType.CREATIVE,
+                -2,
+                14,
+                -2,
+                10,
+                isolatedCapital(helper, 210));
+        ServerPlayer owner = area.player();
+        BlockPos hallPos = area.at(0, 1, 0);
+        BlockPos recruitPos = area.at(2, 1, 4);
+        BlockPos doorPos = area.at(6, 1, 4);
+        BlockPos cropPos = area.at(10, 1, 4);
+        CommandCenterBlockEntity hall = placeCommandCenter(helper, hallPos);
+        hall.claim(owner);
+        KingdomSavedData data = KingdomSavedData.get(helper.getLevel());
+        data.activateHall(
+                owner.getUUID(),
+                hall.factionId(),
+                helper.getLevel().dimension().identifier().toString(),
+                hallPos).orElseThrow();
+        FactionAlignmentSavedData.get(helper.getLevel()).setScore(
+                owner.getUUID(), FactionId.of("republic"), 100);
+        applyCampaignSetupEvent(
+                ProgressionSavedData.get(helper.getLevel()),
+                owner,
+                ProgressionEventType.FACTION_PLEDGED,
+                "galacticwars:republic");
+
+        for (int z = -2; z <= 10; z++) {
+            for (int y = 1; y <= 3; y++) {
+                helper.getLevel().setBlock(
+                        area.at(6, y, z),
+                        Blocks.STONE.defaultBlockState(),
+                        3);
+            }
+        }
+        var lowerDoor = Blocks.OAK_DOOR.defaultBlockState()
+                .setValue(BlockStateProperties.HORIZONTAL_FACING, Direction.EAST)
+                .setValue(BlockStateProperties.DOUBLE_BLOCK_HALF, DoubleBlockHalf.LOWER);
+        var upperDoor = lowerDoor.setValue(
+                BlockStateProperties.DOUBLE_BLOCK_HALF, DoubleBlockHalf.UPPER);
+        helper.getLevel().setBlock(doorPos, lowerDoor, 3);
+        helper.getLevel().setBlock(doorPos.above(), upperDoor, 3);
+        helper.getLevel().setBlock(
+                cropPos.below(), Blocks.FARMLAND.defaultBlockState(), 3);
+        helper.getLevel().setBlock(
+                cropPos,
+                Blocks.WHEAT.defaultBlockState()
+                        .setValue(BlockStateProperties.AGE_7, 7),
+                3);
+        putContainerItem(hall, new ItemStack(Items.WHEAT_SEEDS));
+
+        GalacticRecruitEntity recruit = spawnRecruitAt(
+                helper,
+                ModEntityTypes.CLONE_TROOPER.get(),
+                recruitPos);
+        owner.setPos(hallPos.getX() + 0.5D, hallPos.getY(), hallPos.getZ() + 0.5D);
+        if (!recruit.handleMenuButton(owner, RecruitCommandMenu.BUTTON_HIRE)
+                || !recruit.handleMenuButton(
+                        owner, RecruitCommandMenu.BUTTON_ASSIGN_FARMER)) {
+            helper.fail("Black-box farmer could not be hired and assigned");
+            return;
+        }
+        WorksiteRecord worksite = data.assignedWorksite(
+                owner.getUUID(), recruit.getUUID()).orElse(null);
+        StorageEndpoint hallStorage = data.registeredStorageEndpoint(
+                owner.getUUID(),
+                helper.getLevel().dimension().identifier().toString(),
+                hallPos).orElse(null);
+        if (worksite == null || hallStorage == null) {
+            helper.fail("Black-box farmer lacks authoritative worksite or storage");
+            return;
+        }
+        var configured = data.configureWorksite(
+                owner.getUUID(),
+                worksite.id(),
+                worksite.configuration().revision(),
+                new WorkAreaBounds(25, 7, 17),
+                true,
+                100,
+                true,
+                List.of("minecraft:wheat"),
+                CourierDispatchMode.AUTOMATIC);
+        if (!configured.accepted()) {
+            helper.fail("Black-box farmer bounds were rejected: "
+                    + configured.reasonCode());
+            return;
+        }
+        WorksiteRecord configuredWorksite = configured.worksite().orElseThrow();
+        var storageConfigured = data.configureWorksiteStorage(
+                owner.getUUID(),
+                configuredWorksite.id(),
+                configuredWorksite.configuration().revision(),
+                hallStorage);
+        if (!storageConfigured.accepted()) {
+            helper.fail("Black-box farmer storage was rejected: "
+                    + storageConfigured.reasonCode());
+            return;
+        }
+
+        int toolDamageBefore = recruit.getWorkerMainHandItem().getDamageValue();
+        boolean[] doorOpened = {false};
+        boolean[] doorClosedAfterPassage = {false};
+        boolean[] complete = {false};
+        long startedAt = helper.getTick();
+        helper.onEachTick(() -> {
+            if (complete[0]) {
+                return;
+            }
+            var liveDoor = helper.getLevel().getBlockState(doorPos);
+            if (liveDoor.hasProperty(BlockStateProperties.OPEN)
+                    && liveDoor.getValue(BlockStateProperties.OPEN)) {
+                doorOpened[0] = true;
+            } else if (doorOpened[0]
+                    && recruit.distanceToSqr(
+                            doorPos.getX() + 0.5D,
+                            doorPos.getY(),
+                            doorPos.getZ() + 0.5D) > 9.0D) {
+                doorClosedAfterPassage[0] = true;
+            }
+            boolean cropReplanted = helper.getLevel().getBlockState(cropPos)
+                    .hasProperty(BlockStateProperties.AGE_7)
+                    && helper.getLevel().getBlockState(cropPos)
+                            .getValue(BlockStateProperties.AGE_7) == 0;
+            boolean deposited = countContainerItem(hall, Items.WHEAT) > 0
+                    && countContainerItem(hall, Items.WHEAT_SEEDS) > 0;
+            boolean completedOrder = data.kingdomForOwner(owner.getUUID())
+                    .orElseThrow()
+                    .settlement()
+                    .workOrders()
+                    .stream()
+                    .anyMatch(order -> order.type() == WorkOrderType.FARM
+                            && order.state() == WorkOrderState.COMPLETED);
+            if (cropReplanted
+                    && deposited
+                    && completedOrder
+                    && doorOpened[0]
+                    && doorClosedAfterPassage[0]
+                    && recruit.getWorkerMainHandItem().getDamageValue()
+                            > toolDamageBefore) {
+                complete[0] = true;
+                helper.succeed();
+                return;
+            }
+            if (helper.getTick() - startedAt >= 650) {
+                complete[0] = true;
+                helper.fail("Black-box farmer lifecycle timed out: status="
+                        + recruit.getWorkerStatus()
+                        + ", position=" + recruit.blockPosition()
+                        + ", cropReplanted=" + cropReplanted
+                        + ", deposited=" + deposited
+                        + ", completedOrder=" + completedOrder
+                        + ", doorOpened=" + doorOpened[0]
+                        + ", doorClosed=" + doorClosedAfterPassage[0]);
+            }
+        });
+    }
+
     private static void workerResourceConservation(GameTestHelper helper) {
         BlockPos hallPos = isolatedCapital(helper, 11);
         BlockPos cropPos = hallPos.offset(3, 0, 0);
@@ -6714,6 +6895,7 @@ public final class ModGameTests {
             helper.fail("Lumberjack contract was rejected");
         }
         BlockPos logPos = hallPos.offset(4, 0, 2);
+        helper.getLevel().setBlock(logPos.below(), Blocks.DIRT.defaultBlockState(), 3);
         helper.getLevel().setBlock(logPos, Blocks.OAK_LOG.defaultBlockState(), 3);
         setWorkerInventory(recruit, new ItemStack(Items.OAK_SAPLING));
         UUID lumberOrder = acquirePersistedOrder(recruit);
@@ -6730,7 +6912,7 @@ public final class ModGameTests {
             helper.fail("Miner contract was rejected");
         }
         BlockPos orePos = hallPos.offset(5, 0, 2);
-        helper.getLevel().setBlock(orePos, ModBlocks.DURACRETE.get().defaultBlockState(), 3);
+        helper.getLevel().setBlock(orePos, Blocks.IRON_ORE.defaultBlockState(), 3);
         setWorkerInventory(recruit, ItemStack.EMPTY);
         UUID minerOrder = acquirePersistedOrder(recruit);
         interactWorkerAt(recruit, orePos, "navigate_work_target");
@@ -6870,6 +7052,14 @@ public final class ModGameTests {
         BlockPos hallPos = isolatedCapital(helper, 19);
         ChunkPos specialistChunk = ChunkPos.containing(hallPos);
         helper.getLevel().getChunkSource().updateChunkForced(specialistChunk, true);
+        for (int x = -2; x <= 8; x++) {
+            for (int z = -3; z <= 5; z++) {
+                helper.getLevel().setBlock(
+                        hallPos.offset(x, -1, z),
+                        Blocks.STONE.defaultBlockState(),
+                        3);
+            }
+        }
         CommandCenterBlockEntity hall = placeCommandCenter(helper, hallPos);
         ServerPlayer owner = makeConnectedMockPlayer(helper, GameType.CREATIVE);
         GalacticRecruitEntity recruit = ModEntityTypes.CLONE_TROOPER.get().create(
@@ -6910,37 +7100,20 @@ public final class ModGameTests {
         }
         BlockPos waterPos = hallPos.offset(3, 0, 1);
         helper.getLevel().setBlock(waterPos, Blocks.WATER.defaultBlockState(), 3);
-        UUID fisherOrder = acquirePersistedOrder(recruit);
-        interactWorkerAt(recruit, waterPos, "navigate_work_target");
-        depositWorkerAt(recruit, hallPos);
-        assertCompletedOrder(helper, data, owner.getUUID(), fisherOrder, "fisher");
-        if (countContainerItem(hall, Items.COD) + countContainerItem(hall, Items.SALMON) != 1) {
-            helper.fail("Fisher did not deposit one physical catch");
+        if (!configureWorkerLifecycleWorksite(
+                helper, data, owner, recruit, hallPos, List.of())) {
             return;
         }
-
-        owner.setPos(recruit.getX(), recruit.getY(), recruit.getZ());
-        recruit.setWorkerMainHandItem(ItemStack.EMPTY);
-        if (!recruit.handleMenuButton(owner, RecruitCommandMenu.BUTTON_ASSIGN_ANIMAL_FARMER)) {
-            helper.fail("Animal farmer contract was rejected");
-            return;
-        }
-        Animal first = EntityTypes.COW.create(helper.getLevel(), EntitySpawnReason.TRIGGERED);
-        Animal second = EntityTypes.COW.create(helper.getLevel(), EntitySpawnReason.TRIGGERED);
-        if (first == null || second == null) {
-            helper.fail("Could not create livestock for animal farmer test");
-            return;
-        }
-        first.setPos(hallPos.getX() + 3.5, hallPos.getY(), hallPos.getZ() + 2.5);
-        second.setPos(hallPos.getX() + 4.5, hallPos.getY(), hallPos.getZ() + 2.5);
-        first.setNoAi(true);
-        second.setNoAi(true);
-        first.setPersistenceRequired();
-        second.setPersistenceRequired();
-        helper.getLevel().addFreshEntity(first);
-        helper.getLevel().addFreshEntity(second);
-        helper.runAfterDelay(10, () -> finishSpecialistWorkerLoops(
-                helper, hallPos, hall, owner, recruit, data, first, second, specialistChunk));
+        SpecialistWorkerLifecycleScenario scenario = new SpecialistWorkerLifecycleScenario(
+                helper,
+                hallPos,
+                hall,
+                owner,
+                recruit,
+                data,
+                specialistChunk,
+                countContainerItems(hall));
+        helper.onEachTick(scenario::tick);
     }
 
     private static void animalFarmerSpeciesPairing(GameTestHelper helper) {
@@ -6991,77 +7164,313 @@ public final class ModGameTests {
         });
     }
 
-    private static void finishSpecialistWorkerLoops(
+    private static boolean configureWorkerLifecycleWorksite(
             GameTestHelper helper,
-            BlockPos hallPos,
-            CommandCenterBlockEntity hall,
+            KingdomSavedData data,
             ServerPlayer owner,
             GalacticRecruitEntity recruit,
-            KingdomSavedData data,
-            Animal first,
-            Animal second,
-            ChunkPos forcedChunk
+            BlockPos storagePos,
+            List<String> filters
     ) {
-        setWorkerInventory(recruit, new ItemStack(Items.WHEAT, 2));
-        UUID animalOrder = acquirePersistedOrder(recruit);
-        interactWorkerAt(recruit, first.blockPosition(), "feed_animals");
-        recruit.tickWorkerController();
-        WorkOrder animalWorkOrder = data.workOrder(owner.getUUID(), animalOrder).orElseThrow();
-        if (animalWorkOrder.state() != WorkOrderState.COMPLETED) {
-            helper.fail("Animal farmer order remained " + animalWorkOrder.state()
-                    + "; phase=" + recruit.getWorkerStatus().phase()
-                    + ", reason=" + recruit.getWorkerStatus().reasonCode()
-                    + ", carried=" + workerInventoryCount(recruit)
-                    + ", first=" + first.blockPosition() + "/" + first.canFallInLove()
-                    + "/" + first.isFood(new ItemStack(Items.WHEAT))
-                    + ", second=" + second.blockPosition() + "/" + second.canFallInLove()
-                    + "/" + second.isFood(new ItemStack(Items.WHEAT)));
-            return;
+        WorksiteRecord worksite = data.assignedWorksite(
+                owner.getUUID(), recruit.getUUID()).orElse(null);
+        StorageEndpoint storage = data.registeredStorageEndpoint(
+                owner.getUUID(),
+                helper.getLevel().dimension().identifier().toString(),
+                storagePos).orElse(null);
+        if (worksite == null || storage == null) {
+            helper.fail("Worker lifecycle lacks authoritative worksite or storage");
+            return false;
         }
-        if (!first.isInLove() || !second.isInLove()) {
-            helper.fail("Animal farmer did not consume feed and breed a bounded pair");
-            return;
+        var configured = data.configureWorksite(
+                owner.getUUID(),
+                worksite.id(),
+                worksite.configuration().revision(),
+                new WorkAreaBounds(17, 7, 17),
+                true,
+                100,
+                true,
+                filters,
+                CourierDispatchMode.AUTOMATIC);
+        WorksiteRecord configuredWorksite;
+        if (configured.accepted()) {
+            configuredWorksite = configured.worksite().orElseThrow();
+        } else if (configured.reasonCode().equals("unchanged")) {
+            configuredWorksite = data.assignedWorksite(
+                    owner.getUUID(), recruit.getUUID()).orElseThrow();
+        } else {
+            helper.fail("Worker lifecycle configuration was rejected: "
+                    + configured.reasonCode());
+            return false;
+        }
+        var storageConfigured = data.configureWorksiteStorage(
+                owner.getUUID(),
+                worksite.id(),
+                configuredWorksite.configuration().revision(),
+                storage);
+        boolean storageAlreadyConfigured = storageConfigured.reasonCode().equals("unchanged")
+                && configuredWorksite.storageEndpoints().contains(storage);
+        if (!storageConfigured.accepted() && !storageAlreadyConfigured) {
+            helper.fail("Worker lifecycle storage was rejected: "
+                    + storageConfigured.reasonCode());
+            return false;
+        }
+        return true;
+    }
+
+    private static boolean hasCompletedWorkerOrder(
+            KingdomSavedData data,
+            UUID ownerId,
+            WorkOrderType type
+    ) {
+        return data.kingdomForOwner(ownerId)
+                .orElseThrow()
+                .settlement()
+                .workOrders()
+                .stream()
+                .anyMatch(order -> order.type() == type
+                        && order.state() == WorkOrderState.COMPLETED);
+    }
+
+    /**
+     * Runs through the real scheduler. The fixture never mutates worker phases,
+     * invokes the controller, or moves the recruit after its first assignment.
+     */
+    private static final class SpecialistWorkerLifecycleScenario {
+        private final GameTestHelper helper;
+        private final BlockPos hallPos;
+        private final CommandCenterBlockEntity hall;
+        private final ServerPlayer owner;
+        private final GalacticRecruitEntity recruit;
+        private final KingdomSavedData data;
+        private final ChunkPos forcedChunk;
+        private final int storedBeforeFishing;
+        private int phase;
+        private long phaseStartedAt;
+        private boolean complete;
+        private Animal first;
+        private Animal second;
+
+        private SpecialistWorkerLifecycleScenario(
+                GameTestHelper helper,
+                BlockPos hallPos,
+                CommandCenterBlockEntity hall,
+                ServerPlayer owner,
+                GalacticRecruitEntity recruit,
+                KingdomSavedData data,
+                ChunkPos forcedChunk,
+                int storedBeforeFishing
+        ) {
+            this.helper = helper;
+            this.hallPos = hallPos;
+            this.hall = hall;
+            this.owner = owner;
+            this.recruit = recruit;
+            this.data = data;
+            this.forcedChunk = forcedChunk;
+            this.storedBeforeFishing = storedBeforeFishing;
+            this.phaseStartedAt = helper.getTick();
         }
 
-        owner.setPos(recruit.getX(), recruit.getY(), recruit.getZ());
-        recruit.setWorkerMainHandItem(ItemStack.EMPTY);
-        if (!recruit.handleMenuButton(owner, RecruitCommandMenu.BUTTON_ASSIGN_COOK)) {
-            helper.fail("Cook contract was rejected");
-            return;
-        }
-        putContainerItem(hall, new ItemStack(Items.BEEF));
-        putContainerItem(hall, new ItemStack(Items.COAL));
-        setWorkerInventory(recruit, ItemStack.EMPTY);
-        UUID cookOrder = acquirePersistedOrder(recruit);
-        interactWorkerAt(recruit, hallPos, "withdraw_cooking_ingredient");
-        setWorkerPhase(recruit, WorkerPhase.ACQUIRE_ORDER, "ready", null);
-        recruit.tickWorkerController();
-        interactWorkerAt(recruit, hallPos, "withdraw_cooking_ingredient");
-        setWorkerPhase(recruit, WorkerPhase.ACQUIRE_ORDER, "ready", null);
-        recruit.tickWorkerController();
-        interactWorkerAt(recruit, hallPos, "cook_food");
-        depositWorkerAt(recruit, hallPos);
-        assertCompletedOrder(helper, data, owner.getUUID(), cookOrder, "cook");
-        if (countContainerItem(hall, Items.COOKED_BEEF) != 1) {
-            helper.fail("Cook did not consume physical food and fuel into stored food");
-            return;
+        private void tick() {
+            if (this.complete) {
+                return;
+            }
+            switch (this.phase) {
+                case 0 -> this.waitForFishing();
+                case 1 -> this.waitForAnimalFarming();
+                case 2 -> this.waitForCooking();
+                case 3 -> this.waitForMerchant();
+                default -> this.fail("Specialist lifecycle entered an unknown phase");
+            }
         }
 
-        owner.setPos(recruit.getX(), recruit.getY(), recruit.getZ());
-        recruit.setWorkerMainHandItem(ItemStack.EMPTY);
-        if (!recruit.handleMenuButton(owner, RecruitCommandMenu.BUTTON_ASSIGN_MERCHANT)) {
-            helper.fail("Merchant contract was rejected");
-            return;
+        private void waitForFishing() {
+            boolean completedOrder = hasCompletedWorkerOrder(
+                    this.data, this.owner.getUUID(), WorkOrderType.FISH);
+            boolean physicalCatchStored =
+                    countContainerItems(this.hall) > this.storedBeforeFishing;
+            if (completedOrder
+                    && physicalCatchStored
+                    && workerInventoryCount(this.recruit) == 0) {
+                this.beginAnimalFarming();
+                return;
+            }
+            this.timeoutAfter(520, "Fisher did not complete timed loot-table fishing"
+                    + "; status=" + this.recruit.getWorkerStatus()
+                    + ", stored=" + countContainerItems(this.hall)
+                    + ", order=" + completedOrder);
         }
-        UUID merchantOrder = acquirePersistedOrder(recruit);
-        WorkOrder order = data.workOrder(owner.getUUID(), merchantOrder).orElseThrow();
-        if (!recruit.getWorkerStatus().reasonCode().equals("market_open")
-                || order.state().terminal()) {
-            helper.fail("Merchant did not maintain a persisted open-market assignment");
-            return;
+
+        private void beginAnimalFarming() {
+            this.owner.setPos(
+                    this.recruit.getX(), this.recruit.getY(), this.recruit.getZ());
+            this.recruit.setWorkerMainHandItem(ItemStack.EMPTY);
+            if (!this.recruit.handleMenuButton(
+                    this.owner, RecruitCommandMenu.BUTTON_ASSIGN_ANIMAL_FARMER)) {
+                this.fail("Animal farmer contract was rejected");
+                return;
+            }
+            if (!configureWorkerLifecycleWorksite(
+                    this.helper,
+                    this.data,
+                    this.owner,
+                    this.recruit,
+                    this.hallPos,
+                    List.of("minecraft:cow"))) {
+                this.complete = true;
+                return;
+            }
+            this.first = EntityTypes.COW.create(
+                    this.helper.getLevel(), EntitySpawnReason.TRIGGERED);
+            this.second = EntityTypes.COW.create(
+                    this.helper.getLevel(), EntitySpawnReason.TRIGGERED);
+            if (this.first == null || this.second == null) {
+                this.fail("Could not create livestock for animal farmer lifecycle");
+                return;
+            }
+            this.first.setPos(
+                    this.hallPos.getX() + 3.5D,
+                    this.hallPos.getY(),
+                    this.hallPos.getZ() + 2.5D);
+            this.second.setPos(
+                    this.hallPos.getX() + 4.5D,
+                    this.hallPos.getY(),
+                    this.hallPos.getZ() + 2.5D);
+            this.first.setNoAi(true);
+            this.second.setNoAi(true);
+            this.first.setPersistenceRequired();
+            this.second.setPersistenceRequired();
+            this.helper.getLevel().addFreshEntity(this.first);
+            this.helper.getLevel().addFreshEntity(this.second);
+            putContainerItem(this.hall, new ItemStack(Items.WHEAT, 2));
+            this.advanceTo(1);
         }
-        helper.getLevel().getChunkSource().updateChunkForced(forcedChunk, false);
-        helper.succeed();
+
+        private void waitForAnimalFarming() {
+            boolean completedOrder = hasCompletedWorkerOrder(
+                    this.data, this.owner.getUUID(), WorkOrderType.ANIMAL_FARM);
+            if (completedOrder
+                    && this.first.isInLove()
+                    && this.second.isInLove()
+                    && countContainerItem(this.hall, Items.WHEAT) == 0
+                    && workerInventoryCount(this.recruit) == 0) {
+                this.beginCooking();
+                return;
+            }
+            this.timeoutAfter(360, "Animal farmer did not withdraw feed and breed"
+                    + "; status=" + this.recruit.getWorkerStatus()
+                    + ", order=" + completedOrder
+                    + ", love=" + this.first.isInLove() + "/"
+                    + this.second.isInLove()
+                    + ", storedFeed=" + countContainerItem(this.hall, Items.WHEAT));
+        }
+
+        private void beginCooking() {
+            this.owner.setPos(
+                    this.recruit.getX(), this.recruit.getY(), this.recruit.getZ());
+            this.recruit.setWorkerMainHandItem(ItemStack.EMPTY);
+            if (!this.recruit.handleMenuButton(
+                    this.owner, RecruitCommandMenu.BUTTON_ASSIGN_COOK)) {
+                this.fail("Cook contract was rejected");
+                return;
+            }
+            if (!configureWorkerLifecycleWorksite(
+                    this.helper,
+                    this.data,
+                    this.owner,
+                    this.recruit,
+                    this.hallPos,
+                    List.of("minecraft:beef"))) {
+                this.complete = true;
+                return;
+            }
+            BlockPos furnacePos = this.hallPos.offset(3, 0, -2);
+            this.helper.getLevel().setBlock(
+                    furnacePos, Blocks.FURNACE.defaultBlockState(), 3);
+            putContainerItem(this.hall, new ItemStack(Items.BEEF));
+            putContainerItem(this.hall, new ItemStack(Items.COAL));
+            this.advanceTo(2);
+        }
+
+        private void waitForCooking() {
+            boolean completedOrder = hasCompletedWorkerOrder(
+                    this.data, this.owner.getUUID(), WorkOrderType.COOK);
+            if (completedOrder
+                    && countContainerItem(this.hall, Items.COOKED_BEEF) == 1
+                    && countContainerItem(this.hall, Items.BEEF) == 0
+                    && workerInventoryCount(this.recruit) == 0) {
+                this.beginMerchant();
+                return;
+            }
+            this.timeoutAfter(600, "Cook did not use a real furnace recipe"
+                    + "; status=" + this.recruit.getWorkerStatus()
+                    + ", order=" + completedOrder
+                    + ", raw=" + countContainerItem(this.hall, Items.BEEF)
+                    + ", cooked=" + countContainerItem(this.hall, Items.COOKED_BEEF));
+        }
+
+        private void beginMerchant() {
+            this.owner.setPos(
+                    this.recruit.getX(), this.recruit.getY(), this.recruit.getZ());
+            this.recruit.setWorkerMainHandItem(ItemStack.EMPTY);
+            if (!this.recruit.handleMenuButton(
+                    this.owner, RecruitCommandMenu.BUTTON_ASSIGN_MERCHANT)) {
+                this.fail("Merchant contract was rejected");
+                return;
+            }
+            if (!configureWorkerLifecycleWorksite(
+                    this.helper,
+                    this.data,
+                    this.owner,
+                    this.recruit,
+                    this.hallPos,
+                    List.of())) {
+                this.complete = true;
+                return;
+            }
+            putContainerItem(this.hall, new ItemStack(ModItems.ENERGY_CELL.get(), 2));
+            this.advanceTo(3);
+        }
+
+        private void waitForMerchant() {
+            WorkOrder order = this.data.assignedWorkOrder(
+                    this.owner.getUUID(), this.recruit.getUUID()).orElse(null);
+            if (this.recruit.isMarketAvailable()
+                    && order != null
+                    && order.type() == WorkOrderType.MERCHANT
+                    && !order.state().terminal()
+                    && this.recruit.hasMerchantStock(
+                            ModItems.ENERGY_CELL.get(), 2)) {
+                this.complete = true;
+                this.helper.getLevel().getChunkSource()
+                        .updateChunkForced(this.forcedChunk, false);
+                this.helper.succeed();
+                return;
+            }
+            this.timeoutAfter(260, "Merchant did not open a physical-stock market"
+                    + "; status=" + this.recruit.getWorkerStatus()
+                    + ", order=" + order
+                    + ", market=" + this.recruit.isMarketAvailable());
+        }
+
+        private void advanceTo(int nextPhase) {
+            this.phase = nextPhase;
+            this.phaseStartedAt = this.helper.getTick();
+        }
+
+        private void timeoutAfter(long ticks, String message) {
+            if (this.helper.getTick() - this.phaseStartedAt >= ticks) {
+                this.fail(message);
+            }
+        }
+
+        private void fail(String message) {
+            this.complete = true;
+            this.helper.getLevel().getChunkSource()
+                    .updateChunkForced(this.forcedChunk, false);
+            this.helper.fail(message);
+        }
     }
 
     private static void setWorkerInventory(GalacticRecruitEntity recruit, ItemStack stack) {
