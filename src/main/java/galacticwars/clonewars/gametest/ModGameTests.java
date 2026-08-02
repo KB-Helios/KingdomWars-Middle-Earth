@@ -9237,11 +9237,15 @@ public final class ModGameTests {
         }
 
         ItemStack removedTool = quickMoveWorkerToolToPlayer(
-                helper, openServerRecruitLoadout(helper, owner, recruit, 76), owner);
+                helper,
+                openServerRecruitLoadout(helper, owner, recruit, 76),
+                owner,
+                recruit,
+                hall);
         if (!WorkerDutyLoadoutPolicy.isUsableTool(WorkerProfession.MINER, removedTool)
                 || !recruit.getWorkerMainHandItem().isEmpty()
-                || !inventoryContainsExact(owner.getInventory(), removedTool)
-                || countContainerItem(hall, Items.IRON_PICKAXE) != 0) {
+                || countMatchingStackItems(owner.getInventory(), removedTool) != removedTool.getCount()
+                || countMatchingStackItems(hall, removedTool) != 0) {
             helper.fail("Missing-tool fixture did not retain the removed physical pickaxe");
             return;
         }
@@ -9251,6 +9255,9 @@ public final class ModGameTests {
         UUID[] blockedOrderId = {null};
         boolean[] naturalRetryObserved = {false};
         boolean[] approachedOreAfterReinsertion = {false};
+        long[] reinsertionTick = {-1L};
+        int[] reinsertionRecruitTick = {-1};
+        double[] preReinsertionDistanceSqr = {-1.0D};
         boolean[] complete = {false};
         int[] startedRecruitTick = {-1};
         long readinessStartedAt = helper.getTick();
@@ -9288,11 +9295,15 @@ public final class ModGameTests {
                     return;
                 }
                 blockedOrderId[0] = order.id();
+                reinsertionTick[0] = helper.getTick();
+                reinsertionRecruitTick[0] = recruit.tickCount;
+                preReinsertionDistanceSqr[0] = recruit.distanceToSqr(Vec3.atCenterOf(orePos));
                 quickMovePlayerToolToWorker(
                         helper,
                         openServerRecruitLoadout(helper, owner, recruit, 77),
                         owner,
                         recruit,
+                        hall,
                         removedTool);
             }
 
@@ -9314,9 +9325,13 @@ public final class ModGameTests {
                                 + (activeOrder == null ? null : activeOrder.id()));
                         return;
                     }
-                    naturalRetryObserved[0] |= activeOrder.state() != WorkOrderState.BLOCKED;
-                    approachedOreAfterReinsertion[0] |= recruit.distanceToSqr(
-                            Vec3.atCenterOf(orePos)) <= 4.0D;
+                    boolean laterWorkerTick = helper.getTick() > reinsertionTick[0]
+                            && recruit.tickCount > reinsertionRecruitTick[0];
+                    if (laterWorkerTick) {
+                        naturalRetryObserved[0] |= activeOrder.state() != WorkOrderState.BLOCKED;
+                        approachedOreAfterReinsertion[0] |= preReinsertionDistanceSqr[0] > 4.0D
+                                && recruit.distanceToSqr(Vec3.atCenterOf(orePos)) <= 4.0D;
+                    }
                 } else if (recordedOrder.state() != WorkOrderState.COMPLETED) {
                     complete[0] = true;
                     helper.fail("Missing-tool recovery ended the recorded order as "
@@ -9418,7 +9433,11 @@ public final class ModGameTests {
         }
 
         ItemStack original = quickMoveWorkerToolToPlayer(
-                helper, openServerRecruitLoadout(helper, owner, recruit, 74), owner);
+                helper,
+                openServerRecruitLoadout(helper, owner, recruit, 74),
+                owner,
+                recruit,
+                hall);
         ItemStack nearlyBroken = original.copy();
         nearlyBroken.setDamageValue(nearlyBroken.getMaxDamage() - 1);
         replaceExactPlayerStack(helper, owner, original, nearlyBroken);
@@ -9427,6 +9446,7 @@ public final class ModGameTests {
                 openServerRecruitLoadout(helper, owner, recruit, 75),
                 owner,
                 recruit,
+                hall,
                 nearlyBroken);
 
         ItemStack replacement = new ItemStack(Items.IRON_PICKAXE);
@@ -9543,11 +9563,28 @@ public final class ModGameTests {
     private static ItemStack quickMoveWorkerToolToPlayer(
             GameTestHelper helper,
             RecruitLoadoutMenu menu,
-            ServerPlayer owner
+            ServerPlayer owner,
+            GalacticRecruitEntity recruit,
+            Container storage
     ) {
+        ItemStack expected = recruit.getWorkerMainHandItem().copy();
+        int expectedCount = expected.getCount();
+        int playerBefore = countMatchingStackItems(owner.getInventory(), expected);
+        int workerBefore = matchingWorkerToolCount(recruit, expected);
+        int storageBefore = countMatchingStackItems(storage, expected);
         ItemStack moved = menu.quickMoveStack(owner, LOADOUT_WORKER_TOOL_SLOT);
-        if (moved.isEmpty() || !inventoryContainsExact(owner.getInventory(), moved)) {
-            helper.fail("Provider-owned loadout did not move the physical worker tool to the player");
+        int playerAfter = countMatchingStackItems(owner.getInventory(), expected);
+        int workerAfter = matchingWorkerToolCount(recruit, expected);
+        int storageAfter = countMatchingStackItems(storage, expected);
+        if (moved.isEmpty()
+                || !ItemStack.isSameItemSameComponents(moved, expected)
+                || workerBefore != expectedCount
+                || playerAfter != playerBefore + expectedCount
+                || workerAfter != 0
+                || storageAfter != storageBefore
+                || playerAfter + workerAfter + storageAfter
+                != playerBefore + workerBefore + storageBefore) {
+            helper.fail("Provider-owned loadout did not conserve the physical worker tool");
         }
         menu.removed(owner);
         return moved;
@@ -9558,8 +9595,13 @@ public final class ModGameTests {
             RecruitLoadoutMenu menu,
             ServerPlayer owner,
             GalacticRecruitEntity recruit,
+            Container storage,
             ItemStack expected
     ) {
+        int expectedCount = expected.getCount();
+        int playerBefore = countMatchingStackItems(owner.getInventory(), expected);
+        int workerBefore = matchingWorkerToolCount(recruit, expected);
+        int storageBefore = countMatchingStackItems(storage, expected);
         int sourceSlot = java.util.stream.IntStream.range(
                         RecruitLoadoutMenu.PLAYER_INVENTORY_START,
                         RecruitLoadoutMenu.PLAYER_INVENTORY_END)
@@ -9567,21 +9609,41 @@ public final class ModGameTests {
                         menu.getSlot(slot).getItem(), expected))
                 .findFirst()
                 .orElse(-1);
-        if (sourceSlot < 0 || menu.quickMoveStack(owner, sourceSlot).isEmpty()
-                || !ItemStack.isSameItemSameComponents(
-                        recruit.getWorkerMainHandItem(), expected)) {
-            helper.fail("Provider-owned loadout did not install the expected worker tool");
+        ItemStack moved = sourceSlot < 0 ? ItemStack.EMPTY : menu.quickMoveStack(owner, sourceSlot);
+        int playerAfter = countMatchingStackItems(owner.getInventory(), expected);
+        int workerAfter = matchingWorkerToolCount(recruit, expected);
+        int storageAfter = countMatchingStackItems(storage, expected);
+        if (sourceSlot < 0
+                || moved.isEmpty()
+                || !ItemStack.isSameItemSameComponents(recruit.getWorkerMainHandItem(), expected)
+                || playerBefore < expectedCount
+                || workerBefore != 0
+                || playerAfter != playerBefore - expectedCount
+                || workerAfter != expectedCount
+                || storageAfter != storageBefore
+                || playerAfter + workerAfter + storageAfter
+                != playerBefore + workerBefore + storageBefore) {
+            helper.fail("Provider-owned loadout did not conserve the expected worker tool");
         }
         menu.removed(owner);
     }
 
-    private static boolean inventoryContainsExact(Container inventory, ItemStack expected) {
-        for (int slot = 0; slot < inventory.getContainerSize(); slot++) {
-            if (ItemStack.isSameItemSameComponents(inventory.getItem(slot), expected)) {
-                return true;
+    private static int countMatchingStackItems(Container container, ItemStack expected) {
+        int count = 0;
+        for (int slot = 0; slot < container.getContainerSize(); slot++) {
+            if (ItemStack.isSameItemSameComponents(container.getItem(slot), expected)) {
+                count += container.getItem(slot).getCount();
             }
         }
-        return false;
+        return count;
+    }
+
+    private static int matchingWorkerToolCount(GalacticRecruitEntity recruit, ItemStack expected) {
+        ItemStack workerTool = recruit.getWorkerMainHandItem();
+        int mainHandCount = ItemStack.isSameItemSameComponents(workerTool, expected)
+                ? workerTool.getCount()
+                : 0;
+        return mainHandCount + countMatchingStackItems(recruit.createCargoContainer(), expected);
     }
 
     private static void replaceExactPlayerStack(
