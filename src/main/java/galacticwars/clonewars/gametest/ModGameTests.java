@@ -324,6 +324,9 @@ public final class ModGameTests {
         isolatedEnvironments.put(id("black_box_miner_lifecycle"), event.registerEnvironment(
                         id("black_box_miner_lifecycle_environment"),
                         new TestEnvironmentDefinition.AllOf(List.of())));
+        isolatedEnvironments.put(id("black_box_animal_farmer_lifecycle"), event.registerEnvironment(
+                        id("black_box_animal_farmer_lifecycle_environment"),
+                        new TestEnvironmentDefinition.AllOf(List.of())));
         isolatedEnvironments.put(id("hybrid_courier_dispatch"), event.registerEnvironment(
                         id("hybrid_courier_dispatch_environment"),
                         new TestEnvironmentDefinition.AllOf(List.of())));
@@ -373,6 +376,7 @@ public final class ModGameTests {
                 id("black_box_cook_lifecycle"),
                 id("black_box_lumberjack_lifecycle"),
                 id("black_box_miner_lifecycle"),
+                id("black_box_animal_farmer_lifecycle"),
                 id("competing_courier_leases"),
                 id("courier_live_lease_reload"),
                 id("courier_hall_removal"),
@@ -418,6 +422,8 @@ public final class ModGameTests {
                                     : testId.equals(id("black_box_lumberjack_lifecycle"))
                                             ? 1_000
                                     : testId.equals(id("black_box_miner_lifecycle"))
+                                            ? 900
+                                    : testId.equals(id("black_box_animal_farmer_lifecycle"))
                                             ? 900
                                     : testId.equals(id("competing_courier_leases"))
                                             ? 700
@@ -528,6 +534,8 @@ public final class ModGameTests {
         tests.put(id("black_box_lumberjack_lifecycle"),
                 ModGameTests::blackBoxLumberjackLifecycle);
         tests.put(id("black_box_miner_lifecycle"), ModGameTests::blackBoxMinerLifecycle);
+        tests.put(id("black_box_animal_farmer_lifecycle"),
+                ModGameTests::blackBoxAnimalFarmerLifecycle);
         tests.put(id("bounded_worker_scans"), ModGameTests::boundedWorkerScans);
         tests.put(id("hybrid_courier_dispatch"), ModGameTests::hybridCourierDispatch);
         tests.put(id("competing_courier_leases"), ModGameTests::competingCourierLeases);
@@ -9042,6 +9050,164 @@ public final class ModGameTests {
                         + ", approached=" + approachedOre[0]
                         + ", completedOrder=" + completedOrder
                         + ", toolDamage=" + toolDamageBefore + "->" + toolDamage);
+            }
+        });
+    }
+
+    /**
+     * Exercises one complete breeding order through ordinary hire, profession-assignment,
+     * worksite, registered-storage, navigation, feed withdrawal, and feeding paths. The fixture
+     * never mutates a worker phase, invokes the controller, or moves the recruit after assignment.
+     */
+    private static void blackBoxAnimalFarmerLifecycle(GameTestHelper helper) {
+        SmartBrainTestArea area = prepareSmartBrainTestAreaAt(
+                helper,
+                GameType.CREATIVE,
+                -2,
+                14,
+                -2,
+                8,
+                isolatedCapital(helper, 222));
+        ServerLevel level = helper.getLevel();
+        ServerPlayer owner = area.player();
+        BlockPos hallPos = area.at(0, 1, 0);
+        BlockPos recruitPos = area.at(2, 1, 4);
+        BlockPos firstCowPos = area.at(6, 1, 4);
+        BlockPos secondCowPos = area.at(7, 1, 4);
+        CommandCenterBlockEntity hall = placeCommandCenter(helper, hallPos);
+        hall.claim(owner);
+        KingdomSavedData data = KingdomSavedData.get(level);
+        if (data.activateHall(
+                owner.getUUID(),
+                hall.factionId(),
+                level.dimension().identifier().toString(),
+                hallPos).isEmpty()) {
+            helper.fail("Black-box animal farmer fixture could not activate its Command Center");
+            return;
+        }
+        putContainerItem(hall, new ItemStack(ModItems.CREDIT_CHIP.get(), 32));
+        FactionAlignmentSavedData.get(level).setScore(
+                owner.getUUID(), FactionId.of("republic"), 100);
+        applyCampaignSetupEvent(
+                ProgressionSavedData.get(level),
+                owner,
+                ProgressionEventType.FACTION_PLEDGED,
+                "galacticwars:republic");
+
+        GalacticRecruitEntity recruit = spawnRecruitAt(
+                helper, ModEntityTypes.CLONE_TROOPER.get(), recruitPos);
+        owner.setPos(recruit.getX(), recruit.getY(), recruit.getZ());
+        if (!recruit.handleMenuButton(owner, RecruitCommandMenu.BUTTON_HIRE)
+                || !recruit.handleMenuButton(
+                        owner, RecruitCommandMenu.BUTTON_ASSIGN_ANIMAL_FARMER)) {
+            helper.fail("Black-box animal farmer could not be hired and assigned");
+            return;
+        }
+        if (!configureWorkerLifecycleWorksite(
+                helper,
+                data,
+                owner,
+                recruit,
+                hallPos,
+                List.of("minecraft:cow"))) {
+            return;
+        }
+
+        Animal first = EntityTypes.COW.create(level, EntitySpawnReason.TRIGGERED);
+        Animal second = EntityTypes.COW.create(level, EntitySpawnReason.TRIGGERED);
+        if (first == null || second == null) {
+            helper.fail("Black-box animal farmer could not create its livestock pair");
+            return;
+        }
+        first.setPos(Vec3.atCenterOf(firstCowPos));
+        second.setPos(Vec3.atCenterOf(secondCowPos));
+        first.setNoAi(true);
+        second.setNoAi(true);
+        first.setPersistenceRequired();
+        second.setPersistenceRequired();
+        if (!level.addFreshEntity(first) || !level.addFreshEntity(second)) {
+            helper.fail("Black-box animal farmer could not spawn its livestock pair");
+            return;
+        }
+        putContainerItem(hall, new ItemStack(Items.WHEAT, 2));
+
+        Container recruitCargo = recruit.createCargoContainer();
+        boolean[] withdrewFeed = {false};
+        boolean[] approachedPair = {false};
+        boolean[] complete = {false};
+        int[] startedRecruitTick = {-1};
+        long readinessStartedAt = helper.getTick();
+        helper.onEachTick(() -> {
+            if (complete[0]) {
+                return;
+            }
+            if (startedRecruitTick[0] < 0) {
+                boolean areaTicking = areSmartBrainAreaChunksTicking(
+                        helper, area, -2, 14, -2, 8);
+                boolean recruitIndexed = level.getEntity(recruit.getUUID()) == recruit;
+                boolean livestockIndexed = level.getEntity(first.getUUID()) == first
+                        && level.getEntity(second.getUUID()) == second;
+                if (!areaTicking || !recruitIndexed || !livestockIndexed
+                        || recruit.tickCount == 0) {
+                    if (helper.getTick() - readinessStartedAt
+                            >= SMART_BRAIN_CHUNK_READY_TIMEOUT) {
+                        complete[0] = true;
+                        helper.fail("Black-box animal farmer area never became entity-ticking: "
+                                + "ticking=" + areaTicking + ", recruit=" + recruitIndexed
+                                + ", livestock=" + livestockIndexed
+                                + ", recruitTick=" + recruit.tickCount);
+                    }
+                    return;
+                }
+                startedRecruitTick[0] = recruit.tickCount;
+            }
+
+            int storedWheat = countContainerItem(hall, Items.WHEAT);
+            int carriedWheat = countContainerItem(recruitCargo, Items.WHEAT);
+            int fedAnimals = (first.isInLove() ? 1 : 0) + (second.isInLove() ? 1 : 0);
+            withdrewFeed[0] |= storedWheat == 0 && carriedWheat == 2;
+            approachedPair[0] |= recruit.distanceToSqr(first) <= 4.0D
+                    || recruit.distanceToSqr(second) <= 4.0D;
+            if (!first.isAlive() || !second.isAlive()
+                    || storedWheat + carriedWheat + fedAnimals != 2) {
+                complete[0] = true;
+                helper.fail("Black-box animal farmer violated feed conservation: stored="
+                        + storedWheat + ", carried=" + carriedWheat
+                        + ", fed=" + fedAnimals + ", alive="
+                        + first.isAlive() + "/" + second.isAlive());
+                return;
+            }
+
+            boolean completedOrder = hasCompletedWorkerOrder(
+                    data, owner.getUUID(), WorkOrderType.ANIMAL_FARM);
+            if (completedOrder
+                    && first.isInLove()
+                    && second.isInLove()
+                    && storedWheat == 0
+                    && carriedWheat == 0
+                    && withdrewFeed[0]
+                    && approachedPair[0]
+                    && recruit.getRecruitCommand() == RecruitmentAction.WORK_AT_SITE) {
+                complete[0] = true;
+                recruit.discard();
+                first.discard();
+                second.discard();
+                helper.succeed();
+                return;
+            }
+
+            if (recruit.tickCount - startedRecruitTick[0] >= 500) {
+                complete[0] = true;
+                helper.fail("Black-box animal farmer lifecycle timed out: status="
+                        + recruit.getWorkerStatus()
+                        + ", position=" + recruit.position()
+                        + ", cows=" + first.position() + "/" + second.position()
+                        + ", stored=" + storedWheat
+                        + ", carried=" + carriedWheat
+                        + ", love=" + first.isInLove() + "/" + second.isInLove()
+                        + ", withdrew=" + withdrewFeed[0]
+                        + ", approached=" + approachedPair[0]
+                        + ", completedOrder=" + completedOrder);
             }
         });
     }
