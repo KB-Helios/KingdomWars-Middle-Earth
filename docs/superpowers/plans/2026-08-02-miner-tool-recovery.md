@@ -637,9 +637,12 @@ Record the actual actionable/executed/up-to-date counts. Do not reuse the prior 
 Resolve `neoforge\run\gametestserver` and verify that it is inside this worktree's `neoforge\run` directory before each aggregate run:
 
 ```powershell
-Resolve-Path neoforge\run\gametestserver
-Resolve-Path neoforge\run
-Remove-Item -LiteralPath "C:\Users\kevin\.codex\worktrees\1f5d\GalacticWars\neoforge\run\gametestserver" -Recurse -Force
+$gametestPath = Resolve-Path neoforge\run\gametestserver
+$runPath = Resolve-Path neoforge\run
+if (-not $gametestPath.Path.StartsWith($runPath.Path)) {
+    throw "Resolved gametestserver path is not within neoforge\run"
+}
+Remove-Item -LiteralPath $gametestPath.Path -Recurse -Force
 ```
 
 Do not remove `neoforge\run`, any workspace root, or any donor directory.

@@ -172,7 +172,8 @@ invocation, or post-assignment recruit teleportation.
 1. Use two in-bounds iron ores and install a compatible pickaxe with exactly one durability point
    remaining through the provider-owned loadout menu.
 2. Let ordinary mining consume that final durability point on the first ore and conserve its exact
-   raw-iron output.
+   raw-iron output. Track the original pickaxe identity before the break and assert its removal
+   from the worker-tool slot after the break.
 3. With no replacement initially available, require the next mining order to reach its target and
    block as `missing_tool`; capture that second order ID.
 4. Add one component-bearing compatible replacement to registered physical storage as the fixture's
@@ -180,9 +181,9 @@ invocation, or post-assignment recruit teleportation.
    mutate the recruit, controller phase, work target, or persisted order.
 5. Observe natural retry, physical travel to storage, `withdraw_worker_tool`, an exact atomic transfer,
    return to the second ore, and completion of the same captured order.
-6. Throughout the test, assert exactly two ore/raw-iron units, one intentionally broken original tool,
-   one replacement moving only among storage and the worker-tool slot, preserved replacement
-   components, and exactly one durability point consumed from the replacement by the second ore.
+6. Throughout the test, assert exactly two ore/raw-iron units, exactly one replacement moving only
+   among storage and the worker-tool slot, preserved replacement components, and exactly one
+   durability point consumed from the replacement by the second ore.
 
 The controlled RED must be captured before production recovery is implemented. It should show the
 broken miner repeatedly blocking with the replacement still in registered storage and the second ore

@@ -1929,7 +1929,7 @@ public class GalacticRecruitEntity extends TamableAnimal
                 worksite.id(),
                 worksite.configuration().revision(),
                 endpoint);
-        if (!configured.accepted()) {
+        if (!configured.accepted() && !configured.reasonCode().equals("unchanged")) {
             return false;
         }
         this.releaseCurrentWorkOrder(false);

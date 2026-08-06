@@ -12340,8 +12340,10 @@ public final class ModGameTests {
                     && this.furnaceLoadedAt < 0L) {
                 this.furnaceLoadedAt = currentTick;
             }
-            if (this.helper.getLevel().getBlockState(this.furnacePos)
-                    .getValue(BlockStateProperties.LIT) && this.furnaceLitAt < 0L) {
+            BlockState furnaceState = this.helper.getLevel().getBlockState(this.furnacePos);
+            if (furnaceState.hasProperty(BlockStateProperties.LIT)
+                    && furnaceState.getValue(BlockStateProperties.LIT)
+                    && this.furnaceLitAt < 0L) {
                 this.furnaceLitAt = currentTick;
             }
             String cookStatus = this.recruit.getWorkerStatus().phase() + "/"
