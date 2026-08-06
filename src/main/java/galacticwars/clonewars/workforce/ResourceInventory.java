@@ -2,6 +2,7 @@ package galacticwars.clonewars.workforce;
 
 import java.util.Collections;
 import java.util.LinkedHashMap;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -76,7 +77,7 @@ public record ResourceInventory(Map<String, Integer> resources) {
 
     private static String normalizeItemId(String itemId) {
         Objects.requireNonNull(itemId, "itemId");
-        String normalized = itemId.trim().toLowerCase();
+        String normalized = itemId.trim().toLowerCase(Locale.ROOT);
         if (normalized.isEmpty()) {
             throw new IllegalArgumentException("itemId cannot be blank");
         }

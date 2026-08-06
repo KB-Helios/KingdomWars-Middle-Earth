@@ -31,7 +31,7 @@ public final class WorkerSafetyBehaviour extends ExtendedBehaviour<GalacticRecru
     protected boolean checkExtraStartConditions(
             ServerLevel level, GalacticRecruitEntity recruit
     ) {
-        threat = BrainUtil.getMemory(recruit, MemoryModuleType.HURT_BY_ENTITY);
+        threat = currentThreat(recruit);
         return recruit.shouldUseWorkerSafety(threat);
     }
 
@@ -48,7 +48,7 @@ public final class WorkerSafetyBehaviour extends ExtendedBehaviour<GalacticRecru
 
     @Override
     protected void tick(GalacticRecruitEntity recruit) {
-        LivingEntity remembered = BrainUtil.getMemory(recruit, MemoryModuleType.HURT_BY_ENTITY);
+        LivingEntity remembered = currentThreat(recruit);
         if (remembered != null && remembered.isAlive() && remembered.level() == recruit.level()) {
             threat = remembered;
         }
@@ -71,5 +71,19 @@ public final class WorkerSafetyBehaviour extends ExtendedBehaviour<GalacticRecru
         }
         threat = null;
         threatFreeTicks = 0;
+    }
+
+    private static @Nullable LivingEntity currentThreat(GalacticRecruitEntity recruit) {
+        LivingEntity remembered = BrainUtil.getMemory(
+                recruit, MemoryModuleType.HURT_BY_ENTITY);
+        if (remembered != null) {
+            return remembered;
+        }
+        // The HurtBy sensor can clear its brain memory before the next behaviour pass.
+        // Retain the vanilla living-attacker record as the durable handoff.
+        LivingEntity attacker = recruit.getLastHurtByMob();
+        return attacker != null && attacker.isAlive() && attacker.level() == recruit.level()
+                ? attacker
+                : null;
     }
 }

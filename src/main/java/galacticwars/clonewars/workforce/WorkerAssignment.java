@@ -1,5 +1,6 @@
 package galacticwars.clonewars.workforce;
 
+import java.util.Locale;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
@@ -19,7 +20,7 @@ public record WorkerAssignment(
         Objects.requireNonNull(worksiteId, "worksiteId");
         Objects.requireNonNull(profession, "profession");
         Objects.requireNonNull(dimensionId, "dimensionId");
-        dimensionId = dimensionId.trim().toLowerCase();
+        dimensionId = dimensionId.trim().toLowerCase(Locale.ROOT);
         if (dimensionId.isEmpty()) {
             throw new IllegalArgumentException("dimensionId cannot be blank");
         }

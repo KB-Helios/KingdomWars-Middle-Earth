@@ -5,8 +5,6 @@ import galacticwars.clonewars.kingdom.KingdomRecord;
 import galacticwars.clonewars.kingdom.KingdomSavedData;
 import galacticwars.clonewars.kingdom.WorksiteRecord;
 import java.util.ArrayList;
-import java.util.Comparator;
-import java.util.List;
 import net.minecraft.core.particles.ParticleTypes;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
@@ -19,8 +17,8 @@ import net.minecraft.server.level.ServerPlayer;
  */
 public final class WorksiteOverlayService {
     private static final int INTERVAL_TICKS = 10;
+    private static final int MAX_WORKSITES_PER_PLAYER = 4;
     private static final double MAX_DISTANCE_SQUARED = 96.0D * 96.0D;
-    private static final int MAX_VISIBLE_WORKSITES = 20;
 
     private WorksiteOverlayService() {
     }
@@ -40,7 +38,7 @@ public final class WorksiteOverlayService {
             }
             String dimensionId =
                     player.level().dimension().identifier().toString();
-            List<WorksiteRecord> visibleWorksites = new ArrayList<>();
+            ArrayList<WorksiteRecord> visible = new ArrayList<>();
             for (var settlement : kingdom.settlements()) {
                 for (WorksiteRecord worksite : settlement.worksites()) {
                     if (!worksite.dimensionId().equals(dimensionId)
@@ -54,18 +52,17 @@ public final class WorksiteOverlayService {
                                     > MAX_DISTANCE_SQUARED) {
                         continue;
                     }
-                    visibleWorksites.add(worksite);
+                    visible.add(worksite);
                 }
             }
-            visibleWorksites.sort(Comparator.comparingDouble(worksite ->
-                    player.distanceToSqr(
-                            worksite.x() + 0.5D,
-                            worksite.y() + 0.5D,
-                            worksite.z() + 0.5D)));
-            int limit = Math.min(MAX_VISIBLE_WORKSITES, visibleWorksites.size());
-            for (int i = 0; i < limit; i++) {
-                renderBounds((ServerLevel) player.level(), player, visibleWorksites.get(i));
-            }
+            WorksiteOverlaySelector.nearestVisible(
+                            visible,
+                            player.getX(),
+                            player.getY(),
+                            player.getZ(),
+                            MAX_WORKSITES_PER_PLAYER)
+                    .forEach(worksite -> renderBounds(
+                            (ServerLevel) player.level(), player, worksite));
         }
     }
 

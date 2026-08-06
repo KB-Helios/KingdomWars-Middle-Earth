@@ -4,6 +4,7 @@ import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -35,6 +36,7 @@ import galacticwars.clonewars.combat.FactionRangedWeaponService;
 import galacticwars.clonewars.combat.BlasterHeatPolicy;
 import galacticwars.clonewars.combat.BlasterItem;
 import galacticwars.clonewars.combat.LightsaberDeflectionService;
+import galacticwars.clonewars.combat.RecruitAmmunitionService;
 import galacticwars.clonewars.classes.ClassProgressSavedData;
 import galacticwars.clonewars.classes.ClassAbilityEffectRegistry;
 import galacticwars.clonewars.classes.PlayerClassRuntime;
@@ -87,8 +89,11 @@ import galacticwars.clonewars.kingdom.WorkOrder;
 import galacticwars.clonewars.kingdom.WorkOrderState;
 import galacticwars.clonewars.kingdom.WorkOrderType;
 import galacticwars.clonewars.kingdom.WorksiteRecord;
+import galacticwars.clonewars.kingdom.WorksiteUpdateResult;
 import galacticwars.clonewars.item.CommandTargetSelection;
 import galacticwars.clonewars.menu.RecruitCommandMenu;
+import galacticwars.clonewars.menu.RecruitLoadoutMenu;
+import galacticwars.clonewars.menu.RecruitLoadoutMenuProvider;
 import galacticwars.clonewars.menu.CommandCenterOperationsMenu;
 import galacticwars.clonewars.menu.CommandCenterOperationsMenuProvider;
 import galacticwars.clonewars.menu.CommandCenterNavigationMenu;
@@ -96,10 +101,14 @@ import galacticwars.clonewars.menu.FactionSelectionMenu;
 import galacticwars.clonewars.menu.MerchantTradeMenu;
 import galacticwars.clonewars.menu.MerchantTradeMenuProvider;
 import galacticwars.clonewars.menu.StarterCampSetupMenu;
+import galacticwars.clonewars.menu.WorksiteConfigurationAction;
+import galacticwars.clonewars.menu.WorksiteConfigurationMenu;
+import galacticwars.clonewars.menu.WorksiteConfigurationMenuProvider;
 import galacticwars.clonewars.network.ClassActivatePayload;
 import galacticwars.clonewars.network.ClassHudPayload;
 import galacticwars.clonewars.network.ClassSelectPayload;
 import galacticwars.clonewars.network.FieldCommandRequestPayload;
+import galacticwars.clonewars.network.WorksiteActionPayload;
 import galacticwars.clonewars.progression.LaunchContentCatalog;
 import galacticwars.clonewars.progression.GalacticProgressionCoordinator;
 import galacticwars.clonewars.progression.MissionAttemptSavedData;
@@ -129,10 +138,24 @@ import galacticwars.clonewars.settlement.KingdomBaseBlueprint;
 import galacticwars.clonewars.settlement.StarterCampDeployment;
 import galacticwars.clonewars.settlement.StarterCampDeploymentPhase;
 import galacticwars.clonewars.settlement.StarterCampDeploymentService;
+import galacticwars.clonewars.technology.KingdomResearchService;
+import galacticwars.clonewars.technology.KingdomTechnologyState;
+import galacticwars.clonewars.technology.ResearchResult;
 import galacticwars.clonewars.workforce.WorkerPhase;
 import galacticwars.clonewars.workforce.WorkerProfession;
+import galacticwars.clonewars.workforce.WorkerStatus;
+import galacticwars.clonewars.workforce.WorkerDutyLoadoutPolicy;
 import galacticwars.clonewars.workforce.CourierDispatchMode;
+import galacticwars.clonewars.workforce.CourierRouteExecutionState;
+import galacticwars.clonewars.workforce.CourierRouteMode;
+import galacticwars.clonewars.workforce.CourierTransferAction;
+import galacticwars.clonewars.workforce.CourierWaypoint;
+import galacticwars.clonewars.workforce.SettlementSupplyLedger;
+import galacticwars.clonewars.workforce.SupplyCategory;
+import galacticwars.clonewars.workforce.SupplyDemand;
+import galacticwars.clonewars.workforce.SupplyReservation;
 import galacticwars.clonewars.workforce.WorkAreaBounds;
+import galacticwars.clonewars.workforce.WorkerExecutionState;
 import galacticwars.clonewars.world.PlanetTravelService;
 import galacticwars.clonewars.world.PlanetTravelGameTests;
 import galacticwars.clonewars.world.BlueprintSiteAnchorBlockEntity;
@@ -213,6 +236,10 @@ public final class ModGameTests {
     private static final Identifier EMPTY_STRUCTURE = Identifier.withDefaultNamespace("empty");
     private static final int SMART_BRAIN_TEST_SETUP_INTERVAL = 300;
     private static final int SMART_BRAIN_CHUNK_READY_TIMEOUT = 300;
+    private static final int SMART_BRAIN_TEST_AREA_HORIZONTAL_SPACING = 160;
+    private static final int SMART_BRAIN_TEST_AREA_VERTICAL_SPACING = 120;
+    private static final int SMART_BRAIN_TEST_AREA_VERTICAL_LANES = 2;
+    private static final int LOADOUT_WORKER_TOOL_SLOT = 1;
     private static final AtomicInteger SMART_BRAIN_AREA_SEQUENCE = new AtomicInteger();
     private static final Map<Identifier, Consumer<GameTestHelper>> TESTS = createTests();
 
@@ -277,14 +304,71 @@ public final class ModGameTests {
         isolatedEnvironments.put(id("grouped_zero_supply_blaster"), event.registerEnvironment(
                         id("grouped_zero_supply_blaster_environment"),
                         new TestEnvironmentDefinition.AllOf(List.of())));
+        isolatedEnvironments.put(id("recruit_blaster_ammunition"), event.registerEnvironment(
+                        id("recruit_blaster_ammunition_environment"),
+                        new TestEnvironmentDefinition.AllOf(List.of())));
         isolatedEnvironments.put(id("worker_safety_and_upkeep"), event.registerEnvironment(
                         id("worker_safety_and_upkeep_environment"),
+                        new TestEnvironmentDefinition.AllOf(List.of())));
+        isolatedEnvironments.put(id("recruit_hazard_and_self_care"), event.registerEnvironment(
+                        id("recruit_hazard_and_self_care_environment"),
                         new TestEnvironmentDefinition.AllOf(List.of())));
         isolatedEnvironments.put(id("black_box_farmer_door_lifecycle"), event.registerEnvironment(
                         id("black_box_farmer_door_lifecycle_environment"),
                         new TestEnvironmentDefinition.AllOf(List.of())));
+        isolatedEnvironments.put(id("recruit_door_command_resumption"), event.registerEnvironment(
+                        id("recruit_door_command_resumption_environment"),
+                        new TestEnvironmentDefinition.AllOf(List.of())));
         isolatedEnvironments.put(id("specialist_worker_loops"), event.registerEnvironment(
                         id("specialist_worker_loops_environment"),
+                        new TestEnvironmentDefinition.AllOf(List.of())));
+        isolatedEnvironments.put(id("black_box_cook_lifecycle"), event.registerEnvironment(
+                        id("black_box_cook_lifecycle_environment"),
+                        new TestEnvironmentDefinition.AllOf(List.of())));
+        isolatedEnvironments.put(id("black_box_lumberjack_lifecycle"), event.registerEnvironment(
+                        id("black_box_lumberjack_lifecycle_environment"),
+                        new TestEnvironmentDefinition.AllOf(List.of())));
+        isolatedEnvironments.put(id("black_box_miner_lifecycle"), event.registerEnvironment(
+                        id("black_box_miner_lifecycle_environment"),
+                        new TestEnvironmentDefinition.AllOf(List.of())));
+        isolatedEnvironments.put(id("black_box_miner_broken_tool_recovery"), event.registerEnvironment(
+                        id("black_box_miner_broken_tool_recovery_environment"),
+                        new TestEnvironmentDefinition.AllOf(List.of())));
+        isolatedEnvironments.put(id("black_box_miner_missing_tool_recovery"), event.registerEnvironment(
+                        id("black_box_miner_missing_tool_recovery_environment"),
+                        new TestEnvironmentDefinition.AllOf(List.of())));
+        isolatedEnvironments.put(id("black_box_animal_farmer_lifecycle"), event.registerEnvironment(
+                        id("black_box_animal_farmer_lifecycle_environment"),
+                        new TestEnvironmentDefinition.AllOf(List.of())));
+        isolatedEnvironments.put(id("black_box_fisher_lifecycle"), event.registerEnvironment(
+                        id("black_box_fisher_lifecycle_environment"),
+                        new TestEnvironmentDefinition.AllOf(List.of())));
+        isolatedEnvironments.put(id("black_box_merchant_lifecycle"), event.registerEnvironment(
+                        id("black_box_merchant_lifecycle_environment"),
+                        new TestEnvironmentDefinition.AllOf(List.of())));
+        isolatedEnvironments.put(id("black_box_builder_lifecycle"), event.registerEnvironment(
+                        id("black_box_builder_lifecycle_environment"),
+                        new TestEnvironmentDefinition.AllOf(List.of())));
+        isolatedEnvironments.put(id("black_box_courier_lifecycle"), event.registerEnvironment(
+                        id("black_box_courier_lifecycle_environment"),
+                        new TestEnvironmentDefinition.AllOf(List.of())));
+        isolatedEnvironments.put(id("black_box_technician_lifecycle"), event.registerEnvironment(
+                        id("black_box_technician_lifecycle_environment"),
+                        new TestEnvironmentDefinition.AllOf(List.of())));
+        isolatedEnvironments.put(id("hybrid_courier_dispatch"), event.registerEnvironment(
+                        id("hybrid_courier_dispatch_environment"),
+                        new TestEnvironmentDefinition.AllOf(List.of())));
+        isolatedEnvironments.put(id("competing_courier_leases"), event.registerEnvironment(
+                        id("competing_courier_leases_environment"),
+                        new TestEnvironmentDefinition.AllOf(List.of())));
+        isolatedEnvironments.put(id("courier_live_lease_reload"), event.registerEnvironment(
+                        id("courier_live_lease_reload_environment"),
+                        new TestEnvironmentDefinition.AllOf(List.of())));
+        isolatedEnvironments.put(id("courier_hall_removal"), event.registerEnvironment(
+                        id("courier_hall_removal_environment"),
+                        new TestEnvironmentDefinition.AllOf(List.of())));
+        isolatedEnvironments.put(id("commander_center_replay_runtime"), event.registerEnvironment(
+                        id("commander_center_replay_runtime_environment"),
                         new TestEnvironmentDefinition.AllOf(List.of())));
         isolatedEnvironments.put(id("planet_faction_outpost_runtime"), event.registerEnvironment(
                         id("planet_faction_outpost_runtime_environment"),
@@ -309,29 +393,47 @@ public final class ModGameTests {
                 id("planet_faction_outpost_runtime"),
                 id("grouped_brain_authority"),
                 id("grouped_zero_supply_blaster"),
+                id("recruit_blaster_ammunition"),
                 id("grouped_patrol_pause_runtime"),
                 id("grouped_protect_entity_runtime"),
                 id("worker_safety_and_upkeep"),
+                id("recruit_hazard_and_self_care"),
                 id("black_box_farmer_door_lifecycle"),
+                id("recruit_door_command_resumption"),
                 id("specialist_worker_loops"),
+                id("black_box_cook_lifecycle"),
+                id("black_box_lumberjack_lifecycle"),
+                id("black_box_miner_lifecycle"),
+                id("black_box_miner_broken_tool_recovery"),
+                id("black_box_miner_missing_tool_recovery"),
+                id("black_box_animal_farmer_lifecycle"),
+                id("black_box_fisher_lifecycle"),
+                id("black_box_merchant_lifecycle"),
+                id("black_box_builder_lifecycle"),
+                id("black_box_courier_lifecycle"),
+                id("black_box_technician_lifecycle"),
+                id("competing_courier_leases"),
+                id("courier_live_lease_reload"),
+                id("courier_hall_removal"),
                 id("local_recruit_protect_owner"),
                 id("command_marker_runtime"));
         for (Identifier testId : TESTS.keySet()) {
             int timeoutTicks = testId.equals(id("smart_brain_move_stall_recovery"))
                     ? 520
                     : Set.of(
-                    id("smart_brain_move_command"),
                     id("grouped_brain_authority"),
+                    id("grouped_protect_entity_runtime"),
+                    id("vehicle_embodied_runtime")).contains(testId)
+                    ? 600
+                    : Set.of(
+                    id("smart_brain_move_command"),
                     id("grouped_zero_supply_blaster"),
-                    id("grouped_patrol_pause_runtime"),
-                    id("grouped_protect_entity_runtime")).contains(testId)
+                    id("grouped_patrol_pause_runtime")).contains(testId)
                     ? 260
                     : testId.equals(id("smart_brain_follow_and_sit"))
-                            ? 720
+                            ? 900
                             : Set.of(id("command_marker_runtime"), id("field_command_authority")).contains(testId)
                                     ? 180
-                                    : testId.equals(id("vehicle_embodied_runtime"))
-                                            ? 260
                                     : testId.equals(id("mission_failure_retry_persistence"))
                                             ? 360
                                     : testId.equals(id("chapter_three_campaign_runtime"))
@@ -343,18 +445,54 @@ public final class ModGameTests {
                                     : testId.equals(id("natural_civilian_brain_runtime"))
                                             ? 600
                                     : testId.equals(id("faction_ai_reaction_runtime"))
-                                            ? 360
+                                            ? 900
                                     : testId.equals(id("black_box_farmer_door_lifecycle"))
-                                            ? 700
+                                            ? 1_200
+                                    : testId.equals(id("recruit_door_command_resumption"))
+                                            ? 900
                                     : testId.equals(id("specialist_worker_loops"))
                                             ? 1_600
+                                    : testId.equals(id("black_box_cook_lifecycle"))
+                                            ? 900
+                                    : testId.equals(id("black_box_lumberjack_lifecycle"))
+                                            ? 1_000
+                                    : testId.equals(id("black_box_miner_lifecycle"))
+                                            ? 900
+                                    : testId.equals(id("black_box_miner_broken_tool_recovery"))
+                                            ? 1_500
+                                    : testId.equals(id("black_box_miner_missing_tool_recovery"))
+                                            ? 1_200
+                                    : testId.equals(id("black_box_animal_farmer_lifecycle"))
+                                            ? 900
+                                    : testId.equals(id("black_box_fisher_lifecycle"))
+                                            ? 1_000
+                                    : testId.equals(id("black_box_merchant_lifecycle"))
+                                            ? 900
+                                    : testId.equals(id("black_box_builder_lifecycle"))
+                                            ? 1_800
+                                    : testId.equals(id("black_box_courier_lifecycle"))
+                                            ? 1_200
+                                    : testId.equals(id("black_box_technician_lifecycle"))
+                                            ? 2_100
+                                    : testId.equals(id("competing_courier_leases"))
+                                            ? 700
+                                    : testId.equals(id("courier_live_lease_reload"))
+                                            ? 700
+                                    : testId.equals(id("courier_hall_removal"))
+                                            ? 900
+                                    : testId.equals(id("worker_safety_and_upkeep"))
+                                            ? 700
                                     : Set.of(
                                             id("local_recruit_protect_owner"),
                                             id("ungrouped_recruit_ranged_brain"),
                                             id("ungrouped_recruit_melee_brain"),
-                                            id("worker_safety_and_upkeep"),
+                                            id("recruit_hazard_and_self_care"),
                                             id("faction_selection_transaction")).contains(testId)
                                             ? 360
+                                    : testId.equals(id("recruit_blaster_ammunition"))
+                                            ? 800
+                                    : testId.equals(id("blaster_friendly_fire"))
+                                            ? 400
                                             : 100;
             if (testId.equals(id("faction_selection_transaction"))) {
                 timeoutTicks = 2_000;
@@ -433,12 +571,36 @@ public final class ModGameTests {
         tests.put(id("local_recruit_protect_owner"), ModGameTests::localRecruitProtectOwner);
         tests.put(id("worker_resource_conservation"), ModGameTests::workerResourceConservation);
         tests.put(id("worker_safety_and_upkeep"), ModGameTests::workerSafetyAndUpkeep);
+        tests.put(id("recruit_hazard_and_self_care"), ModGameTests::recruitHazardAndSelfCare);
         tests.put(id("black_box_farmer_door_lifecycle"),
                 ModGameTests::blackBoxFarmerDoorLifecycle);
+        tests.put(id("recruit_door_command_resumption"),
+                ModGameTests::recruitDoorCommandResumption);
         tests.put(id("physical_logistics_transaction"),
                 PhysicalLogisticsGameTests::atomicPhysicalTransfer);
         tests.put(id("enabled_worker_loops"), ModGameTests::enabledWorkerLoops);
         tests.put(id("specialist_worker_loops"), ModGameTests::specialistWorkerLoops);
+        tests.put(id("black_box_cook_lifecycle"), ModGameTests::blackBoxCookLifecycle);
+        tests.put(id("black_box_lumberjack_lifecycle"),
+                ModGameTests::blackBoxLumberjackLifecycle);
+        tests.put(id("black_box_miner_lifecycle"), ModGameTests::blackBoxMinerLifecycle);
+        tests.put(id("black_box_miner_broken_tool_recovery"),
+                ModGameTests::blackBoxMinerBrokenToolRecovery);
+        tests.put(id("black_box_miner_missing_tool_recovery"),
+                ModGameTests::blackBoxMinerMissingToolRecovery);
+        tests.put(id("black_box_animal_farmer_lifecycle"),
+                ModGameTests::blackBoxAnimalFarmerLifecycle);
+        tests.put(id("black_box_fisher_lifecycle"), ModGameTests::blackBoxFisherLifecycle);
+        tests.put(id("black_box_merchant_lifecycle"), ModGameTests::blackBoxMerchantLifecycle);
+        tests.put(id("black_box_builder_lifecycle"), ModGameTests::blackBoxBuilderLifecycle);
+        tests.put(id("black_box_courier_lifecycle"), ModGameTests::blackBoxCourierLifecycle);
+        tests.put(id("black_box_technician_lifecycle"),
+                ModGameTests::blackBoxTechnicianLifecycle);
+        tests.put(id("bounded_worker_scans"), ModGameTests::boundedWorkerScans);
+        tests.put(id("hybrid_courier_dispatch"), ModGameTests::hybridCourierDispatch);
+        tests.put(id("competing_courier_leases"), ModGameTests::competingCourierLeases);
+        tests.put(id("courier_live_lease_reload"), ModGameTests::courierLiveLeaseReload);
+        tests.put(id("courier_hall_removal"), ModGameTests::courierHallRemoval);
         tests.put(id("animal_farmer_species_pairing"), ModGameTests::animalFarmerSpeciesPairing);
         tests.put(id("workforce_saved_data_authority"), ModGameTests::workforceSavedDataAuthority);
         tests.put(id("recruit_spawn_eggs"), ModGameTests::recruitSpawnEggs);
@@ -455,6 +617,7 @@ public final class ModGameTests {
         tests.put(id("faction_ai_reaction_runtime"), ModGameTests::factionAiReactionRuntime);
         tests.put(id("grouped_brain_authority"), ModGameTests::groupedBrainAuthority);
         tests.put(id("grouped_zero_supply_blaster"), ModGameTests::groupedZeroSupplyBlaster);
+        tests.put(id("recruit_blaster_ammunition"), ModGameTests::recruitBlasterAmmunition);
         tests.put(id("grouped_patrol_pause_runtime"), ModGameTests::groupedPatrolPauseRuntime);
         tests.put(id("grouped_protect_entity_runtime"), ModGameTests::groupedProtectEntityRuntime);
         tests.put(id("field_command_authority"), ModGameTests::fieldCommandAuthority);
@@ -1110,6 +1273,14 @@ public final class ModGameTests {
         shooter.tame(owner);
         ItemStack weapon = new ItemStack(ModItems.DC15_BLASTER.get());
         shooter.setItemInHand(InteractionHand.MAIN_HAND, weapon);
+        shooter.createCargoContainer().setItem(
+                0, new ItemStack(ModItems.ENERGY_CELL.get()));
+        if (!RecruitAmmunitionService.tryConsumeForShot(shooter)
+                || countContainerItem(
+                shooter.createCargoContainer(), ModItems.ENERGY_CELL.get()) != 0) {
+            helper.fail("Tamed recruit projectile fixture could not consume its physical Energy Cell");
+            return;
+        }
         ModItems.DC15_BLASTER.get().fireAt(helper.getLevel(), shooter, target, weapon);
 
         GalacticRecruitEntity archer = helper.spawn(
@@ -1341,6 +1512,10 @@ public final class ModGameTests {
         target.setHealth(target.getMaxHealth());
         shooter.initializeNaturalFactionNpc(UUID.randomUUID(), NpcServiceBranch.MILITARY);
         shooter.setItemInHand(InteractionHand.MAIN_HAND, new ItemStack(ModItems.DC15_BLASTER.get()));
+        if (!shooter.createCargoContainer().isEmpty()) {
+            helper.fail("Natural ranged recruit unexpectedly began with player-managed cargo ammunition");
+            return;
+        }
         if (!(shooter.getBrain() instanceof net.tslat.smartbrainlib.api.internal.SmartBrain<?>)) {
             helper.fail("Recruit did not receive a SmartBrainLib brain");
             return;
@@ -1365,9 +1540,218 @@ public final class ModGameTests {
                 helper.fail("Ungrouped ranged recruit brain fired a bolt without its weapon identity");
                 return;
             }
+            if (!shooter.createCargoContainer().isEmpty()) {
+                helper.fail("Natural faction recruit consumed or created player-managed cargo ammunition");
+                return;
+            }
             shooter.discard();
             target.discard();
             bolts.forEach(BlasterBoltEntity::discard);
+        });
+    }
+
+    private static void recruitBlasterAmmunition(GameTestHelper helper) {
+        SmartBrainTestArea area = prepareSmartBrainTestArea(
+                helper, GameType.CREATIVE, -2, 48, -3, 5);
+        ServerPlayer owner = area.player();
+        BlockPos shooterPosition = area.at(2, 1, 1);
+        BlockPos targetNearPosition = area.at(12, 1, 1);
+        BlockPos targetFarPosition = area.at(44, 1, 1);
+        GalacticRecruitEntity shooter = spawnRecruitAt(
+                helper, ModEntityTypes.CLONE_TROOPER.get(), shooterPosition);
+        GalacticRecruitEntity target = spawnRecruitAt(
+                helper, ModEntityTypes.B1_BATTLE_DROID.get(), targetNearPosition);
+        target.setNoAi(true);
+        target.getAttribute(Attributes.MAX_HEALTH).setBaseValue(1024.0D);
+        target.setHealth(target.getMaxHealth());
+        shooter.tame(owner);
+        shooter.setItemInHand(
+                InteractionHand.MAIN_HAND, new ItemStack(ModItems.DC15_BLASTER.get()));
+        shooter.getAttribute(Attributes.MOVEMENT_SPEED).setBaseValue(0.0D);
+        owner.setPos(shooter.getX(), shooter.getY(), shooter.getZ());
+        Container cargo = shooter.createCargoContainer();
+        cargo.setItem(0, new ItemStack(ModItems.ENERGY_CELL.get()));
+        BlockPos wallBase = area.at(7, 1, 1);
+        AABB shotArea = shooter.getBoundingBox().inflate(64.0D);
+        Set<UUID> observedBolts = new java.util.HashSet<>();
+        int[] phase = {-1};
+        int[] phaseStartedRecruitTick = {shooter.tickCount};
+        long indexWaitStartedTick = helper.getTick();
+        boolean[] complete = {false};
+
+        helper.onEachTick(() -> {
+            if (complete[0]) {
+                return;
+            }
+            helper.getLevel().getEntitiesOfClass(
+                            BlasterBoltEntity.class,
+                            shotArea,
+                            bolt -> bolt.getOwner() == shooter)
+                    .forEach(bolt -> observedBolts.add(bolt.getUUID()));
+            int cells = countContainerItem(cargo, ModItems.ENERGY_CELL.get());
+            if (shooter.isWithinMeleeAttackRange(target)) {
+                complete[0] = true;
+                helper.fail("Empty blaster recruit silently closed into melee range");
+                return;
+            }
+
+            int elapsed = shooter.tickCount - phaseStartedRecruitTick[0];
+            switch (phase[0]) {
+                case -1 -> {
+                    boolean shooterIndexed = helper.getLevel().getEntity(shooter.getUUID()) == shooter;
+                    boolean targetIndexed = helper.getLevel().getEntity(target.getUUID()) == target;
+                    // The out-of-range phase spans several chunks. Under aggregate load,
+                    // the shooter's chunk can tick before the far target's chunk does.
+                    boolean areaTicking = areSmartBrainAreaChunksTicking(
+                            helper, area, -2, 48, -3, 5);
+                    boolean entitiesTicked = shooter.tickCount > 0 && target.tickCount > 0;
+                    if (!shooterIndexed || !targetIndexed || !areaTicking || !entitiesTicked) {
+                        if (helper.getTick() - indexWaitStartedTick
+                                >= SMART_BRAIN_CHUNK_READY_TIMEOUT) {
+                            complete[0] = true;
+                            helper.fail("Physical-ammunition fixtures never became entity-ticking: shooter="
+                                    + shooterIndexed + ", target=" + targetIndexed
+                                    + ", entitiesTicked=" + entitiesTicked
+                                    + ", areaTicking=" + areaTicking);
+                        }
+                        return;
+                    }
+                    ItemStack marker = new ItemStack(ModItems.COMMAND_MARKER.get());
+                    owner.setItemInHand(InteractionHand.MAIN_HAND, marker);
+                    owner.setShiftKeyDown(true);
+                    marker.interactLivingEntity(owner, target, InteractionHand.MAIN_HAND);
+                    owner.setShiftKeyDown(false);
+                    if (!shooter.handleMenuButton(owner, RecruitCommandMenu.BUTTON_ATTACK)
+                            || shooter.getRecruitCommand() != RecruitmentAction.ATTACK_TARGET
+                            || shooter.getTarget() != target) {
+                        complete[0] = true;
+                        helper.fail("Physical-ammunition recruit could not receive its embodied attack order");
+                        return;
+                    }
+                    target.setPos(
+                            targetFarPosition.getX() + 0.5D,
+                            targetFarPosition.getY(),
+                            targetFarPosition.getZ() + 0.5D);
+                    target.setDeltaMovement(Vec3.ZERO);
+                    phase[0] = 0;
+                    phaseStartedRecruitTick[0] = shooter.tickCount;
+                }
+                case 0 -> {
+                    if (!observedBolts.isEmpty() || cells != 1) {
+                        complete[0] = true;
+                        helper.fail("Out-of-range blaster attempt consumed or fired ammunition: bolts="
+                                + observedBolts.size() + ", cells=" + cells);
+                        return;
+                    }
+                    if (elapsed >= 30) {
+                        target.setPos(
+                                targetNearPosition.getX() + 0.5D,
+                                targetNearPosition.getY(),
+                                targetNearPosition.getZ() + 0.5D);
+                        target.setDeltaMovement(Vec3.ZERO);
+                        for (int x = -1; x <= 1; x++) {
+                            for (int y = 0; y <= 3; y++) {
+                                for (int z = -4; z <= 4; z++) {
+                                    helper.getLevel().setBlockAndUpdate(
+                                            wallBase.offset(x, y, z), Blocks.STONE.defaultBlockState());
+                                }
+                            }
+                        }
+                        shooter.getSensing().tick();
+                        if (shooter.getSensing().hasLineOfSight(target)) {
+                            complete[0] = true;
+                            helper.fail("Physical-ammunition sight barrier did not block the target");
+                            return;
+                        }
+                        phase[0] = 1;
+                        phaseStartedRecruitTick[0] = shooter.tickCount;
+                    }
+                }
+                case 1 -> {
+                    if (!observedBolts.isEmpty() || cells != 1) {
+                        complete[0] = true;
+                        helper.fail("Line-of-sight-blocked blaster attempt consumed or fired ammunition: bolts="
+                                + observedBolts.size() + ", cells=" + cells);
+                        return;
+                    }
+                    if (elapsed >= 24) {
+                        for (int x = -1; x <= 1; x++) {
+                            for (int y = 0; y <= 3; y++) {
+                                for (int z = -4; z <= 4; z++) {
+                                    helper.getLevel().setBlockAndUpdate(
+                                            wallBase.offset(x, y, z), Blocks.AIR.defaultBlockState());
+                                }
+                            }
+                        }
+                        shooter.getSensing().tick();
+                        phase[0] = 2;
+                        phaseStartedRecruitTick[0] = shooter.tickCount;
+                    }
+                }
+                case 2 -> {
+                    if (observedBolts.size() > 1) {
+                        complete[0] = true;
+                        helper.fail("One physical Energy Cell produced multiple blaster bolts");
+                        return;
+                    }
+                    if (observedBolts.size() == 1) {
+                        if (cells != 0) {
+                            complete[0] = true;
+                            helper.fail("Recruit blaster created a bolt without consuming its Energy Cell");
+                            return;
+                        }
+                        phase[0] = 3;
+                        phaseStartedRecruitTick[0] = shooter.tickCount;
+                        return;
+                    }
+                    if (elapsed >= 100) {
+                        complete[0] = true;
+                        helper.fail("Supplied recruit did not resume ranged fire after line of sight cleared");
+                    }
+                }
+                case 3 -> {
+                    if (observedBolts.size() != 1 || cells != 0) {
+                        complete[0] = true;
+                        helper.fail("Empty recruit blaster fired again or recreated ammunition: bolts="
+                                + observedBolts.size() + ", cells=" + cells);
+                        return;
+                    }
+                    if (elapsed >= BlasterHeatPolicy.SHOT_COOLDOWN_TICKS + 24) {
+                        cargo.setItem(0, new ItemStack(ModItems.ENERGY_CELL.get()));
+                        phase[0] = 4;
+                        phaseStartedRecruitTick[0] = shooter.tickCount;
+                    }
+                }
+                case 4 -> {
+                    if (observedBolts.size() > 2) {
+                        complete[0] = true;
+                        helper.fail("One-cell resupply produced multiple blaster bolts");
+                        return;
+                    }
+                    if (observedBolts.size() == 2) {
+                        if (cells != 0) {
+                            complete[0] = true;
+                            helper.fail("Resupplied recruit fired without consuming the replacement Energy Cell");
+                            return;
+                        }
+                        complete[0] = true;
+                        shooter.discard();
+                        target.discard();
+                        helper.getLevel().getEntitiesOfClass(
+                                        BlasterBoltEntity.class,
+                                        shotArea,
+                                        bolt -> bolt.getOwner() == shooter)
+                                .forEach(BlasterBoltEntity::discard);
+                        helper.succeed();
+                        return;
+                    }
+                    if (elapsed >= 100) {
+                        complete[0] = true;
+                        helper.fail("Physical Energy Cell resupply did not restore ranged fire");
+                    }
+                }
+                default -> throw new IllegalStateException("Unknown ammunition phase " + phase[0]);
+            }
         });
     }
 
@@ -1406,24 +1790,27 @@ public final class ModGameTests {
         owner.setYRot(-90.0F);
         long indexWaitStartedTick = helper.getTick();
         int[] phase = {0};
-        int[] phaseStartedRecruitTick = {0};
+        long[] phaseStartedGameTick = {0L};
         Vec3[] startingPosition = {Vec3.ZERO};
         Vec3[] heldPosition = {Vec3.ZERO};
         double[] startingDistance = {0.0D};
         helper.onEachTick(() -> {
             if (phase[0] == 0) {
-                if (helper.getLevel().getEntity(recruit.getUUID()) != recruit) {
+                owner.setPos(ownerPos.getX() + 0.5D, ownerPos.getY(), ownerPos.getZ() + 0.5D);
+                boolean areaTicking = areSmartBrainAreaChunksTicking(
+                        helper, area, -4, 12, -6, 10);
+                boolean recruitIndexed = helper.getLevel().getEntity(recruit.getUUID()) == recruit;
+                if (!areaTicking || !recruitIndexed || recruit.tickCount == 0) {
                     if (helper.getTick() - indexWaitStartedTick >= SMART_BRAIN_CHUNK_READY_TIMEOUT) {
                         phase[0] = 4;
-                        helper.fail("SmartBrain companion never entered the server entity index");
+                        helper.fail("SmartBrain companion area never became entity-ticking: ticking="
+                                + areaTicking + ", recruit=" + recruitIndexed
+                                + ", recruitTick=" + recruit.tickCount);
                     }
                     return;
                 }
-                owner.setPos(ownerPos.getX() + 0.5D, ownerPos.getY(), ownerPos.getZ() + 0.5D);
-                // Embedded GameTest players do not send the movement acknowledgement that
-                // normally advances their entity-ticking chunk ticket. Refresh it after the
-                // owner move and avoid starting the movement window until both entities tick.
-                helper.getLevel().getChunkSource().move(owner);
+                // The shared readiness poll refreshes the embedded player's post-move chunk
+                // ticket; retain the local checks before starting the movement window.
                 boolean ownerChunkTicking = helper.getLevel().areEntitiesActuallyLoadedAndTicking(
                         ChunkPos.containing(owner.blockPosition()));
                 boolean recruitChunkTicking = helper.getLevel().areEntitiesActuallyLoadedAndTicking(
@@ -1439,15 +1826,19 @@ public final class ModGameTests {
                 invokeRecruitCommand(recruit, RecruitmentAction.FOLLOW_OWNER);
                 startingPosition[0] = recruit.position();
                 startingDistance[0] = recruit.distanceToSqr(owner);
-                phaseStartedRecruitTick[0] = recruit.tickCount;
+                phaseStartedGameTick[0] = helper.getTick();
                 phase[0] = 1;
                 return;
             }
-            if (phase[0] == 1 && recruit.tickCount - phaseStartedRecruitTick[0] >= 320) {
+            if (phase[0] == 1) {
+                long elapsed = helper.getTick() - phaseStartedGameTick[0];
                 boolean approachedOwner = recruit.distanceToSqr(owner) < startingDistance[0] - 4.0D;
                 boolean followedAnchor = recruit.position().distanceToSqr(startingPosition[0]) > 4.0D
                         && BrainUtil.hasMemory(recruit,
                         net.minecraft.world.entity.ai.memory.MemoryModuleType.WALK_TARGET);
+                if (!approachedOwner && !followedAnchor && elapsed < 520L) {
+                    return;
+                }
                 if (!approachedOwner && !followedAnchor) {
                     phase[0] = 4;
                     net.minecraft.world.level.pathfinder.Path activePath = recruit.getNavigation().getPath();
@@ -1467,7 +1858,8 @@ public final class ModGameTests {
                             + ", recruitChunkTicking=" + helper.getLevel().areEntitiesActuallyLoadedAndTicking(
                             ChunkPos.containing(recruit.blockPosition()))
                             + ", navigationDone=" + recruit.getNavigation().isDone()
-                            + ", recruitTicks=" + (recruit.tickCount - phaseStartedRecruitTick[0])
+                            + ", gameTicks=" + elapsed
+                            + ", recruitTicks=" + recruit.tickCount
                             + ", path=" + pathState(recruit, owner.blockPosition())
                             + ", activePath=" + (activePath == null ? "none" : "nodes="
                             + activePath.getNodeCount() + ", index=" + activePath.getNextNodeIndex()
@@ -1485,11 +1877,11 @@ public final class ModGameTests {
                 recruit.setWorkerProfession(WorkerProfession.FARMER);
                 invokeRecruitCommand(recruit, RecruitmentAction.HOLD_POSITION);
                 heldPosition[0] = recruit.position();
-                phaseStartedRecruitTick[0] = recruit.tickCount;
+                phaseStartedGameTick[0] = helper.getTick();
                 phase[0] = 2;
                 return;
             }
-            if (phase[0] == 2 && recruit.tickCount - phaseStartedRecruitTick[0] >= 20) {
+            if (phase[0] == 2 && helper.getTick() - phaseStartedGameTick[0] >= 20L) {
                 double heldDeltaX = recruit.getX() - heldPosition[0].x();
                 double heldDeltaZ = recruit.getZ() - heldPosition[0].z();
                 if (!recruit.isOrderedToSit()
@@ -1505,11 +1897,11 @@ public final class ModGameTests {
                     return;
                 }
                 invokeRecruitCommand(recruit, RecruitmentAction.CLEAR_TARGET);
-                phaseStartedRecruitTick[0] = recruit.tickCount;
+                phaseStartedGameTick[0] = helper.getTick();
                 phase[0] = 3;
                 return;
             }
-            if (phase[0] == 3 && recruit.tickCount - phaseStartedRecruitTick[0] >= 5) {
+            if (phase[0] == 3 && helper.getTick() - phaseStartedGameTick[0] >= 5L) {
                 phase[0] = 4;
                 if (recruit.isOrderedToSit()) {
                     helper.fail("Clear-target command incorrectly kept the recruit sitting");
@@ -1813,22 +2205,6 @@ public final class ModGameTests {
         // virtual/hibernate transition. A field Hold must therefore resolve the commander's
         // current server position, rather than pulling a live squad back to that stale anchor.
         BlockPos liveHoldPosition = area.at(5, 1, 1);
-        commander.setPos(liveHoldPosition.getX() + 0.5D, liveHoldPosition.getY(), liveHoldPosition.getZ() + 0.5D);
-        var holdState = ArmyFieldCommandService.execute(owner, new FieldCommandRequestPayload(
-                UUID.randomUUID(), FieldCommandAction.HOLD, List.of(squad.id())));
-        ArmyGroupOrder heldOrder = data.armyGroup(squad.id()).orElseThrow().order();
-        if (holdState.result() != FieldCommandResult.ACCEPTED
-                || heldOrder.type() != ArmyCommandType.HOLD_POSITION
-                || heldOrder.targetPosition().isEmpty()
-                || heldOrder.targetPosition().orElseThrow().blockPosition().x()
-                != commander.blockPosition().getX()
-                || heldOrder.targetPosition().orElseThrow().blockPosition().z()
-                != commander.blockPosition().getZ()) {
-            helper.fail("Field Hold did not use the live commander's server position: result="
-                    + holdState.result() + ", order=" + heldOrder + ", commander=" + commander.blockPosition());
-            return;
-        }
-
         BlockPos moveTarget = area.at(14, 1, 1);
         ArmyLocation moveLocation = new ArmyLocation(
                 helper.getLevel().dimension().identifier().toString(),
@@ -1836,12 +2212,8 @@ public final class ModGameTests {
         ArmyGroupOrder moveOrder = new ArmyGroupOrder(
                 ArmyCommandType.MOVE_TO_POSITION,
                 Optional.of(moveLocation), Optional.empty(), squad.order().formation(), squad.order().spacing());
-        if (!data.issueArmyOrder(owner.getUUID(), squad.id(), moveOrder)) {
-            helper.fail("Grouped SmartBrain setup could not persist its move order");
-            return;
-        }
-
-        long startedAt = helper.getTick();
+        long[] startedAt = {helper.getTick()};
+        boolean[] ordersIssued = {false};
         boolean[] complete = {false};
         helper.onEachTick(() -> {
             if (complete[0]) {
@@ -1849,6 +2221,69 @@ public final class ModGameTests {
             }
             boolean commanderIndexed = helper.getLevel().getEntity(commander.getUUID()) == commander;
             boolean soldierIndexed = helper.getLevel().getEntity(soldier.getUUID()) == soldier;
+            if (!ordersIssued[0]) {
+                // Under aggregate load, entity indexing can precede the forced area's
+                // entity-ticking state; the live command and SmartBrain path require both.
+                boolean areaTicking = areSmartBrainAreaChunksTicking(
+                        helper, area, -4, 18, -4, 4);
+                boolean recruitsTicked = commander.tickCount > 0 && soldier.tickCount > 0;
+                if (!commanderIndexed || !soldierIndexed || !areaTicking || !recruitsTicked) {
+                    if (helper.getTick() - startedAt[0] >= SMART_BRAIN_CHUNK_READY_TIMEOUT) {
+                        complete[0] = true;
+                        helper.fail("Grouped SmartBrain fixtures never became entity-ticking: commander="
+                                + commanderIndexed + ", soldier=" + soldierIndexed
+                                + ", recruitsTicked=" + recruitsTicked
+                                + ", areaTicking=" + areaTicking);
+                    }
+                    return;
+                }
+                commander.setPos(
+                        liveHoldPosition.getX() + 0.5D,
+                        liveHoldPosition.getY(),
+                        liveHoldPosition.getZ() + 0.5D);
+                var holdState = ArmyFieldCommandService.execute(
+                        owner,
+                        new FieldCommandRequestPayload(
+                                UUID.randomUUID(), FieldCommandAction.HOLD, List.of(squad.id())));
+                ArmyGroupOrder heldOrder = data.armyGroup(squad.id()).orElseThrow().order();
+                if (holdState.result() != FieldCommandResult.ACCEPTED
+                        || heldOrder.type() != ArmyCommandType.HOLD_POSITION
+                        || heldOrder.targetPosition().isEmpty()
+                        || heldOrder.targetPosition().orElseThrow().blockPosition().x()
+                        != commander.blockPosition().getX()
+                        || heldOrder.targetPosition().orElseThrow().blockPosition().z()
+                        != commander.blockPosition().getZ()) {
+                    complete[0] = true;
+                    var currentGroup = data.armyGroup(squad.id()).orElseThrow();
+                    helper.fail("Field Hold did not use the live commander's server position: result="
+                            + holdState.result() + ", order=" + heldOrder
+                            + ", commander=" + commander.blockPosition()
+                            + ", owner=" + owner.blockPosition()
+                            + ", distanceSqr=" + owner.distanceToSqr(commander)
+                            + ", lifecycle=" + currentGroup.simulation().lifecycleState()
+                            + ", serviceBranch=" + commander.getServiceBranch()
+                            + ", contains=" + currentGroup.contains(commander.getUUID())
+                            + ", visibleSquads=" + holdState.squads().size()
+                            + ", visibleTarget=" + holdState.squads().stream()
+                                    .anyMatch(candidate -> candidate.id().equals(squad.id()))
+                            + ", visibleNames=" + holdState.squads().stream()
+                                    .map(candidate -> candidate.name()).limit(4).toList()
+                            + ", kingdomGroups=" + data.armyGroupsForKingdom(kingdom.id()).size()
+                            + ", sameLevel=" + (owner.level() == helper.getLevel())
+                            + ", ticks=" + owner.tickCount + "/" + commander.tickCount
+                            + ", areaTicking=" + areSmartBrainAreaChunksTicking(
+                                    helper, area, -4, 18, -4, 4));
+                    return;
+                }
+                if (!data.issueArmyOrder(owner.getUUID(), squad.id(), moveOrder)) {
+                    complete[0] = true;
+                    helper.fail("Grouped SmartBrain setup could not persist its move order");
+                    return;
+                }
+                ordersIssued[0] = true;
+                startedAt[0] = helper.getTick();
+                return;
+            }
             ArmyBrainState commanderState = BrainUtil.getMemory(commander, ArmyBrainMemoryTypes.ARMY_STATE);
             ArmyBrainState soldierState = BrainUtil.getMemory(soldier, ArmyBrainMemoryTypes.ARMY_STATE);
             ArmyMarchMemory commanderMarch = BrainUtil.getMemory(commander, ArmyBrainMemoryTypes.MARCH_STATE);
@@ -1860,7 +2295,7 @@ public final class ModGameTests {
             if (!commanderIndexed || !soldierIndexed || commanderState == null || soldierState == null
                     || commanderMarch == null || soldierMarch == null
                     || commanderWalkTarget == null || soldierWalkTarget == null) {
-                if (helper.getTick() - startedAt >= 180L) {
+                if (helper.getTick() - startedAt[0] >= 180L) {
                     complete[0] = true;
                     helper.fail("Live grouped SmartBrain did not publish state and formation walk targets: indexed="
                             + commanderIndexed + "/" + soldierIndexed
@@ -1957,6 +2392,9 @@ public final class ModGameTests {
         soldier.tame(owner);
         commander.setMilitaryMainHandItem(new ItemStack(Items.IRON_SWORD));
         soldier.setMilitaryMainHandItem(new ItemStack(ModItems.DC15_BLASTER.get()));
+        Container soldierCargo = soldier.createCargoContainer();
+        soldierCargo.setItem(0, new ItemStack(
+                ModItems.ENERGY_CELL.get(), BlasterHeatPolicy.SHOTS_BEFORE_OVERHEAT + 1));
         target.setNoAi(true);
         target.setInvulnerable(true);
         target.getAttribute(Attributes.MAX_HEALTH).setBaseValue(4096.0D);
@@ -2016,12 +2454,29 @@ public final class ModGameTests {
             }
             if (observedBolts.size() >= BlasterHeatPolicy.SHOTS_BEFORE_OVERHEAT
                     && overheatStartedRecruitTick[0] < 0) {
+                int expectedRemainingCells = 1;
+                int remainingCells = countContainerItem(
+                        soldierCargo, ModItems.ENERGY_CELL.get());
+                if (remainingCells != expectedRemainingCells) {
+                    complete[0] = true;
+                    helper.fail("Grouped blaster did not consume exactly one physical cell per shot: bolts="
+                            + observedBolts.size() + ", cells=" + remainingCells);
+                    return;
+                }
                 overheatStartedRecruitTick[0] = soldier.tickCount;
             }
             if (overheatStartedRecruitTick[0] >= 0) {
                 if (observedBolts.size() > BlasterHeatPolicy.SHOTS_BEFORE_OVERHEAT) {
                     complete[0] = true;
                     helper.fail("Grouped blaster fired before its overheat window elapsed");
+                    return;
+                }
+                int remainingCells = countContainerItem(
+                        soldierCargo, ModItems.ENERGY_CELL.get());
+                if (remainingCells != 1) {
+                    complete[0] = true;
+                    helper.fail("Overheated grouped blaster consumed its reserved Energy Cell: cells="
+                            + remainingCells);
                     return;
                 }
                 if (soldier.tickCount - overheatStartedRecruitTick[0] >= 30) {
@@ -2311,24 +2766,9 @@ public final class ModGameTests {
             return;
         }
 
-        ItemStack marker = new ItemStack(ModItems.COMMAND_MARKER.get());
-        marker.set(ModDataComponents.COMMAND_TARGET,
-                CommandTargetSelection.entity(helper.getLevel(), protectedRecruit));
-        owner.setItemInHand(InteractionHand.MAIN_HAND, marker);
-        ArmyFieldCommandService.clearReplayHistory(owner.getUUID());
-        var protectedResult = ArmyFieldCommandService.execute(owner, new FieldCommandRequestPayload(
-                UUID.randomUUID(), FieldCommandAction.PROTECT_MARKED_ENTITY, List.of(squad.id())));
-        ArmyGroupOrder protectedOrder = data.armyGroup(squad.id()).orElseThrow().order();
-        if (protectedResult.result() != FieldCommandResult.ACCEPTED
-                || protectedOrder.type() != ArmyCommandType.PROTECT_ENTITY
-                || protectedOrder.targetEntityId().filter(protectedRecruit.getUUID()::equals).isEmpty()) {
-            helper.fail("Protect Marked Entity did not persist an authoritative group order: result="
-                    + protectedResult.result() + ", order=" + protectedOrder);
-            return;
-        }
-
-        long startedAt = helper.getTick();
+        long[] startedAt = {helper.getTick()};
         int[] threatStartedAtRecruitTick = {-1};
+        boolean[] commandIssued = {false};
         boolean[] complete = {false};
         helper.onEachTick(() -> {
             if (complete[0]) {
@@ -2338,10 +2778,43 @@ public final class ModGameTests {
                     && helper.getLevel().getEntity(soldier.getUUID()) == soldier
                     && helper.getLevel().getEntity(protectedRecruit.getUUID()) == protectedRecruit
                     && helper.getLevel().getEntity(attacker.getUUID()) == attacker;
+            if (!commandIssued[0]) {
+                if (!entitiesIndexed) {
+                    if (helper.getTick() - startedAt[0] >= SMART_BRAIN_CHUNK_READY_TIMEOUT) {
+                        complete[0] = true;
+                        helper.fail("Grouped Protect Entity fixtures never entered the server index");
+                    }
+                    return;
+                }
+                ItemStack marker = new ItemStack(ModItems.COMMAND_MARKER.get());
+                marker.set(ModDataComponents.COMMAND_TARGET,
+                        CommandTargetSelection.entity(helper.getLevel(), protectedRecruit));
+                owner.setItemInHand(InteractionHand.MAIN_HAND, marker);
+                ArmyFieldCommandService.clearReplayHistory(owner.getUUID());
+                var protectedResult = ArmyFieldCommandService.execute(
+                        owner,
+                        new FieldCommandRequestPayload(
+                                UUID.randomUUID(),
+                                FieldCommandAction.PROTECT_MARKED_ENTITY,
+                                List.of(squad.id())));
+                ArmyGroupOrder protectedOrder = data.armyGroup(squad.id()).orElseThrow().order();
+                if (protectedResult.result() != FieldCommandResult.ACCEPTED
+                        || protectedOrder.type() != ArmyCommandType.PROTECT_ENTITY
+                        || protectedOrder.targetEntityId()
+                                .filter(protectedRecruit.getUUID()::equals).isEmpty()) {
+                    complete[0] = true;
+                    helper.fail("Protect Marked Entity did not persist an authoritative group order: result="
+                            + protectedResult.result() + ", order=" + protectedOrder);
+                    return;
+                }
+                commandIssued[0] = true;
+                startedAt[0] = helper.getTick();
+                return;
+            }
             ArmyBrainState commanderState = BrainUtil.getMemory(commander, ArmyBrainMemoryTypes.ARMY_STATE);
             ArmyBrainState soldierState = BrainUtil.getMemory(soldier, ArmyBrainMemoryTypes.ARMY_STATE);
             if (!entitiesIndexed || commanderState == null || soldierState == null) {
-                if (helper.getTick() - startedAt >= 120L) {
+                if (helper.getTick() - startedAt[0] >= 120L) {
                     complete[0] = true;
                     helper.fail("Grouped Protect Entity squad never entered the live brain: indexed="
                             + entitiesIndexed + ", states=" + (commanderState != null) + "/"
@@ -2587,7 +3060,137 @@ public final class ModGameTests {
             helper.fail("Faction recruit projectile damaged a neutral player");
             return;
         }
-        helper.succeed();
+
+        SmartBrainTestArea collisionArea = prepareSmartBrainTestArea(
+                helper, GameType.CREATIVE, 0, 16, 0, 3);
+        ServerPlayer collisionOwner = collisionArea.player();
+        GalacticRecruitEntity collisionShooter = spawnRecruitAt(
+                helper, ModEntityTypes.CLONE_TROOPER.get(), collisionArea.at(2, 1, 1));
+        GalacticRecruitEntity protectedRecruit = spawnRecruitAt(
+                helper, ModEntityTypes.ARC_TROOPER.get(), collisionArea.at(7, 1, 1));
+        GalacticRecruitEntity collisionTarget = spawnRecruitAt(
+                helper, ModEntityTypes.B1_BATTLE_DROID.get(), collisionArea.at(13, 1, 1));
+        collisionShooter.tame(collisionOwner);
+        protectedRecruit.tame(collisionOwner);
+        collisionShooter.setNoAi(true);
+        protectedRecruit.setNoAi(true);
+        collisionTarget.setNoAi(true);
+        collisionShooter.setNoGravity(true);
+        protectedRecruit.setNoGravity(true);
+        collisionTarget.setNoGravity(true);
+        collisionTarget.initializeNaturalFactionNpc(UUID.randomUUID(), NpcServiceBranch.MILITARY);
+        protectedRecruit.getAttribute(Attributes.MAX_HEALTH).setBaseValue(128.0D);
+        protectedRecruit.setHealth(protectedRecruit.getMaxHealth());
+        collisionTarget.getAttribute(Attributes.MAX_HEALTH).setBaseValue(128.0D);
+        collisionTarget.setHealth(collisionTarget.getMaxHealth());
+        ItemStack collisionWeapon = new ItemStack(ModItems.DC15_BLASTER.get());
+        collisionShooter.setItemInHand(InteractionHand.MAIN_HAND, collisionWeapon);
+        collisionShooter.createCargoContainer().setItem(
+                0, new ItemStack(ModItems.ENERGY_CELL.get()));
+        long collisionIndexWaitStartedTick = helper.getTick();
+        int[] collisionPhase = {0};
+        long[] collisionPhaseStartedTick = {helper.getTick()};
+        BlasterBoltEntity[] crossingBolt = {null};
+        helper.onEachTick(() -> {
+            if (collisionPhase[0] == 3) {
+                return;
+            }
+            if (collisionPhase[0] == 0) {
+                boolean entitiesIndexed = helper.getLevel().getEntity(collisionShooter.getUUID())
+                        == collisionShooter
+                        && helper.getLevel().getEntity(protectedRecruit.getUUID()) == protectedRecruit
+                        && helper.getLevel().getEntity(collisionTarget.getUUID()) == collisionTarget;
+                boolean chunkTicking = helper.getLevel().areEntitiesActuallyLoadedAndTicking(
+                        ChunkPos.containing(collisionShooter.blockPosition()));
+                if (!entitiesIndexed || !chunkTicking) {
+                    if (helper.getTick() - collisionIndexWaitStartedTick
+                            >= SMART_BRAIN_CHUNK_READY_TIMEOUT) {
+                        collisionPhase[0] = 3;
+                        helper.fail("Collision-level friendly-fire fixtures never became ready: indexed="
+                                + entitiesIndexed + ", chunkTicking=" + chunkTicking);
+                    }
+                    return;
+                }
+                if (!RecruitAmmunitionService.tryConsumeForShot(collisionShooter)) {
+                    collisionPhase[0] = 3;
+                    helper.fail("Collision-level friendly-fire shooter could not consume its Energy Cell");
+                    return;
+                }
+                ModItems.DC15_BLASTER.get().fireAt(
+                        helper.getLevel(), collisionShooter, collisionTarget, collisionWeapon);
+                collisionPhase[0] = 1;
+                collisionPhaseStartedTick[0] = helper.getTick();
+                return;
+            }
+
+            if (collisionPhase[0] == 1) {
+                if (helper.getTick() == collisionPhaseStartedTick[0]) {
+                    return;
+                }
+                List<BlasterBoltEntity> crossingBolts = helper.getLevel().getEntitiesOfClass(
+                        BlasterBoltEntity.class,
+                        collisionShooter.getBoundingBox().inflate(20.0D),
+                        candidate -> candidate.getOwner() == collisionShooter);
+                if (crossingBolts.size() != 1) {
+                    collisionPhase[0] = 3;
+                    helper.fail("Collision-level friendly-fire fixture did not create exactly one recruit-owned bolt");
+                    return;
+                }
+                crossingBolt[0] = crossingBolts.getFirst();
+                Vec3 collisionPathStart = crossingBolt[0].position();
+                Vec3 collisionPathEnd = collisionPathStart.add(
+                        crossingBolt[0].getDeltaMovement().normalize().scale(24.0D));
+                if (protectedRecruit.getBoundingBox().clip(collisionPathStart, collisionPathEnd).isEmpty()
+                        || collisionTarget.getBoundingBox().clip(collisionPathStart, collisionPathEnd).isEmpty()) {
+                    collisionPhase[0] = 3;
+                    helper.fail("Recruit-owned bolt trajectory did not cross both collision fixtures: start="
+                            + collisionPathStart + ", end=" + collisionPathEnd
+                            + ", protectedBox=" + protectedRecruit.getBoundingBox()
+                            + ", enemyBox=" + collisionTarget.getBoundingBox()
+                            + ", protectedHittable=" + protectedRecruit.canBeHitByProjectile()
+                            + ", enemyHittable=" + collisionTarget.canBeHitByProjectile());
+                    return;
+                }
+                collisionPhase[0] = 2;
+                return;
+            }
+            if (protectedRecruit.hurtTime > 0
+                    || protectedRecruit.getLastDamageSource() != null) {
+                collisionPhase[0] = 3;
+                helper.fail("Real recruit-owned bolt damaged the same-owner recruit in its path: health="
+                        + protectedRecruit.getHealth() + ", hurtTime=" + protectedRecruit.hurtTime
+                        + ", source=" + protectedRecruit.getLastDamageSource());
+                return;
+            }
+            if (collisionTarget.hurtTime > 0
+                    || collisionTarget.getLastDamageSource() != null) {
+                collisionPhase[0] = 3;
+                helper.fail("Friendly-fire bolt crossed the protected recruit and damaged the enemy behind it: health="
+                        + collisionTarget.getHealth() + ", hurtTime=" + collisionTarget.hurtTime
+                        + ", source=" + collisionTarget.getLastDamageSource());
+                return;
+            }
+            if (crossingBolt[0].isRemoved()) {
+                if (crossingBolt[0].position().distanceToSqr(protectedRecruit.position()) > 6.25D) {
+                    collisionPhase[0] = 3;
+                    helper.fail("Recruit-owned bolt was removed away from the protected collision target");
+                    return;
+                }
+                collisionPhase[0] = 3;
+                collisionShooter.discard();
+                protectedRecruit.discard();
+                collisionTarget.discard();
+                helper.succeed();
+                return;
+            }
+            if (helper.getTick() - collisionPhaseStartedTick[0] >= 20L) {
+                collisionPhase[0] = 3;
+                helper.fail("Recruit-owned bolt did not collide with and stop at the protected recruit: bolt="
+                        + crossingBolt[0].position() + ", velocity=" + crossingBolt[0].getDeltaMovement()
+                        + ", protected=" + protectedRecruit.position()
+                        + ", enemy=" + collisionTarget.position());
+            }
+        });
     }
 
     private static void recruitSpawnEggs(GameTestHelper helper) {
@@ -4189,6 +4792,7 @@ public final class ModGameTests {
         merchant.initializeFromSpawnEgg();
         merchant.tame(owner);
         merchant.setWorkerProfession(WorkerProfession.MERCHANT);
+        configurePhysicalMarket(helper, owner, merchant, hall, hallPos, 16);
         BlockPos beacon = area.at(10, 1, 10);
         helper.getLevel().setBlockAndUpdate(beacon, ModBlocks.CONTROL_BEACON.get().defaultBlockState());
         GalacticRecruitEntity escort = spawnRecruitAt(
@@ -4626,7 +5230,10 @@ public final class ModGameTests {
 
     private static void blueprintSiteRuntime(GameTestHelper helper) {
         ServerLevel level = helper.getLevel();
-        BlockPos anchorPos = helper.absolutePos(new BlockPos(2, 1, 2));
+        BlockPos anchorPos = isolatedCapital(helper, 96);
+        ChunkPos siteChunk = ChunkPos.containing(anchorPos);
+        level.getChunkSource().updateChunkForced(siteChunk, true);
+        level.getChunk(siteChunk.x(), siteChunk.z());
         BlockPos primaryLootPos = anchorPos.offset(2, 0, 0);
         BlockPos suppliesLootPos = anchorPos.offset(-2, 0, 0);
         level.setBlock(anchorPos.below(), Blocks.STONE.defaultBlockState(), 3);
@@ -4636,6 +5243,7 @@ public final class ModGameTests {
         level.removeBlockEntity(primaryLootPos);
         level.removeBlockEntity(suppliesLootPos);
         if (!(level.getBlockEntity(anchorPos) instanceof BlueprintSiteAnchorBlockEntity anchor)) {
+            level.getChunkSource().updateChunkForced(siteChunk, false);
             helper.fail("Blueprint site anchor block entity was not created");
             return;
         }
@@ -4648,6 +5256,7 @@ public final class ModGameTests {
                 .findFirst().orElse(null);
         if (outpost == null || !outpost.factionId().equals("galacticwars:hutt_cartel")
                 || !data.siteGenerated(outpost.id())) {
+            level.getChunkSource().updateChunkForced(siteChunk, false);
             helper.fail("Blueprint site did not atomically register its faction outpost"
                     + " [record=" + (outpost != null)
                     + ", generated=" + (outpost != null && data.siteGenerated(outpost.id()))
@@ -4656,27 +5265,41 @@ public final class ModGameTests {
                     + ", supplies=" + hasLazyLoot(level, suppliesLootPos) + "]");
             return;
         }
-        int expectedResidents = outpost.militaryNpcIds().size() + outpost.civilianNpcIds().size();
-        int loadedResidents = level.getEntitiesOfClass(GalacticRecruitEntity.class,
-                new AABB(anchorPos).inflate(12.0D), recruit -> outpost.contains(recruit.getUUID())).size();
-        if (expectedResidents < 3 || loadedResidents != expectedResidents
-                || !hasLazyLoot(level, primaryLootPos)
-                || !hasLazyLoot(level, suppliesLootPos)
-                || !anchor.isInitialized()) {
-            helper.fail("Blueprint site residents or lazy loot were incomplete");
-            return;
-        }
-        BlueprintSiteAnchorBlockEntity.serverTick(level, anchorPos, level.getBlockState(anchorPos), anchor);
-        int afterReplay = level.getEntitiesOfClass(GalacticRecruitEntity.class,
-                new AABB(anchorPos).inflate(12.0D), recruit -> outpost.contains(recruit.getUUID())).size();
-        Tag encoded = FactionOutpostSavedData.CODEC.encodeStart(NbtOps.INSTANCE, data).getOrThrow();
-        FactionOutpostSavedData restored = FactionOutpostSavedData.CODEC.parse(NbtOps.INSTANCE, encoded).getOrThrow();
-        if (afterReplay != loadedResidents || restored.outpost(outpost.id()).isEmpty()
-                || !restored.siteGenerated(outpost.id())) {
-            helper.fail("Blueprint site initialization was not reload-idempotent");
-            return;
-        }
-        helper.succeed();
+        helper.runAfterDelay(2, () -> {
+            int expectedResidents = outpost.militaryNpcIds().size() + outpost.civilianNpcIds().size();
+            int loadedResidents = (int) java.util.stream.Stream.concat(
+                            outpost.militaryNpcIds().stream(), outpost.civilianNpcIds().stream())
+                    .filter(residentId -> level.getEntity(residentId) instanceof GalacticRecruitEntity)
+                    .count();
+            if (expectedResidents < 3 || loadedResidents != expectedResidents
+                    || !hasLazyLoot(level, primaryLootPos)
+                    || !hasLazyLoot(level, suppliesLootPos)
+                    || !anchor.isInitialized()) {
+                level.getChunkSource().updateChunkForced(siteChunk, false);
+                helper.fail("Blueprint site residents or lazy loot were incomplete"
+                        + " [residents=" + loadedResidents + "/" + expectedResidents
+                        + ", primary=" + hasLazyLoot(level, primaryLootPos)
+                        + ", supplies=" + hasLazyLoot(level, suppliesLootPos)
+                        + ", initialized=" + anchor.isInitialized() + "]");
+                return;
+            }
+            BlueprintSiteAnchorBlockEntity.serverTick(level, anchorPos, level.getBlockState(anchorPos), anchor);
+            int afterReplay = (int) java.util.stream.Stream.concat(
+                            outpost.militaryNpcIds().stream(), outpost.civilianNpcIds().stream())
+                    .filter(residentId -> level.getEntity(residentId) instanceof GalacticRecruitEntity)
+                    .count();
+            Tag encoded = FactionOutpostSavedData.CODEC.encodeStart(NbtOps.INSTANCE, data).getOrThrow();
+            FactionOutpostSavedData restored = FactionOutpostSavedData.CODEC.parse(NbtOps.INSTANCE, encoded)
+                    .getOrThrow();
+            if (afterReplay != loadedResidents || restored.outpost(outpost.id()).isEmpty()
+                    || !restored.siteGenerated(outpost.id())) {
+                level.getChunkSource().updateChunkForced(siteChunk, false);
+                helper.fail("Blueprint site initialization was not reload-idempotent");
+                return;
+            }
+            level.getChunkSource().updateChunkForced(siteChunk, false);
+            helper.succeed();
+        });
     }
 
     private static void commanderCenterReplayRuntime(GameTestHelper helper) {
@@ -5463,25 +6086,27 @@ public final class ModGameTests {
         }
         player.getInventory().add(new ItemStack(ModItems.CREDIT_CHIP.get(), 100));
 
-        UUID outpostId = UUID.randomUUID();
-        BlockPos merchantPosition = helper.absolutePos(new BlockPos(2, 1, 2));
+        ServerPlayer merchantOwner = makeConnectedMockPlayer(helper, GameType.CREATIVE);
+        BlockPos marketHallPos = isolatedCapital(helper, 83);
+        CommandCenterBlockEntity marketHall = placeCommandCenter(helper, marketHallPos);
+        marketHall.claim(merchantOwner);
+        marketHall.setFaction("galacticwars:republic");
+        KingdomSavedData kingdoms = KingdomSavedData.get(level);
+        if (kingdoms.activateHall(
+                merchantOwner.getUUID(),
+                marketHall.factionId(),
+                level.dimension().identifier().toString(),
+                marketHallPos).isEmpty()) {
+            helper.fail("Trader disposition setup could not activate its physical market");
+            return;
+        }
         GalacticRecruitEntity trader = helper.spawn(
                 ModEntityTypes.REPUBLIC_CIVILIAN.get(), new BlockPos(2, 1, 2));
-        trader.initializeBlueprintSiteResident(
-                outpostId,
-                NpcServiceBranch.CIVILIAN,
-                NpcRole.TRADER,
-                merchantPosition,
-                32);
-        FactionOutpostSavedData.get(level).registerGeneratedSite(
-                outpostId,
-                "galacticwars:republic",
-                level.dimension().identifier().toString(),
-                merchantPosition,
-                32,
-                List.of(),
-                List.of(trader.getUUID()),
-                level.getGameTime());
+        trader.initializeFromSpawnEgg();
+        trader.tame(merchantOwner);
+        trader.setWorkerProfession(WorkerProfession.MERCHANT);
+        configurePhysicalMarket(
+                helper, merchantOwner, trader, marketHall, marketHallPos, 32);
         player.setPos(trader.getX(), trader.getY(), trader.getZ() + 1.0D);
         level.getChunkSource().move(player);
 
@@ -5552,6 +6177,83 @@ public final class ModGameTests {
                 live.itemCount(),
                 live.creditPrice(),
                 live.disposition());
+        MerchantTradeMenu marketMenu = (MerchantTradeMenu) new MerchantTradeMenuProvider(trader)
+                .createMenu(72, player.getInventory(), player);
+        int stockBeforeClose = countContainerItem(marketHall, ModItems.ENERGY_CELL.get());
+        int creditsBeforeClose = CreditTransactionService.playerBalance(player);
+        setWorkerPhase(trader, WorkerPhase.COOLDOWN, "market_closed", null);
+        PhysicalTradeService.TradePreview closedMarket = PhysicalTradeService.preview(
+                player, "republic_quartermaster", trader);
+        PhysicalTradeService.TradeResult closedPurchase = PhysicalTradeService.purchase(
+                player,
+                UUID.randomUUID(),
+                "republic_quartermaster",
+                trader,
+                liveQuote);
+        if (closedMarket.eligible()
+                || !closedMarket.reason().equals("merchant_unavailable")
+                || closedPurchase.accepted()
+                || !closedPurchase.reason().equals("merchant_unavailable")
+                || marketMenu.stillValid(player)
+                || countContainerItem(marketHall, ModItems.ENERGY_CELL.get()) != stockBeforeClose
+                || CreditTransactionService.playerBalance(player) != creditsBeforeClose) {
+            helper.fail("A closed physical market became synthetic stock: preview="
+                    + closedMarket + ", purchase=" + closedPurchase
+                    + ", menuValid=" + marketMenu.stillValid(player)
+                    + ", stock=" + stockBeforeClose + "/"
+                    + countContainerItem(marketHall, ModItems.ENERGY_CELL.get())
+                    + ", credits=" + creditsBeforeClose + "/"
+                    + CreditTransactionService.playerBalance(player));
+            return;
+        }
+        setWorkerPhase(trader, WorkerPhase.COOLDOWN, "market_open", null);
+
+        ServerPlayer overflowPlayer = makeConnectedMockPlayer(helper, GameType.SURVIVAL);
+        overflowPlayer.setPos(trader.getX(), trader.getY(), trader.getZ() + 1.0D);
+        level.getChunkSource().move(overflowPlayer);
+        alignment.setScore(overflowPlayer.getUUID(), merchantFaction, 10);
+        overflowPlayer.getInventory().add(new ItemStack(ModItems.CREDIT_CHIP.get(), 100));
+        setSavedDataState(
+                progression,
+                overflowPlayer.getUUID(),
+                new ProgressionState(
+                        ProgressionState.CURRENT_SCHEMA_VERSION,
+                        overflowPlayer.getUUID(),
+                        "galacticwars:hutt_cartel",
+                        0,
+                        Set.of(),
+                        Map.of(ProgressionEventType.TRADE_COMPLETED, Integer.MAX_VALUE),
+                        Map.of(),
+                        Set.of("intro_quest", "faction_intro")));
+        PhysicalTradeService.TradePreview overflowPreview = PhysicalTradeService.preview(
+                overflowPlayer, "republic_quartermaster", trader);
+        PhysicalTradeService.TradeQuote overflowQuote = new PhysicalTradeService.TradeQuote(
+                overflowPreview.tradeId(),
+                overflowPreview.itemId(),
+                overflowPreview.itemCount(),
+                overflowPreview.creditPrice(),
+                overflowPreview.disposition());
+        int stockBeforeOverflow = countContainerItem(marketHall, ModItems.ENERGY_CELL.get());
+        int creditsBeforeOverflow = CreditTransactionService.playerBalance(overflowPlayer);
+        PhysicalTradeService.TradeResult overflowPurchase = PhysicalTradeService.purchase(
+                overflowPlayer,
+                UUID.randomUUID(),
+                "republic_quartermaster",
+                trader,
+                overflowQuote);
+        if (overflowPurchase.accepted()
+                || !overflowPurchase.reason().equals("progression_limit_reached")
+                || countContainerItem(marketHall, ModItems.ENERGY_CELL.get()) != stockBeforeOverflow
+                || CreditTransactionService.playerBalance(overflowPlayer) != creditsBeforeOverflow) {
+            helper.fail("Progression rejection consumed physical market state: preview="
+                    + overflowPreview + ", purchase=" + overflowPurchase
+                    + ", stock=" + stockBeforeOverflow + "/"
+                    + countContainerItem(marketHall, ModItems.ENERGY_CELL.get())
+                    + ", credits=" + creditsBeforeOverflow + "/"
+                    + CreditTransactionService.playerBalance(overflowPlayer));
+            return;
+        }
+
         UUID replayId = UUID.randomUUID();
         PhysicalTradeService.TradeResult purchase = PhysicalTradeService.purchase(
                 player,
@@ -5571,9 +6273,8 @@ public final class ModGameTests {
         int replayedItems = countPlayerItem(
                 player,
                 BuiltInRegistries.ITEM.getValue(Identifier.parse(live.itemId())));
-        boolean alarmRaised = NpcFactionAiService.raiseAlert(
-                trader, player, "gametest_hostile_trade");
-        PhysicalTradeService.TradePreview alarmRefusal =
+        alignment.setScore(player.getUUID(), merchantFaction, -21);
+        PhysicalTradeService.TradePreview hostileRevalidation =
                 PhysicalTradeService.preview(player, "republic_quartermaster", trader);
         if (!purchase.accepted()
                 || !purchase.changed()
@@ -5582,15 +6283,14 @@ public final class ModGameTests {
                 || replay.changed()
                 || replayedItems != purchasedItems
                 || alignment.processedEventCount(player.getUUID()) != 1
-                || !alarmRaised
-                || alarmRefusal.eligible()
-                || !alarmRefusal.reason().equals("hostile_merchant")
-                || !alarmRefusal.disposition().equals("hostile")) {
-            helper.fail("Trader purchase replay or active-alarm revalidation failed: purchase="
+                || hostileRevalidation.eligible()
+                || !hostileRevalidation.reason().equals("hostile_merchant")
+                || !hostileRevalidation.disposition().equals("hostile")) {
+            helper.fail("Trader purchase replay or live-hostility revalidation failed: purchase="
                     + purchase + ", replay=" + replay + ", items=" + purchasedItems
                     + "/" + replayedItems + ", reputationEvents="
                     + alignment.processedEventCount(player.getUUID())
-                    + ", alarm=" + alarmRaised + "/" + alarmRefusal);
+                    + ", hostility=" + hostileRevalidation);
             return;
         }
         trader.discard();
@@ -5840,15 +6540,34 @@ public final class ModGameTests {
 
     private static void workforceSavedDataAuthority(GameTestHelper helper) {
         ServerPlayer owner = makeConnectedMockPlayer(helper, GameType.CREATIVE);
+        ServerPlayer builder = makeConnectedMockPlayer(helper, GameType.CREATIVE);
+        ServerPlayer officer = makeConnectedMockPlayer(helper, GameType.CREATIVE);
+        ServerPlayer quartermaster = makeConnectedMockPlayer(helper, GameType.CREATIVE);
+        ServerPlayer member = makeConnectedMockPlayer(helper, GameType.CREATIVE);
         BlockPos hallPos = isolatedCapital(helper, 3);
+        CommandCenterBlockEntity hall = placeCommandCenter(helper, hallPos);
+        hall.claim(owner);
         KingdomSavedData data = KingdomSavedData.get(helper.getLevel());
         KingdomRecord kingdom = data.activateHall(
                 owner.getUUID(), "galacticwars:republic",
                 helper.getLevel().dimension().identifier().toString(), hallPos).orElseThrow();
-        UUID first = UUID.randomUUID();
+        GalacticRecruitEntity assignedRecruit = helper.spawn(
+                ModEntityTypes.CLONE_TROOPER.get(), new BlockPos(2, 1, 2));
+        assignedRecruit.initializeFromSpawnEgg();
+        assignedRecruit.tame(owner);
+        assignedRecruit.setWorkerProfession(WorkerProfession.FARMER);
+        UUID first = assignedRecruit.getUUID();
         UUID second = UUID.randomUUID();
         UUID third = UUID.randomUUID();
-        if (!data.registerRecruit(owner.getUUID(), first)
+        if (!data.addMember(owner.getUUID(), builder.getUUID(), KingdomMemberRole.BUILDER, "")
+                || !data.addMember(
+                        owner.getUUID(), officer.getUUID(), KingdomMemberRole.OFFICER, "")
+                || !data.addMember(
+                        owner.getUUID(), quartermaster.getUUID(),
+                        KingdomMemberRole.QUARTERMASTER, "")
+                || !data.addMember(
+                        owner.getUUID(), member.getUUID(), KingdomMemberRole.MEMBER, "")
+                || !data.registerRecruit(owner.getUUID(), first)
                 || !data.registerRecruit(owner.getUUID(), second)
                 || !data.registerRecruit(owner.getUUID(), third)
                 || !data.reserveWorksite(owner.getUUID(), first, WorkerProfession.FARMER)
@@ -5857,6 +6576,309 @@ public final class ModGameTests {
             helper.fail("Frontier worksite did not enforce its persisted two-worker capacity");
         }
         WorksiteRecord worksite = data.assignedWorksite(owner.getUUID(), first).orElseThrow();
+        UUID worksiteId = worksite.id();
+        List<CourierWaypoint> route = List.of(
+                new CourierWaypoint(
+                        worksite.dimensionId(),
+                        worksite.x(),
+                        worksite.y(),
+                        worksite.z(),
+                        List.of(CourierTransferAction.takeAll())),
+                new CourierWaypoint(
+                        worksite.dimensionId(),
+                        worksite.x() + 1,
+                        worksite.y(),
+                        worksite.z(),
+                        List.of(CourierTransferAction.putAll())));
+        WorksiteUpdateResult builderRoute = data.configureWorksiteRoute(
+                builder.getUUID(),
+                worksiteId,
+                worksite.configuration().revision(),
+                route,
+                CourierRouteMode.LOOP);
+        if (builderRoute.accepted() || !builderRoute.reasonCode().equals("permission_denied")) {
+            helper.fail("Builder changed courier logistics without MANAGE_LOGISTICS");
+        }
+        worksite = data.assignedWorksite(owner.getUUID(), first).orElseThrow();
+        WorksiteUpdateResult oneWaypoint = data.configureWorksiteRoute(
+                owner.getUUID(),
+                worksiteId,
+                worksite.configuration().revision(),
+                List.of(route.getFirst()),
+                CourierRouteMode.LOOP);
+        if (oneWaypoint.accepted() || !oneWaypoint.reasonCode().equals("invalid_route")) {
+            helper.fail("A one-waypoint courier route was accepted");
+        }
+        worksite = data.assignedWorksite(owner.getUUID(), first).orElseThrow();
+        WorksiteUpdateResult configuredRoute = data.configureWorksiteRoute(
+                owner.getUUID(),
+                worksiteId,
+                worksite.configuration().revision(),
+                route,
+                CourierRouteMode.PING_PONG);
+        if (!configuredRoute.accepted()) {
+            helper.fail("A valid claimed courier route was rejected: "
+                    + configuredRoute.reasonCode());
+        }
+        WorksiteRecord routeConfiguredWorksite = data.assignedWorksite(
+                owner.getUUID(), first).orElseThrow();
+        StorageEndpoint hallStorage = data.registeredStorageEndpoint(
+                        owner.getUUID(),
+                        helper.getLevel().dimension().identifier().toString(),
+                        hallPos)
+                .orElseThrow(() -> new IllegalStateException(
+                        "Authority fixture Command Center was not registered as storage"));
+        WorksiteUpdateResult configuredStorage = data.configureWorksiteStorage(
+                owner.getUUID(),
+                routeConfiguredWorksite.id(),
+                routeConfiguredWorksite.configuration().revision(),
+                hallStorage);
+        if (!configuredStorage.accepted()) {
+            helper.fail("A registered Command Center storage target was rejected: "
+                    + configuredStorage.reasonCode());
+        }
+        WorksiteRecord configuredWorksite = data.assignedWorksite(
+                owner.getUUID(), first).orElseThrow();
+        SettlementRecord configuredSettlement = data.kingdomForOwner(owner.getUUID()).orElseThrow()
+                .settlements().stream()
+                .filter(candidate -> candidate.worksites().stream()
+                        .anyMatch(candidateWorksite -> candidateWorksite.id().equals(worksiteId)))
+                .findFirst()
+                .orElseThrow();
+        long settlementRevision = configuredSettlement.revision();
+        long configurationRevision = configuredWorksite.configuration().revision();
+        long routeRevision = configuredWorksite.configuration().courierRouteRevision();
+        WorksiteUpdateResult unchangedRoute = data.configureWorksiteRoute(
+                owner.getUUID(),
+                configuredWorksite.id(),
+                configurationRevision,
+                List.copyOf(route),
+                CourierRouteMode.PING_PONG);
+        WorksiteRecord unchangedWorksite = data.assignedWorksite(
+                owner.getUUID(), first).orElseThrow();
+        SettlementRecord unchangedSettlement = data.kingdomForOwner(owner.getUUID()).orElseThrow()
+                .settlements().stream()
+                .filter(candidate -> candidate.worksites().stream()
+                        .anyMatch(candidateWorksite -> candidateWorksite.id().equals(worksiteId)))
+                .findFirst()
+                .orElseThrow();
+        if (unchangedRoute.accepted() || !unchangedRoute.reasonCode().equals("unchanged")
+                || unchangedWorksite.configuration().revision() != configurationRevision
+                || unchangedWorksite.configuration().courierRouteRevision() != routeRevision
+                || unchangedSettlement.revision() != settlementRevision) {
+            helper.fail("An identical courier route advanced durable revisions");
+        }
+
+        BlockPos alternateStoragePos = hallPos.offset(3, 0, 0);
+        helper.getLevel().setBlock(
+                alternateStoragePos, Blocks.CHEST.defaultBlockState(), 3);
+        if (!(helper.getLevel().getBlockEntity(alternateStoragePos) instanceof Container alternateStorage)) {
+            helper.fail("Authority fixture could not place its alternate registered storage");
+            return;
+        }
+        StorageEndpoint alternateEndpoint = new StorageEndpoint(
+                helper.getLevel().dimension().identifier().toString(),
+                alternateStoragePos.getX(),
+                alternateStoragePos.getY(),
+                alternateStoragePos.getZ(),
+                alternateStorage.getContainerSize());
+        KingdomRecord authorityKingdom = data.kingdomForOwner(owner.getUUID()).orElseThrow();
+        SettlementRecord authoritySettlement = authorityKingdom.settlement();
+        WorksiteRecord authorityWorksite = data.assignedWorksite(
+                owner.getUUID(), first).orElseThrow();
+        WorksiteRecord registeredAlternate = authorityWorksite
+                .withPrimaryStorageEndpoint(alternateEndpoint)
+                .withPrimaryStorageEndpoint(hallStorage);
+        List<WorksiteRecord> authorityWorksites = authoritySettlement.worksites().stream()
+                .map(candidate -> candidate.id().equals(registeredAlternate.id())
+                        ? registeredAlternate : candidate)
+                .toList();
+        SettlementRecord storageEnabledSettlement = new SettlementRecord(
+                authoritySettlement.id(),
+                authoritySettlement.dimensionId(),
+                authoritySettlement.hallX(),
+                authoritySettlement.hallY(),
+                authoritySettlement.hallZ(),
+                authoritySettlement.claimRadius(),
+                authoritySettlement.housingCapacity(),
+                authoritySettlement.recruitIds(),
+                authoritySettlement.commanderId(),
+                authoritySettlement.commanderPolicy(),
+                authorityWorksites,
+                authoritySettlement.buildProjects(),
+                authoritySettlement.workOrders(),
+                authoritySettlement.recruitmentCampaigns(),
+                authoritySettlement.rewards().add(
+                        hallStorage.slots() + alternateEndpoint.slots(), 0),
+                authoritySettlement.revision() + 1,
+                authoritySettlement.additionalCommanderIds());
+        storeKingdomFixture(data, authorityKingdom.replaceSettlement(storageEnabledSettlement));
+        if (data.registeredStorageEndpoint(
+                        owner.getUUID(),
+                        helper.getLevel().dimension().identifier().toString(),
+                        alternateStoragePos)
+                .filter(endpoint -> endpoint.slots() == alternateEndpoint.slots())
+                .isEmpty()) {
+            helper.fail("Authority fixture did not register its alternate storage");
+            return;
+        }
+        setRecruitField(assignedRecruit, "storageTarget", hallPos.immutable());
+        boolean alternateSelected = assignedRecruit.configureWorkerStorageFromMenu(
+                owner, alternateStoragePos);
+        invokeWorkerAuthorityReconciliation(assignedRecruit, helper.getLevel());
+        WorksiteRecord selectedStorageWorksite = data.assignedWorksite(
+                owner.getUUID(), first).orElseThrow();
+        StorageEndpoint selectedStorage = selectedStorageWorksite.storageEndpoints().getFirst();
+        if (!alternateSelected
+                || selectedStorage.x() != alternateStoragePos.getX()
+                || selectedStorage.y() != alternateStoragePos.getY()
+                || selectedStorage.z() != alternateStoragePos.getZ()
+                || !alternateStoragePos.equals(assignedRecruit.getStorageTarget())) {
+            helper.fail("Storage selection did not survive worksite authority reconciliation: selected="
+                    + alternateSelected + ", durable=" + selectedStorage
+                    + ", entity=" + assignedRecruit.getStorageTarget());
+            return;
+        }
+
+        GalacticRecruitEntity unassignedRecruit = helper.spawn(
+                ModEntityTypes.CLONE_TROOPER.get(), new BlockPos(4, 1, 2));
+        unassignedRecruit.initializeFromSpawnEgg();
+        unassignedRecruit.tame(owner);
+        unassignedRecruit.setWorkerProfession(WorkerProfession.FARMER);
+        if (!data.registerRecruit(owner.getUUID(), unassignedRecruit.getUUID())
+                || WorksiteConfigurationMenuProvider.prepare(owner, unassignedRecruit).isPresent()) {
+            helper.fail("Menu preparation accepted a worker without a durable worksite");
+        }
+        WorksiteConfigurationMenuProvider provider = WorksiteConfigurationMenuProvider
+                .prepare(owner, assignedRecruit)
+                .orElseThrow(() -> new IllegalStateException(
+                        "Assigned worker did not produce a menu provider"));
+        for (ServerPlayer actor : List.of(owner, officer, quartermaster, member)) {
+            actor.setPos(
+                    assignedRecruit.getX(),
+                    assignedRecruit.getY(),
+                    assignedRecruit.getZ());
+        }
+        WorksiteConfigurationMenu preparedMenu = (WorksiteConfigurationMenu) provider.createMenu(
+                41, owner.getInventory(), owner);
+        if (!preparedMenu.snapshot().worksiteId().equals(configuredWorksite.id())
+                || !preparedMenu.snapshot().recruitId().equals(assignedRecruit.getUUID())) {
+            helper.fail("Prepared worksite menu did not retain its authoritative snapshot");
+        }
+
+        WorksiteConfigurationMenu officerMenu = (WorksiteConfigurationMenu)
+                WorksiteConfigurationMenuProvider.prepare(officer, assignedRecruit)
+                        .orElseThrow(() -> new IllegalStateException(
+                                "Officer did not receive a worksite snapshot"))
+                        .createMenu(42, officer.getInventory(), officer);
+        long concurrentRevision = preparedMenu.snapshot().configurationRevision();
+        boolean overlayBeforeConcurrentEdit = preparedMenu.snapshot().overlayVisible();
+        UUID replayId = UUID.randomUUID();
+        WorksiteActionPayload firstEdit = new WorksiteActionPayload(
+                replayId,
+                preparedMenu.containerId,
+                WorksiteConfigurationAction.TOGGLE_OVERLAY.id(),
+                concurrentRevision,
+                -1);
+        boolean firstEditAccepted = preparedMenu.handleReplayAction(owner, firstEdit);
+        WorksiteRecord afterFirstEdit = data.assignedWorksite(
+                owner.getUUID(), first).orElseThrow();
+        long afterFirstEditRevision = afterFirstEdit.configuration().revision();
+        boolean replayRejected = !preparedMenu.handleReplayAction(owner, firstEdit);
+        WorksiteRecord afterReplay = data.assignedWorksite(
+                owner.getUUID(), first).orElseThrow();
+        WorksiteActionPayload staleOfficerEdit = new WorksiteActionPayload(
+                UUID.randomUUID(),
+                officerMenu.containerId,
+                WorksiteConfigurationAction.TOGGLE_KINGDOM_ACCESS.id(),
+                concurrentRevision,
+                -1);
+        boolean staleOfficerRejected = !officerMenu.handleReplayAction(
+                officer, staleOfficerEdit);
+        WorksiteRecord afterStaleEdit = data.assignedWorksite(
+                owner.getUUID(), first).orElseThrow();
+        if (!firstEditAccepted
+                || afterFirstEdit.configuration().overlayVisible()
+                        == overlayBeforeConcurrentEdit
+                || !replayRejected
+                || afterReplay.configuration().revision() != afterFirstEditRevision
+                || !"replayed_request".equals(preparedMenu.snapshot().feedbackCode())
+                || !staleOfficerRejected
+                || afterStaleEdit.configuration().revision() != afterFirstEditRevision
+                || !"stale_revision".equals(officerMenu.snapshot().feedbackCode())) {
+            helper.fail("Concurrent worksite menus did not enforce revision and replay authority: "
+                    + "first=" + firstEditAccepted
+                    + ", replay=" + replayRejected
+                    + ", stale=" + staleOfficerRejected
+                    + ", ownerFeedback=" + preparedMenu.snapshot().feedbackCode()
+                    + ", officerFeedback=" + officerMenu.snapshot().feedbackCode()
+                    + ", before=" + concurrentRevision
+                    + ", after=" + afterStaleEdit.configuration().revision());
+            return;
+        }
+
+        WorksiteConfigurationMenu memberMenu = (WorksiteConfigurationMenu)
+                WorksiteConfigurationMenuProvider.prepare(member, assignedRecruit)
+                        .orElseThrow(() -> new IllegalStateException(
+                                "Member did not receive a read snapshot"))
+                        .createMenu(43, member.getInventory(), member);
+        long beforeMemberEdit = afterStaleEdit.configuration().revision();
+        boolean memberEditRejected = !memberMenu.handleReplayAction(
+                member,
+                new WorksiteActionPayload(
+                        UUID.randomUUID(),
+                        memberMenu.containerId,
+                        WorksiteConfigurationAction.HEIGHT_INCREASE.id(),
+                        beforeMemberEdit,
+                        -1));
+        WorksiteRecord afterMemberEdit = data.assignedWorksite(
+                owner.getUUID(), first).orElseThrow();
+        if (!memberEditRejected
+                || afterMemberEdit.configuration().revision() != beforeMemberEdit
+                || !"permission_denied".equals(memberMenu.snapshot().feedbackCode())) {
+            helper.fail("Ordinary member changed a worksite through the server menu: rejected="
+                    + memberEditRejected + ", feedback=" + memberMenu.snapshot().feedbackCode());
+            return;
+        }
+
+        WorksiteUpdateResult officerRoute = data.configureWorksiteRoute(
+                officer.getUUID(),
+                afterMemberEdit.id(),
+                afterMemberEdit.configuration().revision(),
+                route,
+                CourierRouteMode.LOOP);
+        WorksiteRecord afterOfficerRoute = data.assignedWorksite(
+                owner.getUUID(), first).orElseThrow();
+        WorksiteUpdateResult quartermasterRoute = data.configureWorksiteRoute(
+                quartermaster.getUUID(),
+                afterOfficerRoute.id(),
+                afterOfficerRoute.configuration().revision(),
+                route,
+                CourierRouteMode.PING_PONG);
+        WorksiteRecord afterQuartermasterRoute = data.assignedWorksite(
+                owner.getUUID(), first).orElseThrow();
+        WorksiteUpdateResult memberRoute = data.configureWorksiteRoute(
+                member.getUUID(),
+                afterQuartermasterRoute.id(),
+                afterQuartermasterRoute.configuration().revision(),
+                route,
+                CourierRouteMode.LOOP);
+        WorksiteRecord afterDeniedRoute = data.assignedWorksite(
+                owner.getUUID(), first).orElseThrow();
+        if (!officerRoute.accepted()
+                || !quartermasterRoute.accepted()
+                || memberRoute.accepted()
+                || !"permission_denied".equals(memberRoute.reasonCode())
+                || afterDeniedRoute.configuration().revision()
+                        != afterQuartermasterRoute.configuration().revision()
+                || afterDeniedRoute.configuration().courierRouteMode()
+                        != CourierRouteMode.PING_PONG) {
+            helper.fail("Worksite role matrix did not preserve logistics authority: officer="
+                    + officerRoute.reasonCode() + ", quartermaster="
+                    + quartermasterRoute.reasonCode() + ", member="
+                    + memberRoute.reasonCode());
+            return;
+        }
         WorkOrder queued = new WorkOrder(
                 UUID.randomUUID(), WorkOrderType.FARM, java.util.Optional.empty(), WorkOrderState.QUEUED,
                 java.util.Optional.of(worksite.id()), java.util.Optional.empty(), worksite.dimensionId(),
@@ -6453,6 +7475,265 @@ public final class ModGameTests {
     }
 
     /**
+     * Proves that ordinary embodied army commands retain their persisted
+     * authority while the sole SmartBrain navigation path opens and closes a
+     * claimed door. The recruit is never moved after the first command.
+     */
+    private static void recruitDoorCommandResumption(GameTestHelper helper) {
+        SmartBrainTestArea area = prepareSmartBrainTestAreaAt(
+                helper,
+                GameType.CREATIVE,
+                -2,
+                18,
+                -2,
+                10,
+                isolatedCapital(helper, 211));
+        ServerPlayer owner = area.player();
+        BlockPos hallPos = area.at(0, 1, 0);
+        BlockPos recruitPos = area.at(0, 1, 4);
+        BlockPos doorPos = area.at(6, 1, 4);
+        BlockPos followTarget = area.at(14, 1, 4);
+        CommandCenterBlockEntity hall = placeCommandCenter(helper, hallPos);
+        hall.claim(owner);
+        KingdomSavedData data = KingdomSavedData.get(helper.getLevel());
+        data.activateHall(
+                owner.getUUID(),
+                hall.factionId(),
+                helper.getLevel().dimension().identifier().toString(),
+                hallPos).orElseThrow();
+        FactionAlignmentSavedData.get(helper.getLevel()).setScore(
+                owner.getUUID(), FactionId.of("republic"), 100);
+        applyCampaignSetupEvent(
+                ProgressionSavedData.get(helper.getLevel()),
+                owner,
+                ProgressionEventType.FACTION_PLEDGED,
+                "galacticwars:republic");
+
+        for (int z = -2; z <= 10; z++) {
+            for (int y = 1; y <= 3; y++) {
+                helper.getLevel().setBlock(
+                        area.at(6, y, z),
+                        Blocks.STONE.defaultBlockState(),
+                        3);
+            }
+        }
+        var lowerDoor = Blocks.OAK_DOOR.defaultBlockState()
+                .setValue(BlockStateProperties.HORIZONTAL_FACING, Direction.EAST)
+                .setValue(BlockStateProperties.DOUBLE_BLOCK_HALF, DoubleBlockHalf.LOWER);
+        var upperDoor = lowerDoor.setValue(
+                BlockStateProperties.DOUBLE_BLOCK_HALF, DoubleBlockHalf.UPPER);
+        helper.getLevel().setBlock(doorPos, lowerDoor, 3);
+        helper.getLevel().setBlock(doorPos.above(), upperDoor, 3);
+
+        GalacticRecruitEntity recruit = spawnRecruitAt(
+                helper, ModEntityTypes.CLONE_TROOPER.get(), recruitPos);
+        recruit.setInvulnerable(true);
+        owner.setPos(recruit.getX(), recruit.getY(), recruit.getZ());
+        if (!recruit.handleMenuButton(owner, RecruitCommandMenu.BUTTON_HIRE)) {
+            helper.fail("Door-command recruit could not be hired");
+            return;
+        }
+        KingdomBaseBlueprint forwardBase = GameplayDataManager.snapshot()
+                .blueprint("galacticwars:forward_base").orElseThrow();
+        BuildProject forwardBaseProject = fullyProgressProject(
+                data,
+                owner.getUUID(),
+                forwardBase,
+                helper.getLevel().dimension().identifier().toString(),
+                hallPos.offset(24, 0, 0));
+        if (!data.completeBuildProject(owner.getUUID(), forwardBaseProject, forwardBase)
+                || !recruit.handleMenuButton(
+                        owner, RecruitCommandMenu.BUTTON_PROMOTE_COMMANDER)
+                || !recruit.handleMenuButton(owner, RecruitCommandMenu.BUTTON_FOLLOW)) {
+            helper.fail("Door-command recruit could not become a following commander");
+            return;
+        }
+        var group = data.armyGroupForRecruit(recruit.getUUID()).orElse(null);
+        if (group == null || recruit.getArmyGroupId() == null
+                || !recruit.getArmyGroupId().equals(group.id())) {
+            helper.fail("Door-command commander lacks an authoritative army group");
+            return;
+        }
+
+        owner.setNoGravity(true);
+        owner.setPos(
+                followTarget.getX() + 0.5D,
+                followTarget.getY(),
+                followTarget.getZ() + 0.5D);
+        helper.getLevel().getChunkSource().move(owner);
+        UUID groupId = group.id();
+        int[] phase = {0};
+        int[] phaseStartedRecruitTick = {recruit.tickCount};
+        Vec3[] heldPosition = {Vec3.ZERO};
+        boolean[] followDoorOpened = {false};
+        boolean[] followCrossedDoor = {false};
+        boolean[] followDoorClosed = {false};
+        boolean[] patrolDoorOpened = {false};
+        boolean[] patrolCrossedDoor = {false};
+        boolean[] patrolDoorClosed = {false};
+        boolean[] complete = {false};
+        helper.onEachTick(() -> {
+            if (complete[0]) {
+                return;
+            }
+            var liveDoor = helper.getLevel().getBlockState(doorPos);
+            boolean doorOpen = liveDoor.hasProperty(BlockStateProperties.OPEN)
+                    && liveDoor.getValue(BlockStateProperties.OPEN);
+            var currentGroup = data.armyGroup(groupId).orElse(null);
+            if (currentGroup == null) {
+                complete[0] = true;
+                helper.fail("Door-command army group disappeared");
+                return;
+            }
+
+            if (phase[0] == 0) {
+                followDoorOpened[0] |= doorOpen;
+                followCrossedDoor[0] |= recruit.getX() > doorPos.getX() + 3.0D
+                        && recruit.distanceToSqr(
+                                doorPos.getX() + 0.5D,
+                                doorPos.getY() + 0.5D,
+                                doorPos.getZ() + 0.5D) > 12.25D;
+                followDoorClosed[0] |= followDoorOpened[0]
+                        && followCrossedDoor[0]
+                        && !doorOpen;
+                if (followDoorOpened[0]
+                        && followCrossedDoor[0]
+                        && recruit.getRecruitCommand() == RecruitmentAction.FOLLOW_OWNER
+                        && currentGroup.order().type() == ArmyCommandType.FOLLOW_OWNER) {
+                    owner.setPos(recruit.getX(), recruit.getY(), recruit.getZ());
+                    helper.getLevel().getChunkSource().move(owner);
+                    if (!recruit.handleMenuButton(owner, RecruitCommandMenu.BUTTON_HOLD)) {
+                        complete[0] = true;
+                        helper.fail("Follow-through-door did not accept Hold");
+                        return;
+                    }
+                    heldPosition[0] = recruit.position();
+                    phaseStartedRecruitTick[0] = recruit.tickCount;
+                    phase[0] = 1;
+                    return;
+                }
+                if (recruit.tickCount - phaseStartedRecruitTick[0] >= 360) {
+                    complete[0] = true;
+                    helper.fail("Follow command did not complete its claimed-door cycle: position="
+                            + recruit.position() + ", command=" + recruit.getRecruitCommand()
+                            + ", order=" + currentGroup.order()
+                            + ", opened=" + followDoorOpened[0]
+                            + ", crossed=" + followCrossedDoor[0]
+                            + ", closed=" + followDoorClosed[0]
+                            + ", path=" + pathState(recruit, followTarget));
+                }
+                return;
+            }
+
+            if (phase[0] == 1) {
+                followDoorClosed[0] |= !doorOpen;
+                int holdTicks = recruit.tickCount - phaseStartedRecruitTick[0];
+                boolean walkTargetCleared = !BrainUtil.hasMemory(
+                        recruit,
+                        net.minecraft.world.entity.ai.memory.MemoryModuleType.WALK_TARGET);
+                if (holdTicks >= 20
+                        && followDoorClosed[0]
+                        && recruit.getNavigation().isDone()
+                        && walkTargetCleared
+                        && recruit.isOrderedToSit()
+                        && recruit.getRecruitCommand() == RecruitmentAction.HOLD_POSITION
+                        && currentGroup.order().type() == ArmyCommandType.HOLD_POSITION) {
+                    heldPosition[0] = recruit.position();
+                    phaseStartedRecruitTick[0] = recruit.tickCount;
+                    phase[0] = 2;
+                    return;
+                }
+                if (holdTicks >= 120) {
+                    complete[0] = true;
+                    helper.fail("Hold did not stop navigation and close the traversed door: position="
+                            + recruit.position() + ", held=" + heldPosition[0]
+                            + ", command=" + recruit.getRecruitCommand()
+                            + ", order=" + currentGroup.order()
+                            + ", doorClosed=" + followDoorClosed[0]
+                            + ", orderedSit=" + recruit.isOrderedToSit()
+                            + ", navigationDone=" + recruit.getNavigation().isDone()
+                            + ", walkTargetCleared=" + walkTargetCleared);
+                }
+                return;
+            }
+
+            if (phase[0] == 2) {
+                if (recruit.tickCount - phaseStartedRecruitTick[0] < 20) {
+                    return;
+                }
+                double heldDeltaX = recruit.getX() - heldPosition[0].x();
+                double heldDeltaZ = recruit.getZ() - heldPosition[0].z();
+                if (!recruit.isOrderedToSit()
+                        || recruit.getRecruitCommand() != RecruitmentAction.HOLD_POSITION
+                        || currentGroup.order().type() != ArmyCommandType.HOLD_POSITION
+                        || heldDeltaX * heldDeltaX + heldDeltaZ * heldDeltaZ > 0.25D) {
+                    complete[0] = true;
+                    helper.fail("Hold did not remain stationary after door traversal: position="
+                            + recruit.position() + ", held=" + heldPosition[0]
+                            + ", command=" + recruit.getRecruitCommand()
+                            + ", order=" + currentGroup.order()
+                            + ", orderedSit=" + recruit.isOrderedToSit());
+                    return;
+                }
+                if (!recruit.handleMenuButton(owner, RecruitCommandMenu.BUTTON_PATROL)) {
+                    complete[0] = true;
+                    helper.fail("Held commander could not start a persisted patrol");
+                    return;
+                }
+                phaseStartedRecruitTick[0] = recruit.tickCount;
+                phase[0] = 3;
+                return;
+            }
+
+            patrolDoorOpened[0] |= doorOpen;
+            patrolCrossedDoor[0] |= recruit.getX() < doorPos.getX() - 2.0D
+                    && recruit.distanceToSqr(
+                            doorPos.getX() + 0.5D,
+                            doorPos.getY() + 0.5D,
+                            doorPos.getZ() + 0.5D) > 12.25D;
+            patrolDoorClosed[0] |= patrolDoorOpened[0]
+                    && patrolCrossedDoor[0]
+                    && !doorOpen;
+            if (patrolDoorClosed[0]
+                    && recruit.getRecruitCommand() == RecruitmentAction.PATROL_ROUTE
+                    && currentGroup.order().type() == ArmyCommandType.PATROL_ROUTE
+                    && currentGroup.effectivePatrolPlan().isPresent()) {
+                complete[0] = true;
+                recruit.discard();
+                helper.succeed();
+                return;
+            }
+            if (recruit.tickCount - phaseStartedRecruitTick[0] >= 420) {
+                complete[0] = true;
+                var activePath = recruit.getNavigation().getPath();
+                helper.fail("Patrol command did not resume through the claimed door: position="
+                        + recruit.position() + ", command=" + recruit.getRecruitCommand()
+                        + ", order=" + currentGroup.order()
+                        + ", plan=" + currentGroup.effectivePatrolPlan().orElse(null)
+                        + ", opened=" + patrolDoorOpened[0]
+                        + ", crossed=" + patrolCrossedDoor[0]
+                        + ", closed=" + patrolDoorClosed[0]
+                        + ", door=" + helper.getLevel().getBlockState(doorPos)
+                        + ", upperDoor=" + helper.getLevel().getBlockState(doorPos.above())
+                        + ", horizontalCollision=" + recruit.horizontalCollision
+                        + ", orderedSit=" + recruit.isOrderedToSit()
+                        + ", velocity=" + recruit.getDeltaMovement()
+                        + ", moveWanted=" + recruit.getMoveControl().hasWanted()
+                        + ", wanted=(" + recruit.getMoveControl().getWantedX()
+                        + "," + recruit.getMoveControl().getWantedY()
+                        + "," + recruit.getMoveControl().getWantedZ() + ")"
+                        + ", activePath=" + (activePath == null ? "none"
+                                : "nodes=" + activePath.getNodeCount()
+                                + ", index=" + activePath.getNextNodeIndex()
+                                + ", next=" + activePath.getNextNodePos()
+                                + ", target=" + activePath.getTarget())
+                        + ", path=" + pathState(
+                                recruit, recruitPos));
+            }
+        });
+    }
+
+    /**
      * Exercises the ordinary survival path without setting worker phases, invoking
      * the controller, or moving the recruit after assignment.
      */
@@ -6562,10 +7843,27 @@ public final class ModGameTests {
         boolean[] doorOpened = {false};
         boolean[] doorClosedAfterPassage = {false};
         boolean[] complete = {false};
-        long startedAt = helper.getTick();
+        int[] startedRecruitTick = {-1};
+        long readinessStartedAt = helper.getTick();
         helper.onEachTick(() -> {
             if (complete[0]) {
                 return;
+            }
+            if (startedRecruitTick[0] < 0) {
+                boolean areaTicking = areSmartBrainAreaChunksTicking(
+                        helper, area, -2, 14, -2, 10);
+                boolean recruitIndexed = helper.getLevel().getEntity(recruit.getUUID()) == recruit;
+                if (!areaTicking || !recruitIndexed || recruit.tickCount == 0) {
+                    if (helper.getTick() - readinessStartedAt
+                            >= SMART_BRAIN_CHUNK_READY_TIMEOUT) {
+                        complete[0] = true;
+                        helper.fail("Black-box farmer area never became entity-ticking: ticking="
+                                + areaTicking + ", recruit=" + recruitIndexed
+                                + ", recruitTick=" + recruit.tickCount);
+                    }
+                    return;
+                }
+                startedRecruitTick[0] = recruit.tickCount;
             }
             var liveDoor = helper.getLevel().getBlockState(doorPos);
             if (liveDoor.hasProperty(BlockStateProperties.OPEN)
@@ -6596,13 +7894,14 @@ public final class ModGameTests {
                     && completedOrder
                     && doorOpened[0]
                     && doorClosedAfterPassage[0]
+                    && recruit.getRecruitCommand() == RecruitmentAction.WORK_AT_SITE
                     && recruit.getWorkerMainHandItem().getDamageValue()
                             > toolDamageBefore) {
                 complete[0] = true;
                 helper.succeed();
                 return;
             }
-            if (helper.getTick() - startedAt >= 650) {
+            if (recruit.tickCount - startedRecruitTick[0] >= 800) {
                 complete[0] = true;
                 helper.fail("Black-box farmer lifecycle timed out: status="
                         + recruit.getWorkerStatus()
@@ -6610,6 +7909,7 @@ public final class ModGameTests {
                         + ", cropReplanted=" + cropReplanted
                         + ", deposited=" + deposited
                         + ", completedOrder=" + completedOrder
+                        + ", command=" + recruit.getRecruitCommand()
                         + ", doorOpened=" + doorOpened[0]
                         + ", doorClosed=" + doorClosedAfterPassage[0]);
             }
@@ -6700,6 +8000,202 @@ public final class ModGameTests {
         });
     }
 
+    private static void recruitHazardAndSelfCare(GameTestHelper helper) {
+        SmartBrainTestArea area = prepareSmartBrainTestAreaAt(
+                helper, GameType.SURVIVAL, -4, 24, -4, 8,
+                isolatedCapital(helper, 151));
+        ServerPlayer owner = area.player();
+        BlockPos hallPos = area.at(8, 1, 6);
+        CommandCenterBlockEntity hall = placeCommandCenter(helper, hallPos);
+        hall.claim(owner);
+        KingdomSavedData data = KingdomSavedData.get(helper.getLevel());
+        data.activateHall(
+                owner.getUUID(),
+                hall.factionId(),
+                helper.getLevel().dimension().identifier().toString(),
+                hallPos).orElseThrow();
+        FactionAlignmentSavedData.get(helper.getLevel()).setScore(
+                owner.getUUID(), FactionId.of("republic"), 100);
+        applyCampaignSetupEvent(
+                ProgressionSavedData.get(helper.getLevel()), owner,
+                ProgressionEventType.FACTION_PLEDGED, "galacticwars:republic");
+
+        BlockPos hazardPosition = area.at(2, 1, 2);
+        for (int x = 0; x <= 4; x++) {
+            for (int z = 0; z <= 4; z++) {
+                helper.getLevel().setBlockAndUpdate(
+                        area.at(x, 0, z),
+                        Blocks.CAMPFIRE.defaultBlockState()
+                                .setValue(BlockStateProperties.LIT, false));
+            }
+        }
+        GalacticRecruitEntity escaping = spawnRecruitAt(
+                helper, ModEntityTypes.CLONE_TROOPER.get(), hazardPosition);
+        escaping.initializeFromSpawnEgg();
+        escaping.tame(owner);
+        escaping.setInvulnerable(true);
+        invokeRecruitCommand(escaping, RecruitmentAction.HOLD_POSITION);
+        if (escaping.isInRecruitHazard()) {
+            helper.fail("Unlit campfire field incorrectly activated recruit hazard avoidance");
+            return;
+        }
+        for (int x = 0; x <= 4; x++) {
+            for (int z = 0; z <= 4; z++) {
+                helper.getLevel().setBlockAndUpdate(
+                        area.at(x, 0, z),
+                        Blocks.CAMPFIRE.defaultBlockState()
+                                .setValue(BlockStateProperties.LIT, true));
+            }
+        }
+
+        GalacticRecruitEntity following = spawnRecruitAt(
+                helper, ModEntityTypes.CLONE_TROOPER.get(), area.at(10, 1, 6));
+        GalacticRecruitEntity holding = spawnRecruitAt(
+                helper, ModEntityTypes.CLONE_TROOPER.get(), area.at(12, 1, 6));
+        GalacticRecruitEntity patrolling = spawnRecruitAt(
+                helper, ModEntityTypes.CLONE_TROOPER.get(), area.at(16, 1, 6));
+        GalacticRecruitEntity combat = spawnRecruitAt(
+                helper, ModEntityTypes.CLONE_TROOPER.get(), area.at(22, 1, 6));
+        for (GalacticRecruitEntity recruit : List.of(
+                following, holding, patrolling, combat)) {
+            recruit.initializeFromSpawnEgg();
+            recruit.setInvulnerable(true);
+        }
+        for (GalacticRecruitEntity recruit : List.of(following, holding, combat)) {
+            recruit.tame(owner);
+        }
+        invokeRecruitCommand(following, RecruitmentAction.FOLLOW_OWNER);
+        invokeRecruitCommand(holding, RecruitmentAction.HOLD_POSITION);
+
+        KingdomBaseBlueprint forwardBase = GameplayDataManager.snapshot()
+                .blueprint("galacticwars:forward_base").orElseThrow();
+        BuildProject forwardBaseProject = fullyProgressProject(
+                data,
+                owner.getUUID(),
+                forwardBase,
+                helper.getLevel().dimension().identifier().toString(),
+                hallPos.offset(24, 0, 0));
+        owner.setPos(patrolling.getX(), patrolling.getY(), patrolling.getZ());
+        owner.getInventory().add(new ItemStack(ModItems.CREDIT_CHIP.get(), 25));
+        if (!patrolling.handleMenuButton(owner, RecruitCommandMenu.BUTTON_HIRE)
+                || !data.completeBuildProject(owner.getUUID(), forwardBaseProject, forwardBase)
+                || !patrolling.handleMenuButton(
+                        owner, RecruitCommandMenu.BUTTON_PROMOTE_COMMANDER)) {
+            helper.fail("Self-care patrol fixture could not hire and promote its commander");
+            return;
+        }
+        owner.setPos(
+                area.at(20, 1, 6).getX() + 0.5D,
+                area.at(20, 1, 6).getY(),
+                area.at(20, 1, 6).getZ() + 0.5D);
+        helper.getLevel().getChunkSource().move(owner);
+        if (!patrolling.handleMenuButton(owner, RecruitCommandMenu.BUTTON_PATROL)) {
+            helper.fail("Self-care patrol fixture could not persist a two-waypoint route");
+            return;
+        }
+        var patrolGroup = data.armyGroupForRecruit(patrolling.getUUID()).orElse(null);
+        if (patrolGroup == null
+                || patrolGroup.order().type() != ArmyCommandType.PATROL_ROUTE
+                || patrolGroup.effectivePatrolPlan().isEmpty()
+                || patrolling.getRecruitCommand() != RecruitmentAction.PATROL_ROUTE) {
+            helper.fail("Self-care patrol fixture lacks an authoritative persisted patrol");
+            return;
+        }
+
+        for (GalacticRecruitEntity recruit : List.of(
+                escaping, following, holding, patrolling, combat)) {
+            setRecruitField(recruit, "hunger", 0);
+            setWorkerInventory(recruit, new ItemStack(Items.DRIED_KELP, 3));
+        }
+        invokeRecruitCommand(combat, RecruitmentAction.FOLLOW_OWNER);
+        BrainUtil.setMemory(
+                combat,
+                net.minecraft.world.entity.ai.memory.MemoryModuleType.ATTACK_TARGET,
+                owner);
+        combat.setTarget(null);
+        if (combat.shouldUseRecruitSelfCare()) {
+            helper.fail("Attack memory alone did not preempt recruit self-care");
+            return;
+        }
+        combat.performRecruitSelfCare();
+        if (workerInventoryCount(combat) != 3
+                || combat.getRecruitCommand() != RecruitmentAction.FOLLOW_OWNER) {
+            helper.fail("Attack-memory self-care control consumed food or changed Follow");
+            return;
+        }
+        BrainUtil.clearMemory(
+                combat,
+                net.minecraft.world.entity.ai.memory.MemoryModuleType.ATTACK_TARGET);
+        combat.discard();
+
+        int[] startTick = {following.tickCount};
+        boolean[] escapeTargetObserved = {false};
+        boolean[] complete = {false};
+        helper.onEachTick(() -> {
+            if (complete[0]) {
+                return;
+            }
+            if (escaping.isHazardAvoidanceActive()) {
+                if (workerInventoryCount(escaping) != 3) {
+                    complete[0] = true;
+                    helper.fail("Hazard escape consumed physical food while safety owned the tick");
+                    return;
+                }
+                if (escaping.isInRecruitHazard()) {
+                    if (!BrainUtil.hasMemory(
+                            escaping,
+                            net.minecraft.world.entity.ai.memory.MemoryModuleType.WALK_TARGET)) {
+                        complete[0] = true;
+                        helper.fail("Ordered sit cleared the active hazard escape walk target");
+                        return;
+                    }
+                    escapeTargetObserved[0] = true;
+                }
+            }
+
+            int followFood = workerInventoryCount(following);
+            int holdFood = workerInventoryCount(holding);
+            int patrolFood = workerInventoryCount(patrolling);
+            if (followFood < 2 || holdFood < 2 || patrolFood < 2) {
+                complete[0] = true;
+                helper.fail("Ordinary-command self-care consumed more than one item per cadence: follow="
+                        + followFood + ", hold=" + holdFood + ", patrol=" + patrolFood);
+                return;
+            }
+
+            var currentPatrolGroup = data.armyGroup(patrolGroup.id()).orElse(null);
+            boolean commandsRetained = following.getRecruitCommand()
+                    == RecruitmentAction.FOLLOW_OWNER
+                    && holding.getRecruitCommand() == RecruitmentAction.HOLD_POSITION
+                    && holding.isOrderedToSit()
+                    && patrolling.getRecruitCommand() == RecruitmentAction.PATROL_ROUTE
+                    && currentPatrolGroup != null
+                    && currentPatrolGroup.order().type() == ArmyCommandType.PATROL_ROUTE
+                    && currentPatrolGroup.effectivePatrolPlan().isPresent();
+            if (followFood == 2 && holdFood == 2 && patrolFood == 2
+                    && escapeTargetObserved[0] && commandsRetained) {
+                complete[0] = true;
+                for (GalacticRecruitEntity recruit : List.of(
+                        escaping, following, holding, patrolling)) {
+                    recruit.discard();
+                }
+                helper.succeed();
+                return;
+            }
+            int elapsedTicks = following.tickCount - startTick[0];
+            if (elapsedTicks >= 60) {
+                complete[0] = true;
+                helper.fail("Command-preserving self-care cadence was not observed: follow="
+                        + followFood + ", hold=" + holdFood + ", patrol=" + patrolFood
+                        + ", hazard=" + workerInventoryCount(escaping)
+                        + ", escape=" + escapeTargetObserved[0]
+                        + ", commands=" + following.getRecruitCommand() + "/"
+                        + holding.getRecruitCommand() + "/" + patrolling.getRecruitCommand()
+                        + ", patrolGroup=" + currentPatrolGroup);
+            }
+        });
+    }
+
     private static void workerSafetyAndUpkeep(GameTestHelper helper) {
         SmartBrainTestArea area = prepareSmartBrainTestAreaAt(
                 helper, GameType.SURVIVAL, -4, 12, -4, 6,
@@ -6732,31 +8228,57 @@ public final class ModGameTests {
         }
         setWorkerInventory(worker, new ItemStack(Items.DIAMOND, 3));
         invokeRecruitCommand(worker, RecruitmentAction.WORK_AT_SITE);
-        BrainUtil.setMemory(
-                worker,
-                net.minecraft.world.entity.ai.memory.MemoryModuleType.WALK_TARGET,
-                new net.minecraft.world.entity.ai.memory.WalkTarget(area.at(10, 1, 2), 1.0F, 1));
 
         GalacticRecruitEntity threat = spawnRecruitAt(
                 helper, ModEntityTypes.B1_BATTLE_DROID.get(), area.at(3, 1, 2));
         threat.setNoAi(true);
-        if (!worker.hurtServer(
-                helper.getLevel(),
-                helper.getLevel().damageSources().mobAttack(threat),
-                1.0F)) {
-            helper.fail("Worker safety setup damage was not accepted");
-            return;
-        }
 
         GalacticRecruitEntity[] activeWorker = {worker};
-        int[] phase = {0};
-        int[] phaseStartTick = {worker.tickCount};
+        CompoundTag[] persistedWorker = {null};
+        int[] phase = {-1};
+        long[] phaseStartGameTick = {helper.getTick()};
+        int[] phaseStartRecruitTick = {worker.tickCount};
+        boolean[] selfCareBlockedDuringSafety = {false};
         boolean[] complete = {false};
         helper.onEachTick(() -> {
             if (complete[0]) {
                 return;
             }
             GalacticRecruitEntity current = activeWorker[0];
+            if (phase[0] == -1) {
+                boolean areaTicking = areSmartBrainAreaChunksTicking(
+                        helper, area, -4, 12, -4, 6);
+                boolean workerIndexed = helper.getLevel().getEntity(worker.getUUID()) == worker;
+                boolean threatIndexed = helper.getLevel().getEntity(threat.getUUID()) == threat;
+                if (!areaTicking || !workerIndexed || !threatIndexed || worker.tickCount == 0) {
+                    if (helper.getTick() - phaseStartGameTick[0]
+                            >= SMART_BRAIN_CHUNK_READY_TIMEOUT) {
+                        complete[0] = true;
+                        helper.fail("Worker safety area never became entity-ticking: ticking="
+                                + areaTicking + ", worker=" + workerIndexed
+                                + ", threat=" + threatIndexed
+                                + ", workerTick=" + worker.tickCount);
+                    }
+                    return;
+                }
+                BrainUtil.setMemory(
+                        worker,
+                        net.minecraft.world.entity.ai.memory.MemoryModuleType.WALK_TARGET,
+                        new net.minecraft.world.entity.ai.memory.WalkTarget(
+                                area.at(10, 1, 2), 1.0F, 1));
+                if (!worker.hurtServer(
+                        helper.getLevel(),
+                        helper.getLevel().damageSources().mobAttack(threat),
+                        1.0F)) {
+                    complete[0] = true;
+                    helper.fail("Worker safety setup damage was not accepted");
+                    return;
+                }
+                phase[0] = 0;
+                phaseStartGameTick[0] = helper.getTick();
+                phaseStartRecruitTick[0] = worker.tickCount;
+                return;
+            }
             if (phase[0] == 0) {
                 if (current.isWorkerSafetyRetreating()) {
                     if (workerInventoryCount(current) != 3
@@ -6774,34 +8296,94 @@ public final class ModGameTests {
                                 + ", cargo=" + workerInventoryCount(current));
                         return;
                     }
-                    CompoundTag saved = saveRecruit(current, helper.getLevel());
-                    current.discard();
+                    persistedWorker[0] = saveRecruit(current, helper.getLevel());
+                    current.remove(Entity.RemovalReason.UNLOADED_TO_CHUNK);
                     threat.discard();
-                    GalacticRecruitEntity loaded = loadRecruit(saved, helper.getLevel());
-                    if (!helper.getLevel().addFreshEntity(loaded)) {
+                    if (!current.isRemoved()) {
                         complete[0] = true;
-                        helper.fail("Threatened worker could not be restored after save");
+                        helper.fail("Threatened worker did not cross a real unload boundary");
                         return;
                     }
-                    activeWorker[0] = loaded;
                     phase[0] = 1;
-                    phaseStartTick[0] = loaded.tickCount;
+                    phaseStartGameTick[0] = helper.getTick();
                     return;
                 }
-                if (current.tickCount - phaseStartTick[0] >= 80) {
+                if (current.tickCount - phaseStartRecruitTick[0] >= 80) {
                     complete[0] = true;
-                    helper.fail("Damaged worker never entered its safety retreat");
+                    helper.fail("Damaged worker never entered its safety retreat: status="
+                            + current.getWorkerStatus() + ", hurtTime=" + current.hurtTime
+                            + ", rememberedThreat=" + BrainUtil.hasMemory(
+                            current,
+                            net.minecraft.world.entity.ai.memory.MemoryModuleType.HURT_BY_ENTITY));
                 }
                 return;
             }
 
+            if (phase[0] == 1) {
+                GalacticRecruitEntity loaded = loadRecruit(
+                        persistedWorker[0], helper.getLevel());
+                if (!loaded.getUUID().equals(worker.getUUID())
+                        || workerInventoryCount(loaded) != 3) {
+                    complete[0] = true;
+                    helper.fail("Threatened worker identity or cargo did not decode from its save: id="
+                            + loaded.getUUID() + ", cargo=" + workerInventoryCount(loaded));
+                    return;
+                }
+                if (!helper.getLevel().addFreshEntity(loaded)) {
+                    complete[0] = true;
+                    helper.fail("Threatened worker could not be restored after unload");
+                    return;
+                }
+                activeWorker[0] = loaded;
+                phase[0] = 2;
+                phaseStartGameTick[0] = helper.getTick();
+                phaseStartRecruitTick[0] = loaded.tickCount;
+                return;
+            }
+
+            if (helper.getLevel().getEntity(current.getUUID()) != current) {
+                if (helper.getTick() - phaseStartGameTick[0] >= 40L) {
+                    complete[0] = true;
+                    helper.fail("Reloaded worker never entered the server entity index");
+                }
+                return;
+            }
+
+            if (!selfCareBlockedDuringSafety[0]
+                    && current.isWorkerSafetyRetreating()
+                    && current.hurtTime == 0
+                    && current.getTarget() == null) {
+                setRecruitField(current, "hunger", 0);
+                setWorkerInventory(current, new ItemStack(Items.BREAD, 3));
+                if (current.shouldUseRecruitSelfCare()) {
+                    complete[0] = true;
+                    helper.fail("Loaded worker safety retreat did not preempt self-care");
+                    return;
+                }
+                current.performRecruitSelfCare();
+                if (workerInventoryCount(current) != 3) {
+                    complete[0] = true;
+                    helper.fail("Loaded worker safety retreat consumed physical food");
+                    return;
+                }
+                setRecruitField(current, "hunger", 100);
+                setWorkerInventory(current, new ItemStack(Items.DIAMOND, 3));
+                selfCareBlockedDuringSafety[0] = true;
+            }
             if (workerInventoryCount(current) != 3) {
                 complete[0] = true;
-                helper.fail("Worker cargo changed across safety save/reload");
+                helper.fail("Worker cargo changed after safety save/reload: cargo="
+                        + workerInventoryCount(current) + ", status=" + current.getWorkerStatus()
+                        + ", running=" + current.getBrain().getRunningBehaviors());
                 return;
             }
             if (current.getWorkerStatus().phase() == WorkerPhase.ACQUIRE_ORDER
                     && current.getWorkerStatus().reasonCode().equals("threat_cleared")) {
+                if (!selfCareBlockedDuringSafety[0]) {
+                    complete[0] = true;
+                    helper.fail("Reloaded worker left safety before the self-care control ran");
+                    return;
+                }
                 long upkeepTime = helper.getLevel().getGameTime();
                 hall.clearContent();
                 hall.chargeDailyUpkeep(upkeepTime, 1);
@@ -6845,10 +8427,11 @@ public final class ModGameTests {
                 helper.succeed();
                 return;
             }
-            if (current.tickCount - phaseStartTick[0] >= 150) {
+            if (current.tickCount - phaseStartRecruitTick[0] >= 200) {
                 complete[0] = true;
                 helper.fail("Reloaded worker did not resume after 100 threat-free ticks: "
-                        + current.getWorkerStatus());
+                        + current.getWorkerStatus() + ", selfCareBlocked="
+                        + selfCareBlockedDuringSafety[0]);
             }
         });
     }
@@ -7050,10 +8633,19 @@ public final class ModGameTests {
 
     private static void specialistWorkerLoops(GameTestHelper helper) {
         BlockPos hallPos = isolatedCapital(helper, 19);
-        ChunkPos specialistChunk = ChunkPos.containing(hallPos);
-        helper.getLevel().getChunkSource().updateChunkForced(specialistChunk, true);
-        for (int x = -2; x <= 8; x++) {
-            for (int z = -3; z <= 5; z++) {
+        ChunkPos specialistCenterChunk = ChunkPos.containing(hallPos);
+        Set<ChunkPos> specialistChunks = new LinkedHashSet<>();
+        for (int chunkX = -1; chunkX <= 1; chunkX++) {
+            for (int chunkZ = -1; chunkZ <= 1; chunkZ++) {
+                ChunkPos chunk = new ChunkPos(
+                        specialistCenterChunk.x() + chunkX,
+                        specialistCenterChunk.z() + chunkZ);
+                specialistChunks.add(chunk);
+                helper.getLevel().getChunkSource().updateChunkForced(chunk, true);
+            }
+        }
+        for (int x = -12; x <= 12; x++) {
+            for (int z = -12; z <= 12; z++) {
                 helper.getLevel().setBlock(
                         hallPos.offset(x, -1, z),
                         Blocks.STONE.defaultBlockState(),
@@ -7099,6 +8691,16 @@ public final class ModGameTests {
             return;
         }
         BlockPos waterPos = hallPos.offset(3, 0, 1);
+        for (int x = -1; x <= 1; x++) {
+            for (int z = -1; z <= 1; z++) {
+                if (x != 0 || z != 0) {
+                    helper.getLevel().setBlock(
+                            waterPos.offset(x, 0, z),
+                            Blocks.STONE.defaultBlockState(),
+                            3);
+                }
+            }
+        }
         helper.getLevel().setBlock(waterPos, Blocks.WATER.defaultBlockState(), 3);
         if (!configureWorkerLifecycleWorksite(
                 helper, data, owner, recruit, hallPos, List.of())) {
@@ -7111,9 +8713,3324 @@ public final class ModGameTests {
                 owner,
                 recruit,
                 data,
-                specialistChunk,
+                Set.copyOf(specialistChunks),
                 countContainerItems(hall));
         helper.onEachTick(scenario::tick);
+    }
+
+    /**
+     * Exercises one complete cook order through ordinary hire, profession-assignment, and
+     * worksite paths. The fixture never mutates a worker phase, invokes the controller, or
+     * moves the recruit after assignment.
+     */
+    private static void blackBoxCookLifecycle(GameTestHelper helper) {
+        SmartBrainTestArea area = prepareSmartBrainTestAreaAt(
+                helper,
+                GameType.CREATIVE,
+                -2,
+                14,
+                -2,
+                8,
+                isolatedCapital(helper, 218));
+        ServerLevel level = helper.getLevel();
+        ServerPlayer owner = area.player();
+        BlockPos hallPos = area.at(0, 1, 0);
+        BlockPos recruitPos = area.at(2, 1, 4);
+        BlockPos furnacePos = area.at(7, 1, 4);
+        CommandCenterBlockEntity hall = placeCommandCenter(helper, hallPos);
+        hall.claim(owner);
+        KingdomSavedData data = KingdomSavedData.get(level);
+        if (data.activateHall(
+                owner.getUUID(),
+                hall.factionId(),
+                level.dimension().identifier().toString(),
+                hallPos).isEmpty()) {
+            helper.fail("Black-box cook fixture could not activate its Command Center");
+            return;
+        }
+        putContainerItem(hall, new ItemStack(ModItems.CREDIT_CHIP.get(), 32));
+        FactionAlignmentSavedData.get(level).setScore(
+                owner.getUUID(), FactionId.of("republic"), 100);
+        applyCampaignSetupEvent(
+                ProgressionSavedData.get(level),
+                owner,
+                ProgressionEventType.FACTION_PLEDGED,
+                "galacticwars:republic");
+
+        level.setBlock(furnacePos, Blocks.FURNACE.defaultBlockState(), 3);
+        GalacticRecruitEntity recruit = spawnRecruitAt(
+                helper, ModEntityTypes.CLONE_TROOPER.get(), recruitPos);
+        owner.setPos(recruit.getX(), recruit.getY(), recruit.getZ());
+        if (!recruit.handleMenuButton(owner, RecruitCommandMenu.BUTTON_HIRE)
+                || !recruit.handleMenuButton(owner, RecruitCommandMenu.BUTTON_ASSIGN_COOK)) {
+            helper.fail("Black-box cook could not be hired and assigned");
+            return;
+        }
+        if (!configureWorkerLifecycleWorksite(
+                helper,
+                data,
+                owner,
+                recruit,
+                hallPos,
+                List.of("#minecraft:meat"))) {
+            return;
+        }
+        putContainerItem(hall, new ItemStack(Items.BEEF));
+        putContainerItem(hall, new ItemStack(Items.COAL));
+
+        Container recruitCargo = recruit.createCargoContainer();
+        boolean[] approachedFurnace = {false};
+        boolean[] furnaceLoaded = {false};
+        boolean[] furnaceLit = {false};
+        boolean[] consumedFuelWhileLit = {false};
+        boolean[] complete = {false};
+        int[] startedRecruitTick = {-1};
+        long readinessStartedAt = helper.getTick();
+        helper.onEachTick(() -> {
+            if (complete[0]) {
+                return;
+            }
+            if (startedRecruitTick[0] < 0) {
+                boolean areaTicking = areSmartBrainAreaChunksTicking(
+                        helper, area, -2, 14, -2, 8);
+                boolean recruitIndexed = level.getEntity(recruit.getUUID()) == recruit;
+                if (!areaTicking || !recruitIndexed || recruit.tickCount == 0) {
+                    if (helper.getTick() - readinessStartedAt
+                            >= SMART_BRAIN_CHUNK_READY_TIMEOUT) {
+                        complete[0] = true;
+                        helper.fail("Black-box cook area never became entity-ticking: ticking="
+                                + areaTicking + ", recruit=" + recruitIndexed
+                                + ", recruitTick=" + recruit.tickCount);
+                    }
+                    return;
+                }
+                startedRecruitTick[0] = recruit.tickCount;
+            }
+            if (!(level.getBlockEntity(furnacePos) instanceof Container furnace)) {
+                complete[0] = true;
+                helper.fail("Black-box cook furnace became unavailable");
+                return;
+            }
+
+            approachedFurnace[0] |= recruit.distanceToSqr(Vec3.atCenterOf(furnacePos)) <= 4.0D;
+            furnaceLoaded[0] |= furnace.getItem(0).is(Items.BEEF);
+            var furnaceState = level.getBlockState(furnacePos);
+            boolean litNow = furnaceState.hasProperty(BlockStateProperties.LIT)
+                    && furnaceState.getValue(BlockStateProperties.LIT);
+            furnaceLit[0] |= litNow;
+            consumedFuelWhileLit[0] |= litNow
+                    && furnace.getItem(0).is(Items.BEEF)
+                    && furnace.getItem(1).isEmpty();
+
+            int raw = countContainerItem(hall, Items.BEEF)
+                    + countContainerItem(recruitCargo, Items.BEEF)
+                    + countContainerItem(furnace, Items.BEEF);
+            int cooked = countContainerItem(hall, Items.COOKED_BEEF)
+                    + countContainerItem(recruitCargo, Items.COOKED_BEEF)
+                    + countContainerItem(furnace, Items.COOKED_BEEF);
+            int coal = countContainerItem(hall, Items.COAL)
+                    + countContainerItem(recruitCargo, Items.COAL)
+                    + countContainerItem(furnace, Items.COAL);
+            if (raw + cooked != 1 || coal > 1) {
+                complete[0] = true;
+                helper.fail("Black-box cook violated physical conservation: raw="
+                        + raw + ", cooked=" + cooked + ", coal=" + coal
+                        + ", furnace=" + List.of(
+                                furnace.getItem(0), furnace.getItem(1), furnace.getItem(2))
+                        + ", cargo=" + workerInventoryCount(recruit));
+                return;
+            }
+
+            WorkerStatus status = recruit.getWorkerStatus();
+            if (litNow
+                    && furnace.getItem(0).is(Items.BEEF)
+                    && status.phase() == WorkerPhase.BLOCKED
+                    && status.requiredResource().equals("minecraft:coal")) {
+                complete[0] = true;
+                helper.fail("Lit furnace incorrectly requested a second fuel item: " + status);
+                return;
+            }
+
+            boolean completedOrder = hasCompletedWorkerOrder(
+                    data, owner.getUUID(), WorkOrderType.COOK);
+            if (completedOrder
+                    && countContainerItem(hall, Items.COOKED_BEEF) == 1
+                    && raw == 0
+                    && workerInventoryCount(recruit) == 0
+                    && furnace.getItem(0).isEmpty()
+                    && furnace.getItem(2).isEmpty()) {
+                if (!approachedFurnace[0]
+                        || !furnaceLoaded[0]
+                        || !furnaceLit[0]
+                        || !consumedFuelWhileLit[0]) {
+                    complete[0] = true;
+                    helper.fail("Cook completed without all embodied furnace observations: approached="
+                            + approachedFurnace[0] + ", loaded=" + furnaceLoaded[0]
+                            + ", lit=" + furnaceLit[0]
+                            + ", consumedFuelWhileLit=" + consumedFuelWhileLit[0]);
+                    return;
+                }
+                complete[0] = true;
+                recruit.discard();
+                helper.succeed();
+                return;
+            }
+
+            if (recruit.tickCount - startedRecruitTick[0] >= 750) {
+                complete[0] = true;
+                helper.fail("Black-box cook lifecycle timed out: status=" + status
+                        + ", raw=" + raw + ", cooked=" + cooked + ", coal=" + coal
+                        + ", approached=" + approachedFurnace[0]
+                        + ", loaded=" + furnaceLoaded[0]
+                        + ", lit=" + furnaceLit[0]
+                        + ", consumedFuelWhileLit=" + consumedFuelWhileLit[0]
+                        + ", furnace=" + List.of(
+                                furnace.getItem(0), furnace.getItem(1), furnace.getItem(2)));
+            }
+        });
+    }
+
+    /**
+     * Exercises one complete connected-tree order through ordinary hire, profession-assignment,
+     * worksite, registered-storage, navigation, harvest, replant, and deposit paths. The fixture
+     * never mutates a worker phase, invokes the controller, or moves the recruit after assignment.
+     */
+    private static void blackBoxLumberjackLifecycle(GameTestHelper helper) {
+        SmartBrainTestArea area = prepareSmartBrainTestAreaAt(
+                helper,
+                GameType.CREATIVE,
+                -2,
+                14,
+                -2,
+                8,
+                isolatedCapital(helper, 219));
+        ServerLevel level = helper.getLevel();
+        ServerPlayer owner = area.player();
+        BlockPos hallPos = area.at(0, 1, 0);
+        BlockPos recruitPos = area.at(2, 1, 4);
+        BlockPos treeRoot = area.at(7, 1, 4);
+        List<BlockPos> logPositions = List.of(
+                treeRoot,
+                treeRoot.above(),
+                treeRoot.above(2));
+        CommandCenterBlockEntity hall = placeCommandCenter(helper, hallPos);
+        hall.claim(owner);
+        KingdomSavedData data = KingdomSavedData.get(level);
+        if (data.activateHall(
+                owner.getUUID(),
+                hall.factionId(),
+                level.dimension().identifier().toString(),
+                hallPos).isEmpty()) {
+            helper.fail("Black-box lumberjack fixture could not activate its Command Center");
+            return;
+        }
+        putContainerItem(hall, new ItemStack(ModItems.CREDIT_CHIP.get(), 32));
+        FactionAlignmentSavedData.get(level).setScore(
+                owner.getUUID(), FactionId.of("republic"), 100);
+        applyCampaignSetupEvent(
+                ProgressionSavedData.get(level),
+                owner,
+                ProgressionEventType.FACTION_PLEDGED,
+                "galacticwars:republic");
+
+        level.setBlock(treeRoot.below(), Blocks.DIRT.defaultBlockState(), 3);
+        logPositions.forEach(pos -> level.setBlock(pos, Blocks.OAK_LOG.defaultBlockState(), 3));
+        GalacticRecruitEntity recruit = spawnRecruitAt(
+                helper, ModEntityTypes.CLONE_TROOPER.get(), recruitPos);
+        owner.setPos(recruit.getX(), recruit.getY(), recruit.getZ());
+        if (!recruit.handleMenuButton(owner, RecruitCommandMenu.BUTTON_HIRE)
+                || !recruit.handleMenuButton(
+                        owner, RecruitCommandMenu.BUTTON_ASSIGN_LUMBERJACK)) {
+            helper.fail("Black-box lumberjack could not be hired and assigned");
+            return;
+        }
+        if (!configureWorkerLifecycleWorksite(
+                helper,
+                data,
+                owner,
+                recruit,
+                hallPos,
+                List.of("minecraft:oak_log"))) {
+            return;
+        }
+        putContainerItem(hall, new ItemStack(Items.OAK_SAPLING));
+
+        Container recruitCargo = recruit.createCargoContainer();
+        int toolDamageBefore = recruit.getWorkerMainHandItem().getDamageValue();
+        boolean[] withdrewSapling = {false};
+        boolean[] approachedTree = {false};
+        boolean[] complete = {false};
+        int[] startedRecruitTick = {-1};
+        long readinessStartedAt = helper.getTick();
+        helper.onEachTick(() -> {
+            if (complete[0]) {
+                return;
+            }
+            if (startedRecruitTick[0] < 0) {
+                boolean areaTicking = areSmartBrainAreaChunksTicking(
+                        helper, area, -2, 14, -2, 8);
+                boolean recruitIndexed = level.getEntity(recruit.getUUID()) == recruit;
+                if (!areaTicking || !recruitIndexed || recruit.tickCount == 0) {
+                    if (helper.getTick() - readinessStartedAt
+                            >= SMART_BRAIN_CHUNK_READY_TIMEOUT) {
+                        complete[0] = true;
+                        helper.fail("Black-box lumberjack area never became entity-ticking: ticking="
+                                + areaTicking + ", recruit=" + recruitIndexed
+                                + ", recruitTick=" + recruit.tickCount);
+                    }
+                    return;
+                }
+                startedRecruitTick[0] = recruit.tickCount;
+            }
+
+            withdrewSapling[0] |= countContainerItem(hall, Items.OAK_SAPLING) == 0
+                    && countContainerItem(recruitCargo, Items.OAK_SAPLING) == 1;
+            approachedTree[0] |= recruit.distanceToSqr(Vec3.atCenterOf(treeRoot)) <= 4.0D;
+
+            int standingLogs = 0;
+            for (BlockPos logPos : logPositions) {
+                if (level.getBlockState(logPos).is(Blocks.OAK_LOG)) {
+                    standingLogs++;
+                }
+            }
+            int physicalLogs = standingLogs
+                    + countContainerItem(hall, Items.OAK_LOG)
+                    + countContainerItem(recruitCargo, Items.OAK_LOG);
+            int physicalSaplings = countContainerItem(hall, Items.OAK_SAPLING)
+                    + countContainerItem(recruitCargo, Items.OAK_SAPLING)
+                    + (level.getBlockState(treeRoot).is(Blocks.OAK_SAPLING) ? 1 : 0);
+            if (physicalLogs != 3 || physicalSaplings != 1) {
+                complete[0] = true;
+                helper.fail("Black-box lumberjack violated physical conservation: logs="
+                        + physicalLogs + ", saplings=" + physicalSaplings
+                        + ", standingLogs=" + standingLogs
+                        + ", storedLogs=" + countContainerItem(hall, Items.OAK_LOG)
+                        + ", storedSaplings=" + countContainerItem(hall, Items.OAK_SAPLING)
+                        + ", cargo=" + recruitCargo);
+                return;
+            }
+
+            boolean replanted = level.getBlockState(treeRoot).is(Blocks.OAK_SAPLING)
+                    && level.getBlockState(treeRoot.above()).isAir()
+                    && level.getBlockState(treeRoot.above(2)).isAir();
+            boolean completedOrder = hasCompletedWorkerOrder(
+                    data, owner.getUUID(), WorkOrderType.LUMBER);
+            int toolDamage = recruit.getWorkerMainHandItem().getDamageValue();
+            if (completedOrder
+                    && replanted
+                    && countContainerItem(hall, Items.OAK_LOG) == 3
+                    && countContainerItem(hall, Items.OAK_SAPLING) == 0
+                    && workerInventoryCount(recruit) == 0
+                    && withdrewSapling[0]
+                    && approachedTree[0]
+                    && toolDamage == toolDamageBefore + 3
+                    && recruit.getRecruitCommand() == RecruitmentAction.WORK_AT_SITE) {
+                complete[0] = true;
+                recruit.discard();
+                helper.succeed();
+                return;
+            }
+
+            if (recruit.tickCount - startedRecruitTick[0] >= 600) {
+                complete[0] = true;
+                helper.fail("Black-box lumberjack lifecycle timed out: status="
+                        + recruit.getWorkerStatus()
+                        + ", position=" + recruit.position()
+                        + ", standingLogs=" + standingLogs
+                        + ", storedLogs=" + countContainerItem(hall, Items.OAK_LOG)
+                        + ", storedSaplings=" + countContainerItem(hall, Items.OAK_SAPLING)
+                        + ", cargo=" + recruitCargo
+                        + ", replanted=" + replanted
+                        + ", withdrewSapling=" + withdrewSapling[0]
+                        + ", approachedTree=" + approachedTree[0]
+                        + ", completedOrder=" + completedOrder
+                        + ", toolDamage=" + toolDamageBefore + "->" + toolDamage);
+            }
+        });
+    }
+
+    /**
+     * Exercises one complete ore order through ordinary hire, profession-assignment, worksite,
+     * registered-storage, navigation, mining, and deposit paths. The fixture never mutates a
+     * worker phase, invokes the controller, or moves the recruit after assignment.
+     */
+    private static void blackBoxMinerLifecycle(GameTestHelper helper) {
+        SmartBrainTestArea area = prepareSmartBrainTestAreaAt(
+                helper,
+                GameType.CREATIVE,
+                -2,
+                14,
+                -2,
+                8,
+                isolatedCapital(helper, 220));
+        ServerLevel level = helper.getLevel();
+        ServerPlayer owner = area.player();
+        BlockPos hallPos = area.at(0, 1, 0);
+        BlockPos recruitPos = area.at(2, 1, 4);
+        BlockPos orePos = area.at(7, 1, 4);
+        CommandCenterBlockEntity hall = placeCommandCenter(helper, hallPos);
+        hall.claim(owner);
+        KingdomSavedData data = KingdomSavedData.get(level);
+        if (data.activateHall(
+                owner.getUUID(),
+                hall.factionId(),
+                level.dimension().identifier().toString(),
+                hallPos).isEmpty()) {
+            helper.fail("Black-box miner fixture could not activate its Command Center");
+            return;
+        }
+        putContainerItem(hall, new ItemStack(ModItems.CREDIT_CHIP.get(), 32));
+        FactionAlignmentSavedData.get(level).setScore(
+                owner.getUUID(), FactionId.of("republic"), 100);
+        applyCampaignSetupEvent(
+                ProgressionSavedData.get(level),
+                owner,
+                ProgressionEventType.FACTION_PLEDGED,
+                "galacticwars:republic");
+
+        level.setBlock(orePos, Blocks.IRON_ORE.defaultBlockState(), 3);
+        GalacticRecruitEntity recruit = spawnRecruitAt(
+                helper, ModEntityTypes.CLONE_TROOPER.get(), recruitPos);
+        owner.setPos(recruit.getX(), recruit.getY(), recruit.getZ());
+        if (!recruit.handleMenuButton(owner, RecruitCommandMenu.BUTTON_HIRE)
+                || !recruit.handleMenuButton(owner, RecruitCommandMenu.BUTTON_ASSIGN_MINER)) {
+            helper.fail("Black-box miner could not be hired and assigned");
+            return;
+        }
+        if (!configureWorkerLifecycleWorksite(
+                helper,
+                data,
+                owner,
+                recruit,
+                hallPos,
+                List.of("minecraft:iron_ore"))) {
+            return;
+        }
+
+        Container recruitCargo = recruit.createCargoContainer();
+        int toolDamageBefore = recruit.getWorkerMainHandItem().getDamageValue();
+        boolean[] approachedOre = {false};
+        boolean[] complete = {false};
+        int[] startedRecruitTick = {-1};
+        long readinessStartedAt = helper.getTick();
+        helper.onEachTick(() -> {
+            if (complete[0]) {
+                return;
+            }
+            if (startedRecruitTick[0] < 0) {
+                boolean areaTicking = areSmartBrainAreaChunksTicking(
+                        helper, area, -2, 14, -2, 8);
+                boolean recruitIndexed = level.getEntity(recruit.getUUID()) == recruit;
+                if (!areaTicking || !recruitIndexed || recruit.tickCount == 0) {
+                    if (helper.getTick() - readinessStartedAt
+                            >= SMART_BRAIN_CHUNK_READY_TIMEOUT) {
+                        complete[0] = true;
+                        helper.fail("Black-box miner area never became entity-ticking: ticking="
+                                + areaTicking + ", recruit=" + recruitIndexed
+                                + ", recruitTick=" + recruit.tickCount);
+                    }
+                    return;
+                }
+                startedRecruitTick[0] = recruit.tickCount;
+            }
+
+            approachedOre[0] |= recruit.distanceToSqr(Vec3.atCenterOf(orePos)) <= 4.0D;
+            int physicalIron = (level.getBlockState(orePos).is(Blocks.IRON_ORE) ? 1 : 0)
+                    + countContainerItem(hall, Items.RAW_IRON)
+                    + countContainerItem(recruitCargo, Items.RAW_IRON);
+            if (physicalIron != 1) {
+                complete[0] = true;
+                helper.fail("Black-box miner violated physical conservation: iron="
+                        + physicalIron + ", block=" + level.getBlockState(orePos)
+                        + ", stored=" + countContainerItem(hall, Items.RAW_IRON)
+                        + ", cargo=" + recruitCargo);
+                return;
+            }
+
+            boolean completedOrder = hasCompletedWorkerOrder(
+                    data, owner.getUUID(), WorkOrderType.MINE);
+            int toolDamage = recruit.getWorkerMainHandItem().getDamageValue();
+            if (completedOrder
+                    && level.getBlockState(orePos).isAir()
+                    && countContainerItem(hall, Items.RAW_IRON) == 1
+                    && workerInventoryCount(recruit) == 0
+                    && approachedOre[0]
+                    && toolDamage == toolDamageBefore + 1
+                    && recruit.getRecruitCommand() == RecruitmentAction.WORK_AT_SITE) {
+                complete[0] = true;
+                recruit.discard();
+                helper.succeed();
+                return;
+            }
+
+            if (recruit.tickCount - startedRecruitTick[0] >= 500) {
+                complete[0] = true;
+                helper.fail("Black-box miner lifecycle timed out: status="
+                        + recruit.getWorkerStatus()
+                        + ", position=" + recruit.position()
+                        + ", block=" + level.getBlockState(orePos)
+                        + ", stored=" + countContainerItem(hall, Items.RAW_IRON)
+                        + ", cargo=" + recruitCargo
+                        + ", approached=" + approachedOre[0]
+                        + ", completedOrder=" + completedOrder
+                        + ", toolDamage=" + toolDamageBefore + "->" + toolDamage);
+            }
+        });
+    }
+
+    /**
+     * Proves that an owner can physically reinstall a miner's missing pickaxe through the
+     * provider-owned loadout and the already-blocked order naturally retries without mutation.
+     */
+    private static void blackBoxMinerMissingToolRecovery(GameTestHelper helper) {
+        SmartBrainTestArea area = prepareSmartBrainTestAreaAt(
+                helper,
+                GameType.SURVIVAL,
+                -2,
+                14,
+                -2,
+                10,
+                isolatedCapital(helper, 232));
+        ServerLevel level = helper.getLevel();
+        ServerPlayer owner = area.player();
+        BlockPos hallPos = area.at(0, 1, 0);
+        BlockPos recruitPos = area.at(2, 1, 4);
+        BlockPos orePos = area.at(7, 1, 4);
+        CommandCenterBlockEntity hall = placeCommandCenter(helper, hallPos);
+        hall.claim(owner);
+        KingdomSavedData data = KingdomSavedData.get(level);
+        if (data.activateHall(
+                owner.getUUID(),
+                hall.factionId(),
+                level.dimension().identifier().toString(),
+                hallPos).isEmpty()) {
+            helper.fail("Missing-tool recovery fixture could not activate its Command Center");
+            return;
+        }
+        putContainerItem(hall, new ItemStack(ModItems.CREDIT_CHIP.get(), 32));
+        FactionAlignmentSavedData.get(level).setScore(
+                owner.getUUID(), FactionId.of("republic"), 100);
+        applyCampaignSetupEvent(
+                ProgressionSavedData.get(level),
+                owner,
+                ProgressionEventType.FACTION_PLEDGED,
+                "galacticwars:republic");
+        level.setBlock(orePos, Blocks.IRON_ORE.defaultBlockState(), 3);
+
+        GalacticRecruitEntity recruit = spawnRecruitAt(
+                helper, ModEntityTypes.CLONE_TROOPER.get(), recruitPos);
+        owner.setPos(recruit.getX(), recruit.getY(), recruit.getZ());
+        owner.getInventory().add(new ItemStack(ModItems.CREDIT_CHIP.get(), 53));
+        if (!recruit.handleMenuButton(owner, RecruitCommandMenu.BUTTON_HIRE)
+                || !recruit.handleMenuButton(owner, RecruitCommandMenu.BUTTON_ASSIGN_MINER)) {
+            helper.fail("Missing-tool recovery miner could not be hired and assigned");
+            return;
+        }
+        if (!configureWorkerLifecycleWorksite(
+                helper,
+                data,
+                owner,
+                recruit,
+                hallPos,
+                List.of("minecraft:iron_ore"))) {
+            return;
+        }
+
+        ItemStack removedTool = quickMoveWorkerToolToPlayer(
+                helper,
+                openServerRecruitLoadout(helper, owner, recruit, 76),
+                owner,
+                recruit,
+                hall);
+        if (!WorkerDutyLoadoutPolicy.isUsableTool(WorkerProfession.MINER, removedTool)
+                || !recruit.getWorkerMainHandItem().isEmpty()
+                || countMatchingStackItems(owner.getInventory(), removedTool) != removedTool.getCount()
+                || countMatchingStackItems(hall, removedTool) != 0) {
+            helper.fail("Missing-tool fixture did not retain the removed physical pickaxe");
+            return;
+        }
+
+        Container recruitCargo = recruit.createCargoContainer();
+        int toolDamageBefore = removedTool.getDamageValue();
+        UUID[] blockedOrderId = {null};
+        boolean[] naturalRetryObserved = {false};
+        boolean[] approachedOreAfterReinsertion = {false};
+        long[] reinsertionTick = {-1L};
+        int[] reinsertionRecruitTick = {-1};
+        double[] preReinsertionDistanceSqr = {-1.0D};
+        boolean[] complete = {false};
+        int[] startedRecruitTick = {-1};
+        long readinessStartedAt = helper.getTick();
+        helper.onEachTick(() -> {
+            if (complete[0]) {
+                return;
+            }
+            if (startedRecruitTick[0] < 0) {
+                boolean areaTicking = areSmartBrainAreaChunksTicking(
+                        helper, area, -2, 14, -2, 10);
+                boolean recruitIndexed = level.getEntity(recruit.getUUID()) == recruit;
+                if (!areaTicking || !recruitIndexed || recruit.tickCount == 0) {
+                    if (helper.getTick() - readinessStartedAt >= SMART_BRAIN_CHUNK_READY_TIMEOUT) {
+                        complete[0] = true;
+                        helper.fail("Missing-tool recovery area never became entity-ticking: ticking="
+                                + areaTicking + ", recruit=" + recruitIndexed
+                                + ", recruitTick=" + recruit.tickCount);
+                    }
+                    return;
+                }
+                startedRecruitTick[0] = recruit.tickCount;
+            }
+
+            WorkerStatus status = recruit.getWorkerStatus();
+            if (blockedOrderId[0] == null
+                    && status.phase() == WorkerPhase.BLOCKED
+                    && status.reasonCode().equals("missing_tool")) {
+                WorkOrder order = data.assignedWorkOrder(
+                        owner.getUUID(), recruit.getUUID()).orElse(null);
+                if (order == null || order.type() != WorkOrderType.MINE
+                        || !level.getBlockState(orePos).is(Blocks.IRON_ORE)
+                        || countContainerItem(hall, Items.RAW_IRON) != 0
+                        || workerInventoryCount(recruit) != 0) {
+                    helper.fail("Missing-tool block mutated ore, output, cargo, or order");
+                    return;
+                }
+                blockedOrderId[0] = order.id();
+                reinsertionTick[0] = helper.getTick();
+                reinsertionRecruitTick[0] = recruit.tickCount;
+                preReinsertionDistanceSqr[0] = recruit.distanceToSqr(Vec3.atCenterOf(orePos));
+                quickMovePlayerToolToWorker(
+                        helper,
+                        openServerRecruitLoadout(helper, owner, recruit, 77),
+                        owner,
+                        recruit,
+                        hall,
+                        removedTool);
+            }
+
+            if (blockedOrderId[0] != null) {
+                WorkOrder recordedOrder = data.workOrder(
+                        owner.getUUID(), blockedOrderId[0]).orElse(null);
+                if (recordedOrder == null || recordedOrder.type() != WorkOrderType.MINE) {
+                    complete[0] = true;
+                    helper.fail("Missing-tool recovery lost its recorded mine order");
+                    return;
+                }
+                if (!recordedOrder.state().terminal()) {
+                    WorkOrder activeOrder = data.assignedWorkOrder(
+                            owner.getUUID(), recruit.getUUID()).orElse(null);
+                    if (activeOrder == null || !activeOrder.id().equals(blockedOrderId[0])) {
+                        complete[0] = true;
+                        helper.fail("Missing-tool recovery replaced the blocked order: expected="
+                                + blockedOrderId[0] + ", actual="
+                                + (activeOrder == null ? null : activeOrder.id()));
+                        return;
+                    }
+                    boolean laterWorkerTick = helper.getTick() > reinsertionTick[0]
+                            && recruit.tickCount > reinsertionRecruitTick[0];
+                    if (laterWorkerTick) {
+                        naturalRetryObserved[0] |= activeOrder.state() != WorkOrderState.BLOCKED;
+                        approachedOreAfterReinsertion[0] |= preReinsertionDistanceSqr[0] > 4.0D
+                                && recruit.distanceToSqr(Vec3.atCenterOf(orePos)) <= 4.0D;
+                    }
+                } else if (recordedOrder.state() != WorkOrderState.COMPLETED) {
+                    complete[0] = true;
+                    helper.fail("Missing-tool recovery ended the recorded order as "
+                            + recordedOrder.state());
+                    return;
+                }
+
+                ItemStack expectedUsedTool = removedTool.copy();
+                expectedUsedTool.setDamageValue(toolDamageBefore + 1);
+                if (recordedOrder.state() == WorkOrderState.COMPLETED
+                        && level.getBlockState(orePos).isAir()
+                        && countContainerItem(hall, Items.RAW_IRON) == 1
+                        && workerInventoryCount(recruit) == 0
+                        && naturalRetryObserved[0]
+                        && approachedOreAfterReinsertion[0]
+                        && ItemStack.isSameItemSameComponents(
+                                recruit.getWorkerMainHandItem(), expectedUsedTool)
+                        && recruit.getRecruitCommand() == RecruitmentAction.WORK_AT_SITE) {
+                    complete[0] = true;
+                    recruit.discard();
+                    helper.succeed();
+                    return;
+                }
+            }
+
+            if (recruit.tickCount - startedRecruitTick[0] >= 800) {
+                complete[0] = true;
+                helper.fail("Missing-tool recovery timed out: status=" + status
+                        + ", blockedOrder=" + blockedOrderId[0]
+                        + ", block=" + level.getBlockState(orePos)
+                        + ", stored=" + countContainerItem(hall, Items.RAW_IRON)
+                        + ", cargo=" + workerInventoryCount(recruit)
+                        + ", naturalRetry=" + naturalRetryObserved[0]
+                        + ", approached=" + approachedOreAfterReinsertion[0]
+                        + ", toolDamage=" + toolDamageBefore + "->"
+                        + recruit.getWorkerMainHandItem().getDamageValue());
+            }
+        });
+    }
+
+    /**
+     * Verifies that a miner whose pickaxe breaks can physically withdraw a component-bearing
+     * replacement from registered storage and resume the already-blocked mine order.
+     */
+    private static void blackBoxMinerBrokenToolRecovery(GameTestHelper helper) {
+        SmartBrainTestArea area = prepareSmartBrainTestAreaAt(
+                helper,
+                GameType.SURVIVAL,
+                -2,
+                14,
+                -2,
+                10,
+                isolatedCapital(helper, 231));
+        ServerLevel level = helper.getLevel();
+        ServerPlayer owner = area.player();
+        BlockPos hallPos = area.at(0, 1, 0);
+        BlockPos recruitPos = area.at(2, 1, 4);
+        BlockPos firstOre = area.at(7, 1, 4);
+        BlockPos secondOre = area.at(8, 1, 4);
+        CommandCenterBlockEntity hall = placeCommandCenter(helper, hallPos);
+        hall.claim(owner);
+        KingdomSavedData data = KingdomSavedData.get(level);
+        if (data.activateHall(
+                owner.getUUID(),
+                hall.factionId(),
+                level.dimension().identifier().toString(),
+                hallPos).isEmpty()) {
+            helper.fail("Broken-tool recovery fixture could not activate its Command Center");
+            return;
+        }
+        putContainerItem(hall, new ItemStack(ModItems.CREDIT_CHIP.get(), 32));
+        FactionAlignmentSavedData.get(level).setScore(
+                owner.getUUID(), FactionId.of("republic"), 100);
+        applyCampaignSetupEvent(
+                ProgressionSavedData.get(level),
+                owner,
+                ProgressionEventType.FACTION_PLEDGED,
+                "galacticwars:republic");
+        level.setBlock(firstOre, Blocks.IRON_ORE.defaultBlockState(), 3);
+        level.setBlock(secondOre, Blocks.IRON_ORE.defaultBlockState(), 3);
+
+        GalacticRecruitEntity recruit = spawnRecruitAt(
+                helper, ModEntityTypes.CLONE_TROOPER.get(), recruitPos);
+        owner.setPos(recruit.getX(), recruit.getY(), recruit.getZ());
+        owner.getInventory().add(new ItemStack(ModItems.CREDIT_CHIP.get(), 53));
+        if (!recruit.handleMenuButton(owner, RecruitCommandMenu.BUTTON_HIRE)
+                || !recruit.handleMenuButton(owner, RecruitCommandMenu.BUTTON_ASSIGN_MINER)) {
+            helper.fail("Broken-tool recovery miner could not be hired and assigned");
+            return;
+        }
+        if (!configureWorkerLifecycleWorksite(
+                helper,
+                data,
+                owner,
+                recruit,
+                hallPos,
+                List.of("minecraft:iron_ore"))) {
+            return;
+        }
+
+        ItemStack original = quickMoveWorkerToolToPlayer(
+                helper,
+                openServerRecruitLoadout(helper, owner, recruit, 74),
+                owner,
+                recruit,
+                hall);
+        ItemStack nearlyBroken = original.copy();
+        nearlyBroken.setDamageValue(nearlyBroken.getMaxDamage() - 1);
+        replaceExactPlayerStack(helper, owner, original, nearlyBroken);
+        quickMovePlayerToolToWorker(
+                helper,
+                openServerRecruitLoadout(helper, owner, recruit, 75),
+                owner,
+                recruit,
+                hall,
+                nearlyBroken);
+
+        ItemStack replacement = new ItemStack(Items.IRON_PICKAXE);
+        replacement.set(DataComponents.CUSTOM_NAME, Component.literal("Recovery Pickaxe"));
+        replacement.setDamageValue(7);
+
+        Container recruitCargo = recruit.createCargoContainer();
+        int[] phase = {0};
+        UUID[] blockedOrderId = {null};
+        boolean[] storageNavigationObserved = {false};
+        boolean[] complete = {false};
+        long[] readinessStartedAt = {helper.getTick()};
+        helper.onEachTick(() -> {
+            if (complete[0]) {
+                return;
+            }
+            boolean areaTicking = areSmartBrainAreaChunksTicking(helper, area, -2, 14, -2, 10);
+            boolean recruitIndexed = level.getEntity(recruit.getUUID()) == recruit;
+            if (!areaTicking || !recruitIndexed || recruit.tickCount == 0) {
+                if (helper.getTick() - readinessStartedAt[0] >= SMART_BRAIN_CHUNK_READY_TIMEOUT) {
+                    complete[0] = true;
+                    helper.fail("Broken-tool recovery area never became entity-ticking: ticking="
+                            + areaTicking + ", recruit=" + recruitIndexed
+                            + ", recruitTick=" + recruit.tickCount);
+                }
+                return;
+            }
+
+            int oreAndOutput = (level.getBlockState(firstOre).is(Blocks.IRON_ORE) ? 1 : 0)
+                    + (level.getBlockState(secondOre).is(Blocks.IRON_ORE) ? 1 : 0)
+                    + countContainerItem(hall, Items.RAW_IRON)
+                    + countContainerItem(recruitCargo, Items.RAW_IRON);
+            if (oreAndOutput != 2) {
+                complete[0] = true;
+                helper.fail("Broken-tool recovery violated ore conservation: total=" + oreAndOutput
+                        + ", stored=" + countContainerItem(hall, Items.RAW_IRON)
+                        + ", cargo=" + countContainerItem(recruitCargo, Items.RAW_IRON));
+                return;
+            }
+
+            long completedMineOrders = data.kingdomForOwner(owner.getUUID()).orElseThrow()
+                    .settlement().workOrders().stream()
+                    .filter(order -> order.type() == WorkOrderType.MINE)
+                    .filter(order -> order.state() == WorkOrderState.COMPLETED)
+                    .count();
+            WorkerStatus status = recruit.getWorkerStatus();
+            WorkOrder assigned = data.assignedWorkOrder(
+                    owner.getUUID(), recruit.getUUID()).orElse(null);
+
+            if (phase[0] == 0 && completedMineOrders == 1
+                    && recruit.getWorkerMainHandItem().isEmpty()) {
+                phase[0] = 1;
+            }
+            if (phase[0] == 1
+                    && status.phase() == WorkerPhase.BLOCKED
+                    && status.reasonCode().equals("missing_tool")
+                    && assigned != null
+                    && assigned.type() == WorkOrderType.MINE) {
+                blockedOrderId[0] = assigned.id();
+                putContainerItem(hall, replacement.copy());
+                phase[0] = 2;
+            }
+            if (phase[0] != 2) {
+                return;
+            }
+
+            storageNavigationObserved[0] |= status.phase() == WorkerPhase.NAVIGATE_SOURCE
+                    && status.reasonCode().equals("withdraw_worker_tool");
+            if (assigned != null && !assigned.id().equals(blockedOrderId[0])) {
+                complete[0] = true;
+                helper.fail("Broken-tool recovery replaced the blocked order: expected="
+                        + blockedOrderId[0] + ", actual=" + assigned.id());
+                return;
+            }
+            int physicalReplacementCount = countContainerItem(hall, Items.IRON_PICKAXE)
+                    + countContainerItem(recruitCargo, Items.IRON_PICKAXE)
+                    + (recruit.getWorkerMainHandItem().is(Items.IRON_PICKAXE) ? 1 : 0);
+            if (physicalReplacementCount != 1) {
+                complete[0] = true;
+                helper.fail("Broken-tool recovery duplicated or lost the replacement: count="
+                        + physicalReplacementCount);
+                return;
+            }
+            ItemStack expectedUsedReplacement = replacement.copy();
+            expectedUsedReplacement.setDamageValue(replacement.getDamageValue() + 1);
+            if (completedMineOrders == 2
+                    && countContainerItem(hall, Items.RAW_IRON) == 2
+                    && workerInventoryCount(recruit) == 0
+                    && storageNavigationObserved[0]
+                    && ItemStack.isSameItemSameComponents(
+                            recruit.getWorkerMainHandItem(), expectedUsedReplacement)) {
+                complete[0] = true;
+                recruit.discard();
+                helper.succeed();
+            }
+        });
+    }
+
+    private static RecruitLoadoutMenu openServerRecruitLoadout(
+            GameTestHelper helper,
+            ServerPlayer owner,
+            GalacticRecruitEntity recruit,
+            int containerId
+    ) {
+        if (!recruit.canPlayerManageLogistics(owner)
+                || owner.distanceToSqr(recruit) > 64.0D) {
+            helper.fail("Recruit loadout authority or distance gate was not satisfied");
+            return null;
+        }
+        return (RecruitLoadoutMenu) new RecruitLoadoutMenuProvider(recruit)
+                .createMenu(containerId, owner.getInventory(), owner);
+    }
+
+    private static ItemStack quickMoveWorkerToolToPlayer(
+            GameTestHelper helper,
+            RecruitLoadoutMenu menu,
+            ServerPlayer owner,
+            GalacticRecruitEntity recruit,
+            Container storage
+    ) {
+        ItemStack expected = recruit.getWorkerMainHandItem().copy();
+        int expectedCount = expected.getCount();
+        int playerBefore = countMatchingStackItems(owner.getInventory(), expected);
+        int workerBefore = matchingWorkerToolCount(recruit, expected);
+        int storageBefore = countMatchingStackItems(storage, expected);
+        ItemStack moved = menu.quickMoveStack(owner, LOADOUT_WORKER_TOOL_SLOT);
+        int playerAfter = countMatchingStackItems(owner.getInventory(), expected);
+        int workerAfter = matchingWorkerToolCount(recruit, expected);
+        int storageAfter = countMatchingStackItems(storage, expected);
+        if (moved.isEmpty()
+                || !ItemStack.isSameItemSameComponents(moved, expected)
+                || workerBefore != expectedCount
+                || playerAfter != playerBefore + expectedCount
+                || workerAfter != 0
+                || storageAfter != storageBefore
+                || playerAfter + workerAfter + storageAfter
+                != playerBefore + workerBefore + storageBefore) {
+            helper.fail("Provider-owned loadout did not conserve the physical worker tool");
+        }
+        menu.removed(owner);
+        return moved;
+    }
+
+    private static void quickMovePlayerToolToWorker(
+            GameTestHelper helper,
+            RecruitLoadoutMenu menu,
+            ServerPlayer owner,
+            GalacticRecruitEntity recruit,
+            Container storage,
+            ItemStack expected
+    ) {
+        int expectedCount = expected.getCount();
+        int playerBefore = countMatchingStackItems(owner.getInventory(), expected);
+        int workerBefore = matchingWorkerToolCount(recruit, expected);
+        int storageBefore = countMatchingStackItems(storage, expected);
+        int sourceSlot = java.util.stream.IntStream.range(
+                        RecruitLoadoutMenu.PLAYER_INVENTORY_START,
+                        RecruitLoadoutMenu.PLAYER_INVENTORY_END)
+                .filter(slot -> ItemStack.isSameItemSameComponents(
+                        menu.getSlot(slot).getItem(), expected))
+                .findFirst()
+                .orElse(-1);
+        ItemStack moved = sourceSlot < 0 ? ItemStack.EMPTY : menu.quickMoveStack(owner, sourceSlot);
+        int playerAfter = countMatchingStackItems(owner.getInventory(), expected);
+        int workerAfter = matchingWorkerToolCount(recruit, expected);
+        int storageAfter = countMatchingStackItems(storage, expected);
+        if (sourceSlot < 0
+                || moved.isEmpty()
+                || !ItemStack.isSameItemSameComponents(recruit.getWorkerMainHandItem(), expected)
+                || playerBefore < expectedCount
+                || workerBefore != 0
+                || playerAfter != playerBefore - expectedCount
+                || workerAfter != expectedCount
+                || storageAfter != storageBefore
+                || playerAfter + workerAfter + storageAfter
+                != playerBefore + workerBefore + storageBefore) {
+            helper.fail("Provider-owned loadout did not conserve the expected worker tool");
+        }
+        menu.removed(owner);
+    }
+
+    private static int countMatchingStackItems(Container container, ItemStack expected) {
+        int count = 0;
+        for (int slot = 0; slot < container.getContainerSize(); slot++) {
+            if (ItemStack.isSameItemSameComponents(container.getItem(slot), expected)) {
+                count += container.getItem(slot).getCount();
+            }
+        }
+        return count;
+    }
+
+    private static int matchingWorkerToolCount(GalacticRecruitEntity recruit, ItemStack expected) {
+        ItemStack workerTool = recruit.getWorkerMainHandItem();
+        int mainHandCount = ItemStack.isSameItemSameComponents(workerTool, expected)
+                ? workerTool.getCount()
+                : 0;
+        return mainHandCount + countMatchingStackItems(recruit.createCargoContainer(), expected);
+    }
+
+    private static void replaceExactPlayerStack(
+            GameTestHelper helper,
+            ServerPlayer owner,
+            ItemStack previous,
+            ItemStack replacement
+    ) {
+        Container inventory = owner.getInventory();
+        for (int slot = 0; slot < inventory.getContainerSize(); slot++) {
+            if (ItemStack.isSameItemSameComponents(inventory.getItem(slot), previous)) {
+                inventory.setItem(slot, replacement.copy());
+                inventory.setChanged();
+                return;
+            }
+        }
+        helper.fail("Physical worker tool was not present in player inventory for fixture damage");
+    }
+
+    /**
+     * Exercises one complete breeding order through ordinary hire, profession-assignment,
+     * worksite, registered-storage, navigation, feed withdrawal, and feeding paths. The fixture
+     * never mutates a worker phase, invokes the controller, or moves the recruit after assignment.
+     */
+    private static void blackBoxAnimalFarmerLifecycle(GameTestHelper helper) {
+        SmartBrainTestArea area = prepareSmartBrainTestAreaAt(
+                helper,
+                GameType.CREATIVE,
+                -2,
+                14,
+                -2,
+                8,
+                isolatedCapital(helper, 222));
+        ServerLevel level = helper.getLevel();
+        ServerPlayer owner = area.player();
+        BlockPos hallPos = area.at(0, 1, 0);
+        BlockPos recruitPos = area.at(2, 1, 4);
+        BlockPos firstCowPos = area.at(6, 1, 4);
+        BlockPos secondCowPos = area.at(7, 1, 4);
+        CommandCenterBlockEntity hall = placeCommandCenter(helper, hallPos);
+        hall.claim(owner);
+        KingdomSavedData data = KingdomSavedData.get(level);
+        if (data.activateHall(
+                owner.getUUID(),
+                hall.factionId(),
+                level.dimension().identifier().toString(),
+                hallPos).isEmpty()) {
+            helper.fail("Black-box animal farmer fixture could not activate its Command Center");
+            return;
+        }
+        putContainerItem(hall, new ItemStack(ModItems.CREDIT_CHIP.get(), 32));
+        FactionAlignmentSavedData.get(level).setScore(
+                owner.getUUID(), FactionId.of("republic"), 100);
+        applyCampaignSetupEvent(
+                ProgressionSavedData.get(level),
+                owner,
+                ProgressionEventType.FACTION_PLEDGED,
+                "galacticwars:republic");
+
+        GalacticRecruitEntity recruit = spawnRecruitAt(
+                helper, ModEntityTypes.CLONE_TROOPER.get(), recruitPos);
+        owner.setPos(recruit.getX(), recruit.getY(), recruit.getZ());
+        if (!recruit.handleMenuButton(owner, RecruitCommandMenu.BUTTON_HIRE)
+                || !recruit.handleMenuButton(
+                        owner, RecruitCommandMenu.BUTTON_ASSIGN_ANIMAL_FARMER)) {
+            helper.fail("Black-box animal farmer could not be hired and assigned");
+            return;
+        }
+        if (!configureWorkerLifecycleWorksite(
+                helper,
+                data,
+                owner,
+                recruit,
+                hallPos,
+                List.of("minecraft:cow"))) {
+            return;
+        }
+
+        Animal first = EntityTypes.COW.create(level, EntitySpawnReason.TRIGGERED);
+        Animal second = EntityTypes.COW.create(level, EntitySpawnReason.TRIGGERED);
+        if (first == null || second == null) {
+            helper.fail("Black-box animal farmer could not create its livestock pair");
+            return;
+        }
+        first.setPos(Vec3.atCenterOf(firstCowPos));
+        second.setPos(Vec3.atCenterOf(secondCowPos));
+        first.setNoAi(true);
+        second.setNoAi(true);
+        first.setPersistenceRequired();
+        second.setPersistenceRequired();
+        if (!level.addFreshEntity(first) || !level.addFreshEntity(second)) {
+            helper.fail("Black-box animal farmer could not spawn its livestock pair");
+            return;
+        }
+        putContainerItem(hall, new ItemStack(Items.WHEAT, 2));
+
+        Container recruitCargo = recruit.createCargoContainer();
+        boolean[] withdrewFeed = {false};
+        boolean[] approachedPair = {false};
+        boolean[] complete = {false};
+        int[] startedRecruitTick = {-1};
+        long readinessStartedAt = helper.getTick();
+        helper.onEachTick(() -> {
+            if (complete[0]) {
+                return;
+            }
+            if (startedRecruitTick[0] < 0) {
+                boolean areaTicking = areSmartBrainAreaChunksTicking(
+                        helper, area, -2, 14, -2, 8);
+                boolean recruitIndexed = level.getEntity(recruit.getUUID()) == recruit;
+                boolean livestockIndexed = level.getEntity(first.getUUID()) == first
+                        && level.getEntity(second.getUUID()) == second;
+                if (!areaTicking || !recruitIndexed || !livestockIndexed
+                        || recruit.tickCount == 0) {
+                    if (helper.getTick() - readinessStartedAt
+                            >= SMART_BRAIN_CHUNK_READY_TIMEOUT) {
+                        complete[0] = true;
+                        helper.fail("Black-box animal farmer area never became entity-ticking: "
+                                + "ticking=" + areaTicking + ", recruit=" + recruitIndexed
+                                + ", livestock=" + livestockIndexed
+                                + ", recruitTick=" + recruit.tickCount);
+                    }
+                    return;
+                }
+                startedRecruitTick[0] = recruit.tickCount;
+            }
+
+            int storedWheat = countContainerItem(hall, Items.WHEAT);
+            int carriedWheat = countContainerItem(recruitCargo, Items.WHEAT);
+            int fedAnimals = (first.isInLove() ? 1 : 0) + (second.isInLove() ? 1 : 0);
+            withdrewFeed[0] |= storedWheat == 0 && carriedWheat == 2;
+            approachedPair[0] |= recruit.distanceToSqr(first) <= 4.0D
+                    || recruit.distanceToSqr(second) <= 4.0D;
+            if (!first.isAlive() || !second.isAlive()
+                    || storedWheat + carriedWheat + fedAnimals != 2) {
+                complete[0] = true;
+                helper.fail("Black-box animal farmer violated feed conservation: stored="
+                        + storedWheat + ", carried=" + carriedWheat
+                        + ", fed=" + fedAnimals + ", alive="
+                        + first.isAlive() + "/" + second.isAlive());
+                return;
+            }
+
+            boolean completedOrder = hasCompletedWorkerOrder(
+                    data, owner.getUUID(), WorkOrderType.ANIMAL_FARM);
+            if (completedOrder
+                    && first.isInLove()
+                    && second.isInLove()
+                    && storedWheat == 0
+                    && carriedWheat == 0
+                    && withdrewFeed[0]
+                    && approachedPair[0]
+                    && recruit.getRecruitCommand() == RecruitmentAction.WORK_AT_SITE) {
+                complete[0] = true;
+                recruit.discard();
+                first.discard();
+                second.discard();
+                helper.succeed();
+                return;
+            }
+
+            if (recruit.tickCount - startedRecruitTick[0] >= 500) {
+                complete[0] = true;
+                helper.fail("Black-box animal farmer lifecycle timed out: status="
+                        + recruit.getWorkerStatus()
+                        + ", position=" + recruit.position()
+                        + ", cows=" + first.position() + "/" + second.position()
+                        + ", stored=" + storedWheat
+                        + ", carried=" + carriedWheat
+                        + ", love=" + first.isInLove() + "/" + second.isInLove()
+                        + ", withdrew=" + withdrewFeed[0]
+                        + ", approached=" + approachedPair[0]
+                        + ", completedOrder=" + completedOrder);
+            }
+        });
+    }
+
+    /**
+     * Exercises one complete fishing order through ordinary hire, profession-assignment,
+     * worksite, registered-storage, navigation, timed loot-table fishing, and deposit paths. The
+     * fixture never mutates a worker phase, invokes the controller, or moves the recruit after
+     * assignment.
+     */
+    private static void blackBoxFisherLifecycle(GameTestHelper helper) {
+        SmartBrainTestArea area = prepareSmartBrainTestAreaAt(
+                helper,
+                GameType.CREATIVE,
+                -2,
+                14,
+                -2,
+                8,
+                isolatedCapital(helper, 224));
+        ServerLevel level = helper.getLevel();
+        ServerPlayer owner = area.player();
+        BlockPos hallPos = area.at(0, 1, 0);
+        BlockPos recruitPos = area.at(2, 1, 4);
+        BlockPos waterPos = area.at(7, 1, 4);
+        CommandCenterBlockEntity hall = placeCommandCenter(helper, hallPos);
+        hall.claim(owner);
+        KingdomSavedData data = KingdomSavedData.get(level);
+        if (data.activateHall(
+                owner.getUUID(),
+                hall.factionId(),
+                level.dimension().identifier().toString(),
+                hallPos).isEmpty()) {
+            helper.fail("Black-box fisher fixture could not activate its Command Center");
+            return;
+        }
+        putContainerItem(hall, new ItemStack(ModItems.CREDIT_CHIP.get(), 32));
+        FactionAlignmentSavedData.get(level).setScore(
+                owner.getUUID(), FactionId.of("republic"), 100);
+        applyCampaignSetupEvent(
+                ProgressionSavedData.get(level),
+                owner,
+                ProgressionEventType.FACTION_PLEDGED,
+                "galacticwars:republic");
+
+        GalacticRecruitEntity recruit = spawnRecruitAt(
+                helper, ModEntityTypes.CLONE_TROOPER.get(), recruitPos);
+        owner.setPos(recruit.getX(), recruit.getY(), recruit.getZ());
+        if (!recruit.handleMenuButton(owner, RecruitCommandMenu.BUTTON_HIRE)
+                || !recruit.handleMenuButton(owner, RecruitCommandMenu.BUTTON_ASSIGN_FISHERMAN)) {
+            helper.fail("Black-box fisher could not be hired and assigned");
+            return;
+        }
+        if (!configureWorkerLifecycleWorksite(
+                helper, data, owner, recruit, hallPos, List.of())) {
+            return;
+        }
+        if (!recruit.getWorkerMainHandItem().is(Items.FISHING_ROD)) {
+            helper.fail("Black-box fisher assignment did not equip a fishing rod");
+            return;
+        }
+
+        for (int x = -1; x <= 1; x++) {
+            for (int z = -1; z <= 1; z++) {
+                if (x != 0 || z != 0) {
+                    level.setBlock(
+                            waterPos.offset(x, 0, z),
+                            Blocks.STONE.defaultBlockState(),
+                            3);
+                }
+            }
+        }
+        level.setBlock(waterPos, Blocks.WATER.defaultBlockState(), 3);
+
+        Container recruitCargo = recruit.createCargoContainer();
+        List<ItemStack> storageBaseline = copyContainerStacks(hall);
+        int storedCountBefore = countContainerItems(hall);
+        int rodDamageBefore = recruit.getWorkerMainHandItem().getDamageValue();
+        List<ItemStack> caughtStacks = new ArrayList<>();
+        boolean[] approachedWater = {false};
+        boolean[] castObserved = {false};
+        boolean[] complete = {false};
+        int[] startedRecruitTick = {-1};
+        long readinessStartedAt = helper.getTick();
+        helper.onEachTick(() -> {
+            if (complete[0]) {
+                return;
+            }
+            if (startedRecruitTick[0] < 0) {
+                boolean areaTicking = areSmartBrainAreaChunksTicking(
+                        helper, area, -2, 14, -2, 8);
+                boolean recruitIndexed = level.getEntity(recruit.getUUID()) == recruit;
+                if (!areaTicking || !recruitIndexed || recruit.tickCount == 0) {
+                    if (helper.getTick() - readinessStartedAt
+                            >= SMART_BRAIN_CHUNK_READY_TIMEOUT) {
+                        complete[0] = true;
+                        helper.fail("Black-box fisher area never became entity-ticking: ticking="
+                                + areaTicking + ", recruit=" + recruitIndexed
+                                + ", recruitTick=" + recruit.tickCount);
+                    }
+                    return;
+                }
+                startedRecruitTick[0] = recruit.tickCount;
+            }
+
+            WorkerStatus status = recruit.getWorkerStatus();
+            approachedWater[0] |= recruit.distanceToSqr(Vec3.atCenterOf(waterPos)) <= 4.0D;
+            castObserved[0] |= status.phase() == WorkerPhase.INTERACT
+                    && status.reasonCode().equals("fishing_wait");
+            if (caughtStacks.isEmpty() && !recruitCargo.isEmpty()) {
+                caughtStacks.addAll(copyContainerStacks(recruitCargo));
+            }
+
+            int caughtCount = caughtStacks.stream().mapToInt(ItemStack::getCount).sum();
+            int physicalCatchDelta = countContainerItems(hall)
+                    + countContainerItems(recruitCargo)
+                    - storedCountBefore;
+            if (caughtStacks.isEmpty()) {
+                if (physicalCatchDelta != 0) {
+                    complete[0] = true;
+                    helper.fail("Black-box fisher deposited output without observable cargo: delta="
+                            + physicalCatchDelta + ", stored=" + copyContainerStacks(hall));
+                    return;
+                }
+            } else {
+                if (physicalCatchDelta != caughtCount) {
+                    complete[0] = true;
+                    helper.fail("Black-box fisher violated catch-count conservation: caught="
+                            + caughtCount + ", physicalDelta=" + physicalCatchDelta
+                            + ", caughtStacks=" + caughtStacks
+                            + ", stored=" + copyContainerStacks(hall)
+                            + ", cargo=" + copyContainerStacks(recruitCargo));
+                    return;
+                }
+                for (int index = 0; index < caughtStacks.size(); index++) {
+                    ItemStack caught = caughtStacks.get(index);
+                    boolean alreadyChecked = false;
+                    for (int prior = 0; prior < index; prior++) {
+                        if (ItemStack.isSameItemSameComponents(caughtStacks.get(prior), caught)) {
+                            alreadyChecked = true;
+                            break;
+                        }
+                    }
+                    if (alreadyChecked) {
+                        continue;
+                    }
+                    int expectedCount = countMatchingStack(caughtStacks, caught);
+                    int currentCount = countMatchingStack(hall, caught)
+                            + countMatchingStack(recruitCargo, caught)
+                            - countMatchingStack(storageBaseline, caught);
+                    if (currentCount != expectedCount) {
+                        complete[0] = true;
+                        helper.fail("Black-box fisher changed catch components or quantity: expected="
+                                + expectedCount + " of " + caught + ", current=" + currentCount
+                                + ", stored=" + copyContainerStacks(hall)
+                                + ", cargo=" + copyContainerStacks(recruitCargo));
+                        return;
+                    }
+                }
+            }
+
+            boolean completedOrder = hasCompletedWorkerOrder(
+                    data, owner.getUUID(), WorkOrderType.FISH);
+            int rodDamage = recruit.getWorkerMainHandItem().getDamageValue();
+            if (completedOrder
+                    && !caughtStacks.isEmpty()
+                    && recruitCargo.isEmpty()
+                    && physicalCatchDelta == caughtCount
+                    && approachedWater[0]
+                    && castObserved[0]
+                    && rodDamage == rodDamageBefore + 1
+                    && recruit.getRecruitCommand() == RecruitmentAction.WORK_AT_SITE) {
+                complete[0] = true;
+                recruit.discard();
+                helper.succeed();
+                return;
+            }
+
+            if (recruit.tickCount - startedRecruitTick[0] >= 650) {
+                complete[0] = true;
+                helper.fail("Black-box fisher lifecycle timed out: status=" + status
+                        + ", position=" + recruit.position()
+                        + ", water=" + level.getBlockState(waterPos)
+                        + ", caught=" + caughtStacks
+                        + ", stored=" + copyContainerStacks(hall)
+                        + ", cargo=" + copyContainerStacks(recruitCargo)
+                        + ", approached=" + approachedWater[0]
+                        + ", cast=" + castObserved[0]
+                        + ", completedOrder=" + completedOrder
+                        + ", rodDamage=" + rodDamageBefore + "->" + rodDamage);
+            }
+        });
+    }
+
+    /**
+     * Exercises one physical market transaction through ordinary Survival hire, profession
+     * assignment, worksite, registered storage, navigation, server-authored menu, and menu-action
+     * paths. The fixture never mutates a worker phase, invokes the controller, or moves the
+     * recruit after assignment. Headless GameTest cannot send NeoForge's extended-screen packet,
+     * so it constructs the same provider-owned server menu after proving the live interaction
+     * distance and market-validity gates.
+     */
+    private static void blackBoxMerchantLifecycle(GameTestHelper helper) {
+        SmartBrainTestArea area = prepareSmartBrainTestAreaAt(
+                helper,
+                GameType.SURVIVAL,
+                -2,
+                14,
+                -2,
+                8,
+                isolatedCapital(helper, 226));
+        ServerLevel level = helper.getLevel();
+        ServerPlayer owner = area.player();
+        BlockPos hallPos = area.at(0, 1, 0);
+        BlockPos recruitPos = area.at(12, 1, 4);
+        CommandCenterBlockEntity hall = placeCommandCenter(helper, hallPos);
+        hall.claim(owner);
+        KingdomSavedData data = KingdomSavedData.get(level);
+        if (data.activateHall(
+                owner.getUUID(),
+                hall.factionId(),
+                level.dimension().identifier().toString(),
+                hallPos).isEmpty()) {
+            helper.fail("Black-box merchant fixture could not activate its Command Center");
+            return;
+        }
+        putContainerItem(hall, new ItemStack(ModItems.CREDIT_CHIP.get(), 32));
+        owner.getInventory().add(new ItemStack(ModItems.CREDIT_CHIP.get(), 128));
+        FactionAlignmentSavedData.get(level).setScore(
+                owner.getUUID(), FactionId.of("republic"), 100);
+        applyCampaignSetupEvent(
+                ProgressionSavedData.get(level),
+                owner,
+                ProgressionEventType.FACTION_PLEDGED,
+                "galacticwars:republic");
+
+        GalacticRecruitEntity recruit = spawnRecruitAt(
+                helper, ModEntityTypes.CLONE_TROOPER.get(), recruitPos);
+        owner.setPos(recruit.getX(), recruit.getY(), recruit.getZ());
+        if (!recruit.handleMenuButton(owner, RecruitCommandMenu.BUTTON_HIRE)
+                || !recruit.handleMenuButton(owner, RecruitCommandMenu.BUTTON_ASSIGN_MERCHANT)) {
+            helper.fail("Black-box merchant could not be hired and assigned");
+            return;
+        }
+        if (!configureWorkerLifecycleWorksite(
+                helper, data, owner, recruit, hallPos, List.of())) {
+            return;
+        }
+        WorksiteRecord worksite = data.assignedWorksite(
+                owner.getUUID(), recruit.getUUID()).orElseThrow();
+        Vec3 marketCenter = new Vec3(
+                worksite.x() + 0.5D, worksite.y() + 0.5D, worksite.z() + 0.5D);
+        double initialDistance = recruit.distanceToSqr(marketCenter);
+        if (initialDistance <= 16.0D) {
+            helper.fail("Black-box merchant did not begin far enough away to prove navigation: "
+                    + initialDistance);
+            return;
+        }
+        int expectedTradePrice = FactionBalanceService.applyPercentCeil(
+                FactionBalanceService.tradeCreditPrice(
+                        "galacticwars:republic",
+                        LaunchContentCatalog.trades()
+                                .get("republic_quartermaster").price()),
+                90);
+
+        putContainerItem(hall, new ItemStack(ModItems.ENERGY_CELL.get(), 8));
+        boolean[] navigationObserved = {false};
+        boolean[] complete = {false};
+        int[] startedRecruitTick = {-1};
+        long readinessStartedAt = helper.getTick();
+        helper.onEachTick(() -> {
+            if (complete[0]) {
+                return;
+            }
+            if (startedRecruitTick[0] < 0) {
+                boolean areaTicking = areSmartBrainAreaChunksTicking(
+                        helper, area, -2, 14, -2, 8);
+                boolean recruitIndexed = level.getEntity(recruit.getUUID()) == recruit;
+                if (!areaTicking || !recruitIndexed || recruit.tickCount == 0) {
+                    if (helper.getTick() - readinessStartedAt
+                            >= SMART_BRAIN_CHUNK_READY_TIMEOUT) {
+                        complete[0] = true;
+                        helper.fail("Black-box merchant area never became entity-ticking: ticking="
+                                + areaTicking + ", recruit=" + recruitIndexed
+                                + ", recruitTick=" + recruit.tickCount);
+                    }
+                    return;
+                }
+                startedRecruitTick[0] = recruit.tickCount;
+            }
+
+            WorkerStatus status = recruit.getWorkerStatus();
+            navigationObserved[0] |= status.phase() == WorkerPhase.NAVIGATE_SOURCE
+                    && status.reasonCode().equals("open_market");
+            if (recruit.isMarketAvailable()) {
+                WorkOrder order = data.assignedWorkOrder(
+                        owner.getUUID(), recruit.getUUID()).orElse(null);
+                owner.setPos(recruit.getX(), recruit.getY(), recruit.getZ() + 1.0D);
+                level.getChunkSource().move(owner);
+                MerchantTradeMenu tradeMenu = (MerchantTradeMenu)
+                        new MerchantTradeMenuProvider(recruit)
+                                .createMenu(73, owner.getInventory(), owner);
+
+                int offerIndex = tradeMenu.tradeIds().indexOf("republic_quartermaster");
+                var offer = offerIndex < 0 ? null : tradeMenu.offers().get(offerIndex);
+                int creditsBefore = CreditTransactionService.playerBalance(owner);
+                int stockBefore = countContainerItem(hall, ModItems.ENERGY_CELL.get());
+                int playerStockBefore = countPlayerItem(owner, ModItems.ENERGY_CELL.get());
+                int tradesBefore = ProgressionSavedData.get(level).state(owner.getUUID())
+                        .total(ProgressionEventType.TRADE_COMPLETED);
+                UUID requestId = UUID.randomUUID();
+                boolean traded = offerIndex >= 0
+                        && tradeMenu.handleReplayAction(owner, requestId, offerIndex);
+                boolean replayRejected = offerIndex >= 0
+                        && !tradeMenu.handleReplayAction(owner, requestId, offerIndex);
+                int creditsAfter = CreditTransactionService.playerBalance(owner);
+                int stockAfter = countContainerItem(hall, ModItems.ENERGY_CELL.get());
+                int playerStockAfter = countPlayerItem(owner, ModItems.ENERGY_CELL.get());
+                int tradesAfter = ProgressionSavedData.get(level).state(owner.getUUID())
+                        .total(ProgressionEventType.TRADE_COMPLETED);
+                WorkOrder persistedOrder = data.assignedWorkOrder(
+                        owner.getUUID(), recruit.getUUID()).orElse(null);
+                boolean truthfulOffer = offer != null
+                        && offer.tradeId().equals("republic_quartermaster")
+                        && offer.itemId().equals("galacticwars:energy_cell")
+                        && offer.itemCount() == 8
+                        && offer.creditPrice() == expectedTradePrice
+                        && offer.disposition().equals("friendly")
+                        && offer.eligible();
+                boolean validOrder = order != null
+                        && persistedOrder != null
+                        && persistedOrder.id().equals(order.id())
+                        && persistedOrder.type() == WorkOrderType.MERCHANT
+                        && !persistedOrder.state().terminal()
+                        && persistedOrder.assignedRecruitId()
+                                .filter(recruit.getUUID()::equals).isPresent();
+                boolean conserved = offer != null
+                        && stockBefore == 8
+                        && stockAfter == 0
+                        && playerStockBefore == 0
+                        && playerStockAfter == 8
+                        && creditsAfter == creditsBefore - expectedTradePrice;
+                if (!navigationObserved[0]
+                        || !truthfulOffer
+                        || !traded
+                        || !replayRejected
+                        || !conserved
+                        || tradesAfter != tradesBefore + 1
+                        || !validOrder
+                        || !tradeMenu.stillValid(owner)
+                        || recruit.getRecruitCommand() != RecruitmentAction.WORK_AT_SITE) {
+                    complete[0] = true;
+                    helper.fail("Black-box merchant did not complete one conserved live-menu trade: "
+                            + "status=" + status
+                            + ", initialDistance=" + initialDistance
+                            + ", navigation=" + navigationObserved[0]
+                            + ", offer=" + offer
+                            + ", expectedPrice=" + expectedTradePrice
+                            + ", traded=" + traded
+                            + ", replay=" + replayRejected
+                            + ", credits=" + creditsBefore + "->" + creditsAfter
+                            + ", stock=" + stockBefore + "->" + stockAfter
+                            + ", playerStock=" + playerStockBefore + "->" + playerStockAfter
+                            + ", trades=" + tradesBefore + "->" + tradesAfter
+                            + ", order=" + persistedOrder
+                            + ", menuValid=" + tradeMenu.stillValid(owner));
+                    return;
+                }
+
+                complete[0] = true;
+                recruit.discard();
+                helper.succeed();
+                return;
+            }
+
+            if (recruit.tickCount - startedRecruitTick[0] >= 500) {
+                complete[0] = true;
+                helper.fail("Black-box merchant lifecycle timed out: status=" + status
+                        + ", position=" + recruit.position()
+                        + ", worksite=" + worksite
+                        + ", navigation=" + navigationObserved[0]
+                        + ", market=" + recruit.isMarketAvailable()
+                        + ", stock=" + countContainerItem(hall, ModItems.ENERGY_CELL.get()));
+            }
+        });
+    }
+
+    /**
+     * Exercises one shipped blueprint through ordinary Survival hire, recruit-menu projector
+     * preparation, in-world projection, project-specific assignment, registered storage,
+     * navigation, physical placement, persistence, and completion. The fixture never mutates a
+     * worker phase, invokes the controller, or moves the recruit after project assignment.
+     */
+    private static void blackBoxBuilderLifecycle(GameTestHelper helper) {
+        SmartBrainTestArea area = prepareSmartBrainTestAreaAt(
+                helper,
+                GameType.SURVIVAL,
+                -2,
+                18,
+                -2,
+                10,
+                isolatedCapital(helper, 228));
+        ServerLevel level = helper.getLevel();
+        ServerPlayer owner = area.player();
+        BlockPos hallPos = area.at(0, 1, 0);
+        BlockPos origin = area.at(5, 1, 1);
+        BlockPos recruitPos = area.at(14, 1, 6);
+        CommandCenterBlockEntity hall = placeCommandCenter(helper, hallPos);
+        hall.claim(owner);
+        KingdomSavedData data = KingdomSavedData.get(level);
+        KingdomRecord kingdom = data.activateHall(
+                owner.getUUID(),
+                hall.factionId(),
+                level.dimension().identifier().toString(),
+                hallPos).orElse(null);
+        if (kingdom == null) {
+            helper.fail("Black-box builder fixture could not activate its Command Center");
+            return;
+        }
+        owner.getInventory().add(new ItemStack(ModItems.CREDIT_CHIP.get(), 128));
+        FactionAlignmentSavedData.get(level).setScore(
+                owner.getUUID(), FactionId.of("republic"), 100);
+        applyCampaignSetupEvent(
+                ProgressionSavedData.get(level),
+                owner,
+                ProgressionEventType.FACTION_PLEDGED,
+                "galacticwars:republic");
+
+        GalacticRecruitEntity recruit = spawnRecruitAt(
+                helper, ModEntityTypes.CLONE_TROOPER.get(), recruitPos);
+        owner.setPos(recruit.getX(), recruit.getY(), recruit.getZ());
+        if (!recruit.handleMenuButton(owner, RecruitCommandMenu.BUTTON_HIRE)) {
+            helper.fail("Black-box builder could not be hired");
+            return;
+        }
+        owner.setItemInHand(
+                InteractionHand.MAIN_HAND,
+                new ItemStack(ModItems.BLUEPRINT_PROJECTOR.get()));
+        ConstructionPlan selectedPlan = null;
+        int blueprintCount = GameplayDataManager.snapshot().blueprints().size();
+        for (int attempt = 0; attempt < blueprintCount; attempt++) {
+            if (!recruit.handleMenuButton(
+                    owner, RecruitCommandMenu.BUTTON_BUILD_STARTER_KEEP)) {
+                helper.fail("Black-box builder could not prepare its physical projector");
+                return;
+            }
+            selectedPlan = owner.getItemInHand(InteractionHand.MAIN_HAND)
+                    .get(ModDataComponents.CONSTRUCTION_PLAN.get());
+            if (selectedPlan != null && selectedPlan.blueprintId().equals("galacticwars:mine")) {
+                break;
+            }
+            if (!recruit.handleMenuButton(owner, RecruitCommandMenu.BUTTON_NEXT_BLUEPRINT)) {
+                helper.fail("Black-box builder could not cycle to the shipped mine blueprint");
+                return;
+            }
+        }
+        if (selectedPlan == null || !selectedPlan.blueprintId().equals("galacticwars:mine")) {
+            helper.fail("Black-box builder did not select the shipped mine blueprint: "
+                    + selectedPlan);
+            return;
+        }
+        KingdomBaseBlueprint blueprint = GameplayDataManager.snapshot()
+                .blueprint(selectedPlan.blueprintId()).orElseThrow();
+        if (blueprint.placements().size() != 9
+                || blueprint.placements().stream()
+                        .anyMatch(placement -> !placement.itemId().equals("galacticwars:duracrete"))) {
+            helper.fail("Black-box builder fixture requires the shipped nine-Duracrete mine");
+            return;
+        }
+        for (int placementIndex = 0;
+                placementIndex < blueprint.placements().size();
+                placementIndex++) {
+            BaseBlockPlacement placement = blueprint.rotatedPlacement(placementIndex, 0);
+            BlockPos placementPos = origin.offset(
+                    placement.x(), placement.y(), placement.z());
+            level.getChunkAt(placementPos);
+            level.setBlock(placementPos, Blocks.AIR.defaultBlockState(), 3);
+        }
+
+        int initialMaterials = 9;
+        putContainerItem(hall, new ItemStack(ModItems.DURACRETE.get(), initialMaterials));
+        int buildingEventsBefore = ProgressionSavedData.get(level).state(owner.getUUID())
+                .total(ProgressionEventType.BUILDING_COMPLETED);
+        Vec3 initialRecruitPosition = recruit.position();
+        double initialStorageDistance = recruit.distanceToSqr(
+                hallPos.getX() + 0.5D, hallPos.getY(), hallPos.getZ() + 0.5D);
+        double initialBuildDistance = recruit.distanceToSqr(
+                origin.getX() + 0.5D, origin.getY(), origin.getZ() + 0.5D);
+        if (initialStorageDistance <= 16.0D || initialBuildDistance <= 16.0D) {
+            helper.fail("Black-box builder did not begin far enough away to prove navigation: "
+                    + initialStorageDistance + "/" + initialBuildDistance);
+            return;
+        }
+        ItemStack projector = owner.getItemInHand(InteractionHand.MAIN_HAND);
+        BuildProject[] assignedProject = {null};
+        boolean[] withdrawNavigationObserved = {false};
+        boolean[] buildNavigationObserved = {false};
+        boolean[] movedPhysically = {false};
+        boolean[] complete = {false};
+        int[] startedRecruitTick = {-1};
+        int[] lastPersistedPlacements = {0};
+        UUID[] workOrderId = {null};
+        long readinessStartedAt = helper.getTick();
+        helper.onEachTick(() -> {
+            if (complete[0]) {
+                return;
+            }
+            if (startedRecruitTick[0] < 0) {
+                boolean areaTicking = areSmartBrainAreaChunksTicking(
+                        helper, area, -2, 18, -2, 10);
+                boolean recruitIndexed = level.getEntity(recruit.getUUID()) == recruit;
+                if (!areaTicking || !recruitIndexed || recruit.tickCount == 0) {
+                    if (helper.getTick() - readinessStartedAt
+                            >= SMART_BRAIN_CHUNK_READY_TIMEOUT) {
+                        complete[0] = true;
+                        helper.fail("Black-box builder area never became entity-ticking: ticking="
+                                + areaTicking + ", recruit=" + recruitIndexed
+                                + ", recruitTick=" + recruit.tickCount);
+                    }
+                    return;
+                }
+                startedRecruitTick[0] = recruit.tickCount;
+            }
+            if (assignedProject[0] == null) {
+                owner.setPos(origin.getX() + 0.5D, origin.getY(), origin.getZ() + 0.5D);
+                level.getChunkSource().move(owner);
+                InteractionResult projection = projector.getItem().useOn(new UseOnContext(
+                        owner,
+                        InteractionHand.MAIN_HAND,
+                        new BlockHitResult(
+                                Vec3.atCenterOf(origin.below()),
+                                Direction.UP,
+                                origin.below(),
+                                false)));
+                BuildProject project = data.kingdomForOwner(owner.getUUID()).orElseThrow().settlement()
+                        .buildProjects().stream()
+                        .filter(candidate -> candidate.blueprintId().equals(blueprint.id()))
+                        .filter(candidate -> candidate.originX() == origin.getX()
+                                && candidate.originY() == origin.getY()
+                                && candidate.originZ() == origin.getZ())
+                        .findFirst().orElse(null);
+                boolean projectWorksiteAssigned = project != null
+                        && data.assignedWorksite(owner.getUUID(), recruit.getUUID())
+                                .flatMap(WorksiteRecord::sourceProjectId)
+                                .filter(project.id()::equals)
+                                .isPresent();
+                if (projection != InteractionResult.SUCCESS
+                        || projector.get(ModDataComponents.CONSTRUCTION_PLAN.get()) != null
+                        || project == null
+                        || !projectWorksiteAssigned
+                        || recruit.getWorkerProfession().filter(WorkerProfession.BUILDER::equals).isEmpty()
+                        || recruit.getRecruitCommand() != RecruitmentAction.WORK_AT_SITE) {
+                    complete[0] = true;
+                    helper.fail("Black-box builder projection did not create its authoritative assignment: "
+                            + "projection=" + projection
+                            + ", plan=" + projector.get(ModDataComponents.CONSTRUCTION_PLAN.get())
+                            + ", project=" + project
+                            + ", worksite=" + projectWorksiteAssigned
+                            + ", profession=" + recruit.getWorkerProfession()
+                            + ", command=" + recruit.getRecruitCommand()
+                            + ", indexed=" + (level.getEntity(recruit.getUUID()) == recruit));
+                    return;
+                }
+                assignedProject[0] = project;
+                return;
+            }
+
+            WorkerStatus status = recruit.getWorkerStatus();
+            withdrawNavigationObserved[0] |= status.phase() == WorkerPhase.NAVIGATE_SOURCE
+                    && status.reasonCode().equals("withdraw_build_material");
+            buildNavigationObserved[0] |= status.phase() == WorkerPhase.NAVIGATE_SOURCE
+                    && status.reasonCode().equals("build_place");
+            movedPhysically[0] |= recruit.position().distanceToSqr(initialRecruitPosition) > 4.0D;
+            status.workOrderId().ifPresent(currentOrderId -> {
+                if (workOrderId[0] == null) {
+                    workOrderId[0] = currentOrderId;
+                } else if (!workOrderId[0].equals(currentOrderId)) {
+                    complete[0] = true;
+                    helper.fail("Black-box builder replaced its live persisted work order: "
+                            + workOrderId[0] + "->" + currentOrderId);
+                }
+            });
+            if (complete[0]) {
+                return;
+            }
+
+            BuildProject current = data.kingdomForOwner(owner.getUUID()).orElseThrow().settlement()
+                    .buildProjects().stream()
+                    .filter(candidate -> candidate.id().equals(assignedProject[0].id()))
+                    .findFirst().orElseThrow();
+            int placedBlocks = 0;
+            for (int placementIndex = 0;
+                    placementIndex < blueprint.placements().size();
+                    placementIndex++) {
+                BaseBlockPlacement placement = blueprint.rotatedPlacement(placementIndex, 0);
+                BlockPos placementPos = origin.offset(
+                        placement.x(), placement.y(), placement.z());
+                if (level.getBlockState(placementPos).is(ModBlocks.DURACRETE.get())) {
+                    placedBlocks++;
+                }
+            }
+            int persistedPlacements = current.completedPlacements().size();
+            int storedMaterials = countContainerItem(hall, ModItems.DURACRETE.get());
+            int carriedMaterials = workerInventoryCount(recruit);
+            int conservedMaterials = storedMaterials + carriedMaterials + placedBlocks;
+            if (persistedPlacements < lastPersistedPlacements[0]
+                    || persistedPlacements != placedBlocks
+                    || conservedMaterials != initialMaterials) {
+                complete[0] = true;
+                helper.fail("Black-box builder violated monotonic physical conservation: stored="
+                        + storedMaterials + ", carried=" + carriedMaterials
+                        + ", placed=" + placedBlocks + ", persisted=" + persistedPlacements
+                        + ", previous=" + lastPersistedPlacements[0]
+                        + ", expected=" + initialMaterials + ", status=" + status);
+                return;
+            }
+            lastPersistedPlacements[0] = persistedPlacements;
+
+            if (status.phase() == WorkerPhase.BLOCKED
+                    && status.reasonCode().equals("build_material_missing")) {
+                complete[0] = true;
+                helper.fail("Black-box builder exhausted physical material before completion: stored="
+                        + storedMaterials + ", carried=" + carriedMaterials
+                        + ", placed=" + placedBlocks + ", persisted=" + persistedPlacements
+                        + ", order=" + workOrderId[0]);
+                return;
+            }
+
+            WorkOrder completedOrder = workOrderId[0] == null
+                    ? null
+                    : data.workOrder(owner.getUUID(), workOrderId[0]).orElse(null);
+            int buildingEventsAfter = ProgressionSavedData.get(level).state(owner.getUUID())
+                    .total(ProgressionEventType.BUILDING_COMPLETED);
+            if (current.state()
+                            == galacticwars.clonewars.kingdom.BuildProjectState.COMPLETED
+                    && placedBlocks == 9
+                    && storedMaterials == 0
+                    && carriedMaterials == 0
+                    && completedOrder != null
+                    && completedOrder.type() == WorkOrderType.BUILD
+                    && completedOrder.state() == WorkOrderState.COMPLETED
+                    && buildingEventsAfter == buildingEventsBefore + 1
+                    && withdrawNavigationObserved[0]
+                    && buildNavigationObserved[0]
+                    && movedPhysically[0]
+                    && recruit.getRecruitCommand() == RecruitmentAction.FOLLOW_OWNER
+                    && recruit.getBaseTarget() == null
+                    && recruit.getWorkTarget() == null) {
+                complete[0] = true;
+                recruit.discard();
+                helper.succeed();
+                return;
+            }
+
+            if (recruit.tickCount - startedRecruitTick[0] >= 1_300) {
+                complete[0] = true;
+                helper.fail("Black-box builder lifecycle timed out: status=" + status
+                        + ", project=" + current
+                        + ", stored=" + storedMaterials
+                        + ", carried=" + carriedMaterials
+                        + ", placed=" + placedBlocks
+                        + ", order=" + completedOrder
+                        + ", events=" + buildingEventsBefore + "->" + buildingEventsAfter
+                        + ", navigation=" + withdrawNavigationObserved[0] + "/"
+                        + buildNavigationObserved[0]
+                        + ", moved=" + movedPhysically[0]);
+            }
+        });
+    }
+
+    /**
+     * Exercises one manual delivery through ordinary Survival hire, marker-selected worksite
+     * and storage actions, the replay-safe worksite menu, SmartBrain navigation, physical cargo,
+     * persisted order completion, and progression. The fixture never mutates a worker phase,
+     * invokes the controller, or moves the recruit after assignment.
+     */
+    private static void blackBoxCourierLifecycle(GameTestHelper helper) {
+        SmartBrainTestArea area = prepareSmartBrainTestAreaAt(
+                helper,
+                GameType.SURVIVAL,
+                -2,
+                18,
+                -2,
+                10,
+                isolatedCapital(helper, 229));
+        ServerLevel level = helper.getLevel();
+        ServerPlayer owner = area.player();
+        BlockPos hallPos = area.at(0, 1, 0);
+        BlockPos destination = area.at(8, 1, 2);
+        BlockPos recruitPos = area.at(14, 1, 6);
+        CommandCenterBlockEntity hall = placeCommandCenter(helper, hallPos);
+        hall.claim(owner);
+        KingdomSavedData data = KingdomSavedData.get(level);
+        if (data.activateHall(
+                owner.getUUID(),
+                hall.factionId(),
+                level.dimension().identifier().toString(),
+                hallPos).isEmpty()) {
+            helper.fail("Black-box courier fixture could not activate its Command Center");
+            return;
+        }
+        owner.getInventory().add(new ItemStack(ModItems.CREDIT_CHIP.get(), 128));
+        FactionAlignmentSavedData.get(level).setScore(
+                owner.getUUID(), FactionId.of("republic"), 100);
+        applyCampaignSetupEvent(
+                ProgressionSavedData.get(level),
+                owner,
+                ProgressionEventType.FACTION_PLEDGED,
+                "galacticwars:republic");
+
+        level.setBlock(destination, Blocks.CHEST.defaultBlockState(), 3);
+        if (!(level.getBlockEntity(destination) instanceof Container destinationStorage)) {
+            helper.fail("Black-box courier fixture could not place its destination chest");
+            return;
+        }
+        GalacticRecruitEntity recruit = spawnRecruitAt(
+                helper, ModEntityTypes.CLONE_TROOPER.get(), recruitPos);
+        owner.setPos(recruit.getX(), recruit.getY(), recruit.getZ());
+        if (!recruit.handleMenuButton(owner, RecruitCommandMenu.BUTTON_HIRE)
+                || !recruit.handleMenuButton(owner, RecruitCommandMenu.BUTTON_ASSIGN_COURIER)) {
+            helper.fail("Black-box courier could not be hired and assigned");
+            return;
+        }
+        ItemStack marker = new ItemStack(ModItems.COMMAND_MARKER.get());
+        owner.setItemInHand(InteractionHand.MAIN_HAND, marker);
+
+        int initialMaterials = 3;
+        if (initialMaterials > 0) {
+            putContainerItem(hall, new ItemStack(ModItems.DURACRETE.get(), initialMaterials));
+        }
+        int deliveryEventsBefore = ProgressionSavedData.get(level).state(owner.getUUID())
+                .total(ProgressionEventType.DELIVERY_COMPLETED);
+        Container recruitCargo = recruit.createCargoContainer();
+        Vec3 initialRecruitPosition = recruit.position();
+        boolean[] configured = {false};
+        boolean[] sourceNavigationObserved = {false};
+        boolean[] destinationNavigationObserved = {false};
+        boolean[] sourceApproached = {false};
+        boolean[] destinationApproached = {false};
+        boolean[] cargoObserved = {false};
+        boolean[] movedPhysically = {false};
+        boolean[] complete = {false};
+        int[] startedRecruitTick = {-1};
+        UUID[] workOrderId = {null};
+        long readinessStartedAt = helper.getTick();
+        helper.onEachTick(() -> {
+            if (complete[0]) {
+                return;
+            }
+            if (!configured[0]) {
+                boolean areaTicking = areSmartBrainAreaChunksTicking(
+                        helper, area, -2, 18, -2, 10);
+                boolean recruitIndexed = level.getEntity(recruit.getUUID()) == recruit;
+                if (!areaTicking || !recruitIndexed || recruit.tickCount == 0) {
+                    if (helper.getTick() - readinessStartedAt
+                            >= SMART_BRAIN_CHUNK_READY_TIMEOUT) {
+                        complete[0] = true;
+                        helper.fail("Black-box courier area never became entity-ticking: ticking="
+                                + areaTicking + ", recruit=" + recruitIndexed
+                                + ", recruitTick=" + recruit.tickCount);
+                    }
+                    return;
+                }
+
+                InteractionResult worksiteSelection = marker.getItem().useOn(new UseOnContext(
+                        owner,
+                        InteractionHand.MAIN_HAND,
+                        new BlockHitResult(
+                                Vec3.atCenterOf(destination),
+                                Direction.UP,
+                                destination,
+                                false)));
+                boolean worksiteAccepted = recruit.handleMenuButton(
+                        owner, RecruitCommandMenu.BUTTON_SET_WORKSITE);
+                InteractionResult storageSelection = marker.getItem().useOn(new UseOnContext(
+                        owner,
+                        InteractionHand.MAIN_HAND,
+                        new BlockHitResult(
+                                Vec3.atCenterOf(hallPos),
+                                Direction.UP,
+                                hallPos,
+                                false)));
+                boolean storageAccepted = recruit.handleMenuButton(
+                        owner, RecruitCommandMenu.BUTTON_SET_STORAGE);
+                owner.setPos(recruit.getX(), recruit.getY(), recruit.getZ());
+                level.getChunkSource().move(owner);
+                WorksiteConfigurationMenu menu = (WorksiteConfigurationMenu)
+                        WorksiteConfigurationMenuProvider.prepare(owner, recruit)
+                                .orElseThrow(() -> new IllegalStateException(
+                                        "Black-box courier did not expose its worksite menu"))
+                                .createMenu(51, owner.getInventory(), owner);
+                CourierDispatchMode initialDispatch = menu.snapshot().dispatchMode();
+                boolean hybridAccepted = menu.handleReplayAction(
+                        owner,
+                        new WorksiteActionPayload(
+                                UUID.randomUUID(),
+                                menu.containerId,
+                                WorksiteConfigurationAction.CYCLE_DISPATCH_MODE.id(),
+                                menu.snapshot().configurationRevision(),
+                                -1));
+                CourierDispatchMode intermediateDispatch = menu.snapshot().dispatchMode();
+                boolean manualAccepted = menu.handleReplayAction(
+                        owner,
+                        new WorksiteActionPayload(
+                                UUID.randomUUID(),
+                                menu.containerId,
+                                WorksiteConfigurationAction.CYCLE_DISPATCH_MODE.id(),
+                                menu.snapshot().configurationRevision(),
+                                -1));
+                WorksiteRecord worksite = data.assignedWorksite(
+                        owner.getUUID(), recruit.getUUID()).orElse(null);
+                boolean durableStorage = worksite != null
+                        && worksite.storageEndpoints().stream().anyMatch(endpoint ->
+                                endpoint.dimensionId().equals(
+                                        level.dimension().identifier().toString())
+                                        && endpoint.x() == hallPos.getX()
+                                        && endpoint.y() == hallPos.getY()
+                                        && endpoint.z() == hallPos.getZ());
+                double initialSourceDistance = recruit.distanceToSqr(Vec3.atCenterOf(hallPos));
+                double initialDestinationDistance = recruit.distanceToSqr(
+                        Vec3.atCenterOf(destination));
+                if (worksiteSelection != InteractionResult.SUCCESS
+                        || !worksiteAccepted
+                        || storageSelection != InteractionResult.SUCCESS
+                        || !storageAccepted
+                        || initialDispatch != CourierDispatchMode.AUTOMATIC
+                        || !hybridAccepted
+                        || intermediateDispatch != CourierDispatchMode.HYBRID
+                        || !manualAccepted
+                        || menu.snapshot().dispatchMode() != CourierDispatchMode.MANUAL
+                        || worksite == null
+                        || worksite.x() != destination.getX()
+                        || worksite.y() != destination.getY()
+                        || worksite.z() != destination.getZ()
+                        || worksite.configuration().courierDispatchMode()
+                                != CourierDispatchMode.MANUAL
+                        || !durableStorage
+                        || !hallPos.equals(recruit.getStorageTarget())
+                        || !destination.equals(recruit.getWorkTarget())
+                        || recruit.getRecruitCommand() != RecruitmentAction.WORK_AT_SITE
+                        || initialSourceDistance <= 16.0D
+                        || initialDestinationDistance <= 16.0D) {
+                    complete[0] = true;
+                    helper.fail("Black-box courier setup did not cross its player-facing authority: "
+                            + "selection=" + worksiteSelection + "/" + storageSelection
+                            + ", actions=" + worksiteAccepted + "/" + storageAccepted
+                            + ", dispatch=" + initialDispatch + "->" + intermediateDispatch
+                            + "->" + menu.snapshot().dispatchMode()
+                            + ", worksite=" + worksite
+                            + ", storage=" + recruit.getStorageTarget()
+                            + ", target=" + recruit.getWorkTarget()
+                            + ", command=" + recruit.getRecruitCommand()
+                            + ", distances=" + initialSourceDistance + "/"
+                            + initialDestinationDistance);
+                    return;
+                }
+                configured[0] = true;
+                startedRecruitTick[0] = recruit.tickCount;
+                return;
+            }
+
+            WorkerStatus status = recruit.getWorkerStatus();
+            sourceNavigationObserved[0] |= status.phase() == WorkerPhase.NAVIGATE_SOURCE
+                    && status.reasonCode().equals("courier_withdraw");
+            destinationNavigationObserved[0] |= status.phase() == WorkerPhase.NAVIGATE_STORAGE
+                    && status.reasonCode().equals("courier_deliver");
+            sourceApproached[0] |= recruit.distanceToSqr(Vec3.atCenterOf(hallPos)) <= 4.0D;
+            destinationApproached[0] |= recruit.distanceToSqr(
+                    Vec3.atCenterOf(destination)) <= 4.0D;
+            movedPhysically[0] |= recruit.position().distanceToSqr(initialRecruitPosition) > 4.0D;
+            status.workOrderId().ifPresent(currentOrderId -> {
+                if (workOrderId[0] == null) {
+                    workOrderId[0] = currentOrderId;
+                } else if (!workOrderId[0].equals(currentOrderId)) {
+                    complete[0] = true;
+                    helper.fail("Black-box courier replaced its live persisted work order: "
+                            + workOrderId[0] + "->" + currentOrderId);
+                }
+            });
+            if (complete[0]) {
+                return;
+            }
+
+            int storedMaterials = countContainerItem(hall, ModItems.DURACRETE.get());
+            int carriedMaterials = countContainerItem(
+                    recruitCargo, ModItems.DURACRETE.get());
+            int deliveredMaterials = countContainerItem(
+                    destinationStorage, ModItems.DURACRETE.get());
+            cargoObserved[0] |= carriedMaterials == initialMaterials
+                    && initialMaterials > 0
+                    && storedMaterials == 0
+                    && deliveredMaterials == 0;
+            if (storedMaterials + carriedMaterials + deliveredMaterials != initialMaterials
+                    || carriedMaterials != workerInventoryCount(recruit)) {
+                complete[0] = true;
+                helper.fail("Black-box courier violated exact physical conservation: source="
+                        + storedMaterials + ", cargo=" + carriedMaterials
+                        + ", destination=" + deliveredMaterials
+                        + ", totalCargo=" + workerInventoryCount(recruit)
+                        + ", expected=" + initialMaterials + ", status=" + status);
+                return;
+            }
+            if (status.phase() == WorkerPhase.BLOCKED
+                    && status.reasonCode().equals("courier_source_empty")) {
+                complete[0] = true;
+                WorkOrder blockedOrder = workOrderId[0] == null
+                        ? null
+                        : data.workOrder(owner.getUUID(), workOrderId[0]).orElse(null);
+                helper.fail("Black-box courier reached the registered source without physical cargo: "
+                        + "source=" + storedMaterials + ", cargo=" + carriedMaterials
+                        + ", destination=" + deliveredMaterials
+                        + ", navigation=" + sourceNavigationObserved[0]
+                        + ", approached=" + sourceApproached[0]
+                        + ", moved=" + movedPhysically[0]
+                        + ", order=" + blockedOrder);
+                return;
+            }
+
+            WorkOrder completedOrder = workOrderId[0] == null
+                    ? null
+                    : data.workOrder(owner.getUUID(), workOrderId[0]).orElse(null);
+            int deliveryEventsAfter = ProgressionSavedData.get(level).state(owner.getUUID())
+                    .total(ProgressionEventType.DELIVERY_COMPLETED);
+            if (storedMaterials == 0
+                    && carriedMaterials == 0
+                    && deliveredMaterials == initialMaterials
+                    && completedOrder != null
+                    && completedOrder.type() == WorkOrderType.COURIER
+                    && completedOrder.state() == WorkOrderState.COMPLETED
+                    && deliveryEventsAfter == deliveryEventsBefore + 1
+                    && sourceNavigationObserved[0]
+                    && destinationNavigationObserved[0]
+                    && sourceApproached[0]
+                    && destinationApproached[0]
+                    && cargoObserved[0]
+                    && movedPhysically[0]
+                    && recruit.getRecruitCommand() == RecruitmentAction.WORK_AT_SITE) {
+                complete[0] = true;
+                recruit.discard();
+                helper.succeed();
+                return;
+            }
+
+            if (recruit.tickCount - startedRecruitTick[0] >= 800) {
+                complete[0] = true;
+                helper.fail("Black-box courier lifecycle timed out: status=" + status
+                        + ", source=" + storedMaterials
+                        + ", cargo=" + carriedMaterials
+                        + ", destination=" + deliveredMaterials
+                        + ", order=" + completedOrder
+                        + ", events=" + deliveryEventsBefore + "->" + deliveryEventsAfter
+                        + ", navigation=" + sourceNavigationObserved[0] + "/"
+                        + destinationNavigationObserved[0]
+                        + ", approached=" + sourceApproached[0] + "/"
+                        + destinationApproached[0]
+                        + ", cargoObserved=" + cargoObserved[0]
+                        + ", moved=" + movedPhysically[0]);
+            }
+        });
+    }
+
+    /**
+     * Exercises the ordinary Survival technician contract and Command Center research actions.
+     * The fixture never calls the research tick service, mutates a worker phase, invokes the
+     * worker controller, or moves the recruit after research assignment.
+     */
+    private static void blackBoxTechnicianLifecycle(GameTestHelper helper) {
+        SmartBrainTestArea area = prepareSmartBrainTestAreaAt(
+                helper,
+                GameType.SURVIVAL,
+                -2,
+                24,
+                -2,
+                6,
+                isolatedCapital(helper, 230));
+        ServerLevel level = helper.getLevel();
+        ServerPlayer owner = area.player();
+        BlockPos hallPos = area.at(0, 1, 0);
+        BlockPos recruitPos = area.at(20, 1, 0);
+        CommandCenterBlockEntity hall = placeCommandCenter(helper, hallPos);
+        hall.claim(owner);
+        KingdomSavedData data = KingdomSavedData.get(level);
+        KingdomRecord kingdom = data.activateHall(
+                owner.getUUID(),
+                hall.factionId(),
+                level.dimension().identifier().toString(),
+                hallPos).orElse(null);
+        if (kingdom == null) {
+            helper.fail("Black-box technician fixture could not activate its Command Center");
+            return;
+        }
+        owner.getInventory().add(new ItemStack(ModItems.CREDIT_CHIP.get(), 128));
+        FactionAlignmentSavedData.get(level).setScore(
+                owner.getUUID(), FactionId.of("republic"), 100);
+        applyCampaignSetupEvent(
+                ProgressionSavedData.get(level),
+                owner,
+                ProgressionEventType.FACTION_PLEDGED,
+                "galacticwars:republic");
+
+        GalacticRecruitEntity recruit = spawnRecruitAt(
+                helper, ModEntityTypes.CLONE_TROOPER.get(), recruitPos);
+        Vec3 initialRecruitPosition = recruit.position();
+        boolean[] configured = {false};
+        boolean[] navigationObserved = {false};
+        boolean[] arrivalObserved = {false};
+        boolean[] researchingObserved = {false};
+        boolean[] movedPhysically = {false};
+        boolean[] progressObserved = {false};
+        boolean[] complete = {false};
+        int[] startedRecruitTick = {-1};
+        int[] lastProgress = {0};
+        long readinessStartedAt = helper.getTick();
+        helper.onEachTick(() -> {
+            if (complete[0]) {
+                return;
+            }
+            if (!configured[0]) {
+                boolean areaTicking = areSmartBrainAreaChunksTicking(
+                        helper, area, -2, 24, -2, 6);
+                boolean recruitIndexed = level.getEntity(recruit.getUUID()) == recruit;
+                if (!areaTicking || !recruitIndexed || recruit.tickCount == 0) {
+                    if (helper.getTick() - readinessStartedAt
+                            >= SMART_BRAIN_CHUNK_READY_TIMEOUT) {
+                        complete[0] = true;
+                        helper.fail("Black-box technician area never became entity-ticking: ticking="
+                                + areaTicking + ", recruit=" + recruitIndexed
+                                + ", recruitTick=" + recruit.tickCount);
+                    }
+                    return;
+                }
+
+                owner.setPos(recruit.getX(), recruit.getY(), recruit.getZ());
+                level.getChunkSource().move(owner);
+                boolean hired = recruit.handleMenuButton(
+                        owner, RecruitCommandMenu.BUTTON_HIRE);
+                boolean professionAssigned = hired && recruit.handleMenuButton(
+                        owner, RecruitCommandMenu.BUTTON_ASSIGN_TECHNICIAN);
+                owner.setPos(
+                        hallPos.getX() + 0.5D,
+                        hallPos.getY(),
+                        hallPos.getZ() + 0.5D);
+                level.getChunkSource().move(owner);
+                CommandCenterOperationsMenu operations = (CommandCenterOperationsMenu)
+                        new CommandCenterOperationsMenuProvider(hallPos)
+                                .createMenu(52, owner.getInventory(), owner);
+                owner.containerMenu = operations;
+                boolean technicianListed = operations.dashboardState().workers().stream()
+                        .anyMatch(summary -> summary.entityId().equals(recruit.getUUID())
+                                && summary.profession().equals("technician"));
+                if (!hired || !professionAssigned || !operations.stillValid(owner)
+                        || !technicianListed
+                        || operations.dashboardState().contentGeneration()
+                                != GameplayDataManager.generation()) {
+                    complete[0] = true;
+                    helper.fail("Black-box technician did not cross its player-facing setup: hired="
+                            + hired + ", profession=" + professionAssigned
+                            + ", menu=" + operations.stillValid(owner)
+                            + ", listed=" + technicianListed
+                            + ", generation="
+                            + operations.dashboardState().contentGeneration() + "/"
+                            + GameplayDataManager.generation());
+                    return;
+                }
+
+                putContainerItem(hall, new ItemStack(Items.IRON_INGOT, 16));
+                putContainerItem(hall, new ItemStack(Items.REDSTONE, 8));
+                int initialRevision = data.technologyStateOrDefault(kingdom.id()).revision();
+                ResearchResult started = KingdomResearchService.start(
+                        owner,
+                        hall,
+                        "galacticwars:field_fabrication",
+                        UUID.randomUUID(),
+                        initialRevision);
+                ResearchResult contributed = started.accepted()
+                        ? KingdomResearchService.contribute(
+                                owner,
+                                hall,
+                                UUID.randomUUID(),
+                                started.revision())
+                        : ResearchResult.rejected("start_failed", initialRevision);
+                double assignmentDistance = recruit.distanceToSqr(Vec3.atCenterOf(hallPos));
+                ResearchResult assigned = contributed.accepted()
+                        ? KingdomResearchService.assignTechnician(
+                                owner,
+                                hall,
+                                recruit.getUUID(),
+                                UUID.randomUUID(),
+                                contributed.revision())
+                        : ResearchResult.rejected("contribution_failed", contributed.revision());
+                KingdomTechnologyState assignedState = data.technologyStateOrDefault(kingdom.id());
+                var assignedProject = assignedState.activeProject().orElse(null);
+                if (!started.accepted() || !started.changed()
+                        || !contributed.accepted() || !contributed.changed()
+                        || countContainerItem(hall, Items.IRON_INGOT) != 0
+                        || countContainerItem(hall, Items.REDSTONE) != 0
+                        || assignmentDistance <= 64.0D
+                        || !assigned.accepted() || !assigned.changed()
+                        || assignedProject == null
+                        || assignedProject.technicianId()
+                                .filter(recruit.getUUID()::equals).isEmpty()
+                        || assignedProject.deliveredInputs()
+                                .getOrDefault("minecraft:iron_ingot", 0) != 16
+                        || assignedProject.deliveredInputs()
+                                .getOrDefault("minecraft:redstone", 0) != 8
+                        || !hallPos.equals(recruit.getWorkTarget())
+                        || recruit.getRecruitCommand() != RecruitmentAction.WORK_AT_SITE) {
+                    complete[0] = true;
+                    helper.fail("Black-box distant technician assignment failed before its travel loop: "
+                            + "start=" + started + ", contribution=" + contributed
+                            + ", assignment=" + assigned
+                            + ", distance=" + assignmentDistance
+                            + ", project=" + assignedProject
+                            + ", iron=" + countContainerItem(hall, Items.IRON_INGOT)
+                            + ", redstone=" + countContainerItem(hall, Items.REDSTONE)
+                            + ", status=" + recruit.getWorkerStatus());
+                    return;
+                }
+                configured[0] = true;
+                startedRecruitTick[0] = recruit.tickCount;
+                return;
+            }
+
+            WorkerStatus status = recruit.getWorkerStatus();
+            navigationObserved[0] |= status.phase() == WorkerPhase.NAVIGATE_SOURCE
+                    && status.reasonCode().equals("travel_to_command_center");
+            arrivalObserved[0] |= recruit.distanceToSqr(Vec3.atCenterOf(hallPos)) <= 64.0D;
+            researchingObserved[0] |= status.phase() == WorkerPhase.COOLDOWN
+                    && status.reasonCode().equals("researching");
+            movedPhysically[0] |= recruit.position().distanceToSqr(initialRecruitPosition) > 4.0D;
+
+            KingdomTechnologyState current = data.technologyStateOrDefault(kingdom.id());
+            var project = current.activeProject().orElse(null);
+            if (project != null) {
+                int progress = project.workProgress();
+                int progressDelta = progress - lastProgress[0];
+                if (progressDelta < 0 || progressDelta > 20
+                        || Math.floorMod(progressDelta, 20) != 0
+                        || countContainerItem(hall, Items.IRON_INGOT) != 0
+                        || countContainerItem(hall, Items.REDSTONE) != 0
+                        || project.deliveredInputs()
+                                .getOrDefault("minecraft:iron_ingot", 0) != 16
+                        || project.deliveredInputs()
+                                .getOrDefault("minecraft:redstone", 0) != 8) {
+                    complete[0] = true;
+                    helper.fail("Black-box technician violated monotonic research conservation: "
+                            + "progress=" + lastProgress[0] + "->" + progress
+                            + ", project=" + project
+                            + ", iron=" + countContainerItem(hall, Items.IRON_INGOT)
+                            + ", redstone=" + countContainerItem(hall, Items.REDSTONE)
+                            + ", status=" + status);
+                    return;
+                }
+                progressObserved[0] |= progress > 0;
+                lastProgress[0] = progress;
+            }
+
+            if (current.completed("galacticwars:field_fabrication")
+                    && current.activeProject().isEmpty()) {
+                Tag encoded = KingdomSavedData.CODEC.encodeStart(NbtOps.INSTANCE, data).getOrThrow();
+                KingdomSavedData restored = KingdomSavedData.CODEC.parse(
+                        NbtOps.INSTANCE, encoded).getOrThrow();
+                boolean durableCompletion = restored.technologyStateOrDefault(kingdom.id())
+                        .completed("galacticwars:field_fabrication");
+                if (!navigationObserved[0]
+                        || !arrivalObserved[0]
+                        || !researchingObserved[0]
+                        || !movedPhysically[0]
+                        || !progressObserved[0]
+                        || lastProgress[0] < 1_180
+                        || countContainerItem(hall, Items.IRON_INGOT) != 0
+                        || countContainerItem(hall, Items.REDSTONE) != 0
+                        || recruit.getRecruitCommand() != RecruitmentAction.FOLLOW_OWNER
+                        || status.phase() != WorkerPhase.BLOCKED
+                        || !status.reasonCode().equals("awaiting_research")
+                        || !durableCompletion) {
+                    complete[0] = true;
+                    helper.fail("Black-box technician completed without its embodied lifecycle: "
+                            + "navigation=" + navigationObserved[0]
+                            + ", arrival=" + arrivalObserved[0]
+                            + ", researching=" + researchingObserved[0]
+                            + ", moved=" + movedPhysically[0]
+                            + ", progress=" + lastProgress[0]
+                            + ", durable=" + durableCompletion
+                            + ", status=" + status);
+                    return;
+                }
+                complete[0] = true;
+                recruit.discard();
+                helper.succeed();
+                return;
+            }
+
+            if (recruit.tickCount - startedRecruitTick[0] >= 1_700) {
+                complete[0] = true;
+                helper.fail("Black-box technician lifecycle timed out: status=" + status
+                        + ", project=" + project
+                        + ", navigation=" + navigationObserved[0]
+                        + ", arrival=" + arrivalObserved[0]
+                        + ", researching=" + researchingObserved[0]
+                        + ", moved=" + movedPhysically[0]
+                        + ", progress=" + lastProgress[0]);
+            }
+        });
+    }
+
+    /**
+     * Exercises automatic courier contention without setting private phases,
+     * invoking the worker controller, or moving either courier after assignment.
+     */
+    private static void competingCourierLeases(GameTestHelper helper) {
+        SmartBrainTestArea area = prepareSmartBrainTestAreaAt(
+                helper,
+                GameType.CREATIVE,
+                -2,
+                14,
+                -2,
+                8,
+                isolatedCapital(helper, 215));
+        ServerLevel level = helper.getLevel();
+        ServerPlayer owner = area.player();
+        BlockPos hallPos = area.at(1, 1, 3);
+        CommandCenterBlockEntity hall = placeCommandCenter(helper, hallPos);
+        hall.claim(owner);
+        hall.setFaction("galacticwars:republic");
+        KingdomSavedData data = KingdomSavedData.get(level);
+        KingdomRecord kingdom = data.activateHall(
+                owner.getUUID(),
+                hall.factionId(),
+                level.dimension().identifier().toString(),
+                hallPos).orElse(null);
+        if (kingdom == null) {
+            helper.fail("Competing courier fixture could not activate its kingdom");
+            return;
+        }
+        FactionAlignmentSavedData.get(level).setScore(
+                owner.getUUID(), FactionId.of("republic"), 100);
+        applyCampaignSetupEvent(
+                ProgressionSavedData.get(level),
+                owner,
+                ProgressionEventType.FACTION_PLEDGED,
+                "galacticwars:republic");
+
+        GalacticRecruitEntity firstCourier = spawnRecruitAt(
+                helper, ModEntityTypes.CLONE_TROOPER.get(), area.at(3, 1, 2));
+        GalacticRecruitEntity secondCourier = spawnRecruitAt(
+                helper, ModEntityTypes.CLONE_TROOPER.get(), area.at(3, 1, 4));
+        GalacticRecruitEntity requester = spawnRecruitAt(
+                helper, ModEntityTypes.CLONE_TROOPER.get(), area.at(11, 1, 3));
+        requester.initializeFromSpawnEgg();
+        requester.tame(owner);
+        requester.setNoAi(true);
+        if (!data.registerRecruit(
+                owner.getUUID(), requester.getUUID(), NpcServiceBranch.CIVILIAN)) {
+            helper.fail("Competing courier requester could not join the settlement");
+            return;
+        }
+        for (GalacticRecruitEntity courier : List.of(firstCourier, secondCourier)) {
+            courier.initializeFromSpawnEgg();
+            owner.setPos(courier.getX(), courier.getY(), courier.getZ());
+            if (!courier.handleMenuButton(owner, RecruitCommandMenu.BUTTON_HIRE)
+                    || !courier.handleMenuButton(
+                            owner, RecruitCommandMenu.BUTTON_ASSIGN_COURIER)) {
+                helper.fail("Competing courier could not be hired and assigned: "
+                        + courier.getUUID());
+                return;
+            }
+        }
+
+        putContainerItem(hall, new ItemStack(ModItems.ENERGY_CELL.get(), 4));
+        SupplyDemand demand = new SupplyDemand(
+                UUID.randomUUID(),
+                SupplyCategory.AMMUNITION,
+                "galacticwars:energy_cell",
+                6,
+                0,
+                100,
+                "recruit/" + requester.getUUID() + "/competing_couriers");
+        if (!data.requestSupply(owner.getUUID(), kingdom.settlement().id(), demand)) {
+            helper.fail("Competing courier demand was rejected");
+            return;
+        }
+
+        long startedAt = helper.getTick();
+        boolean[] complete = {false};
+        helper.onEachTick(() -> {
+            if (complete[0]) {
+                return;
+            }
+            SettlementSupplyLedger ledger = data.supplyLedger(
+                    kingdom.settlement().id()).orElseThrow();
+            long activeReservations = ledger.reservations().stream()
+                    .filter(reservation -> reservation.active(level.getGameTime()))
+                    .count();
+            if (activeReservations > 1) {
+                complete[0] = true;
+                helper.fail("Competing couriers double-reserved partial stock: "
+                        + ledger.reservations());
+                return;
+            }
+
+            int sourceStock = countContainerItem(hall, ModItems.ENERGY_CELL.get());
+            int firstCargo = countContainerItem(
+                    firstCourier.createCargoContainer(), ModItems.ENERGY_CELL.get());
+            int secondCargo = countContainerItem(
+                    secondCourier.createCargoContainer(), ModItems.ENERGY_CELL.get());
+            int requesterCargo = countContainerItem(
+                    requester.createCargoContainer(), ModItems.ENERGY_CELL.get());
+            int physicalTotal = sourceStock + firstCargo + secondCargo + requesterCargo;
+            if (physicalTotal != 4) {
+                complete[0] = true;
+                helper.fail("Competing courier transfer violated physical conservation: source="
+                        + sourceStock + ", first=" + firstCargo + ", second=" + secondCargo
+                        + ", requester=" + requesterCargo + ", ledger=" + ledger);
+                return;
+            }
+
+            SupplyDemand currentDemand = ledger.demands().stream()
+                    .filter(candidate -> candidate.id().equals(demand.id()))
+                    .findFirst().orElseThrow();
+            long completedReservations = ledger.reservations().stream()
+                    .filter(reservation -> reservation.state()
+                            == SupplyReservation.State.COMPLETED)
+                    .count();
+            if (requesterCargo == 4
+                    && sourceStock == 0
+                    && firstCargo == 0
+                    && secondCargo == 0
+                    && currentDemand.outstandingQuantity() == 2
+                    && completedReservations == 1) {
+                complete[0] = true;
+                firstCourier.discard();
+                secondCourier.discard();
+                requester.discard();
+                helper.succeed();
+                return;
+            }
+            if (helper.getTick() - startedAt >= 650) {
+                complete[0] = true;
+                helper.fail("Competing courier delivery timed out: source=" + sourceStock
+                        + ", first=" + firstCourier.getWorkerStatus()
+                        + ", second=" + secondCourier.getWorkerStatus()
+                        + ", requester=" + requesterCargo
+                        + ", demand=" + currentDemand
+                        + ", reservations=" + ledger.reservations());
+            }
+        });
+    }
+
+    /**
+     * Proves that an exact automatic delivery retries without partial mutation and that its
+     * physical cargo plus durable lease survive a real entity save/unload/load boundary.
+     */
+    private static void courierLiveLeaseReload(GameTestHelper helper) {
+        SmartBrainTestArea area = prepareSmartBrainTestAreaAt(
+                helper,
+                GameType.CREATIVE,
+                -2,
+                14,
+                -2,
+                8,
+                isolatedCapital(helper, 216));
+        ServerLevel level = helper.getLevel();
+        ServerPlayer owner = area.player();
+        BlockPos hallPos = area.at(1, 1, 3);
+        CommandCenterBlockEntity hall = placeCommandCenter(helper, hallPos);
+        hall.claim(owner);
+        hall.setFaction("galacticwars:republic");
+        KingdomSavedData data = KingdomSavedData.get(level);
+        KingdomRecord kingdom = data.activateHall(
+                owner.getUUID(),
+                hall.factionId(),
+                level.dimension().identifier().toString(),
+                hallPos).orElse(null);
+        if (kingdom == null) {
+            helper.fail("Live-lease reload fixture could not activate its kingdom");
+            return;
+        }
+        FactionAlignmentSavedData.get(level).setScore(
+                owner.getUUID(), FactionId.of("republic"), 100);
+        applyCampaignSetupEvent(
+                ProgressionSavedData.get(level),
+                owner,
+                ProgressionEventType.FACTION_PLEDGED,
+                "galacticwars:republic");
+
+        GalacticRecruitEntity courier = spawnRecruitAt(
+                helper, ModEntityTypes.CLONE_TROOPER.get(), area.at(3, 1, 3));
+        GalacticRecruitEntity requester = spawnRecruitAt(
+                helper, ModEntityTypes.CLONE_TROOPER.get(), area.at(11, 1, 3));
+        requester.initializeFromSpawnEgg();
+        requester.tame(owner);
+        requester.setNoAi(true);
+        if (!data.registerRecruit(
+                owner.getUUID(), requester.getUUID(), NpcServiceBranch.CIVILIAN)) {
+            helper.fail("Live-lease reload requester could not join the settlement");
+            return;
+        }
+        courier.initializeFromSpawnEgg();
+        owner.setPos(courier.getX(), courier.getY(), courier.getZ());
+        if (!courier.handleMenuButton(owner, RecruitCommandMenu.BUTTON_HIRE)
+                || !courier.handleMenuButton(owner, RecruitCommandMenu.BUTTON_ASSIGN_COURIER)) {
+            helper.fail("Live-lease reload courier could not be hired and assigned");
+            return;
+        }
+
+        Container requesterCargo = requester.createCargoContainer();
+        for (int slot = 0; slot < requesterCargo.getContainerSize(); slot++) {
+            requesterCargo.setItem(slot, new ItemStack(Items.COBBLESTONE, 64));
+        }
+        putContainerItem(hall, new ItemStack(ModItems.ENERGY_CELL.get(), 4));
+        SupplyDemand demand = new SupplyDemand(
+                UUID.randomUUID(),
+                SupplyCategory.AMMUNITION,
+                "galacticwars:energy_cell",
+                4,
+                0,
+                100,
+                "recruit/" + requester.getUUID() + "/live_lease_reload");
+        UUID settlementId = kingdom.settlement().id();
+        if (!data.requestSupply(owner.getUUID(), settlementId, demand)) {
+            helper.fail("Live-lease reload demand was rejected");
+            return;
+        }
+
+        UUID courierId = courier.getUUID();
+        GalacticRecruitEntity[] currentCourier = {courier};
+        CompoundTag[] persistedCourier = {null};
+        UUID[] reservationId = {null};
+        int[] phase = {0};
+        long startedAt = helper.getTick();
+        boolean[] complete = {false};
+        helper.onEachTick(() -> {
+            if (complete[0]) {
+                return;
+            }
+            SettlementSupplyLedger ledger = data.supplyLedger(settlementId).orElseThrow();
+            SupplyDemand currentDemand = ledger.demands().stream()
+                    .filter(candidate -> candidate.id().equals(demand.id()))
+                    .findFirst().orElseThrow();
+            List<SupplyReservation> activeReservations = ledger.reservations().stream()
+                    .filter(reservation -> reservation.workerId().equals(courierId))
+                    .filter(reservation -> reservation.active(level.getGameTime()))
+                    .toList();
+            if (activeReservations.size() > 1) {
+                complete[0] = true;
+                helper.fail("Reloading courier created duplicate active leases: "
+                        + activeReservations);
+                return;
+            }
+
+            GalacticRecruitEntity activeCourier = currentCourier[0];
+            int sourceCells = countContainerItem(hall, ModItems.ENERGY_CELL.get());
+            int courierCells = countContainerItem(
+                    activeCourier.createCargoContainer(), ModItems.ENERGY_CELL.get());
+            int requesterCells = countContainerItem(
+                    requesterCargo, ModItems.ENERGY_CELL.get());
+            if (sourceCells + courierCells + requesterCells != 4) {
+                complete[0] = true;
+                helper.fail("Live-lease reload violated physical conservation: source="
+                        + sourceCells + ", courier=" + courierCells
+                        + ", requester=" + requesterCells + ", phase=" + phase[0]);
+                return;
+            }
+
+            switch (phase[0]) {
+                case 0 -> {
+                    if (requesterCells != 0 || currentDemand.outstandingQuantity() != 4) {
+                        complete[0] = true;
+                        helper.fail("Full recipient was partially mutated before exact retry: requester="
+                                + requesterCells + ", demand=" + currentDemand);
+                        return;
+                    }
+                    if (courierCells == 4
+                            && activeCourier.getWorkerStatus().reasonCode()
+                                    .equals("recipient_inventory_full")) {
+                        if (sourceCells != 0 || activeReservations.size() != 1) {
+                            complete[0] = true;
+                            helper.fail("Exact retry did not retain one loaded lease: source="
+                                    + sourceCells + ", leases=" + activeReservations);
+                            return;
+                        }
+                        reservationId[0] = activeReservations.getFirst().id();
+                        persistedCourier[0] = saveRecruit(activeCourier, level);
+                        activeCourier.remove(Entity.RemovalReason.UNLOADED_TO_CHUNK);
+                        if (!activeCourier.isRemoved()
+                                || data.supplyLedger(settlementId).orElseThrow()
+                                        .reservation(reservationId[0])
+                                        .filter(candidate -> candidate.active(level.getGameTime()))
+                                        .isEmpty()) {
+                            complete[0] = true;
+                            helper.fail("Chunk-unload removal released the live courier lease");
+                            return;
+                        }
+                        phase[0] = 1;
+                    }
+                }
+                case 1 -> {
+                    GalacticRecruitEntity reloaded = loadRecruit(persistedCourier[0], level);
+                    if (!reloaded.getUUID().equals(courierId)
+                            || !level.addFreshEntity(reloaded)) {
+                        complete[0] = true;
+                        helper.fail("Serialized live-lease courier could not rejoin the server");
+                        return;
+                    }
+                    currentCourier[0] = reloaded;
+                    int reloadedCells = countContainerItem(
+                            reloaded.createCargoContainer(), ModItems.ENERGY_CELL.get());
+                    SettlementSupplyLedger reloadedLedger = data.supplyLedger(
+                            settlementId).orElseThrow();
+                    long matchingActiveLeases = reloadedLedger.reservations().stream()
+                            .filter(candidate -> candidate.id().equals(reservationId[0]))
+                            .filter(candidate -> candidate.workerId().equals(courierId))
+                            .filter(candidate -> candidate.active(level.getGameTime()))
+                            .count();
+                    if (reloadedCells != 4 || matchingActiveLeases != 1L) {
+                        complete[0] = true;
+                        helper.fail("Reload lost physical cargo or original lease: cargo="
+                                + reloadedCells + ", leases=" + reloadedLedger.reservations());
+                        return;
+                    }
+                    requesterCargo.setItem(8, ItemStack.EMPTY);
+                    phase[0] = 2;
+                }
+                case 2 -> {
+                    SupplyReservation persistedReservation = ledger.reservation(
+                            reservationId[0]).orElse(null);
+                    if (requesterCells == 4) {
+                        if (sourceCells != 0
+                                || courierCells != 0
+                                || currentDemand.outstandingQuantity() != 0
+                                || persistedReservation == null
+                                || persistedReservation.state()
+                                        != SupplyReservation.State.COMPLETED
+                                || activeReservations.size() != 0) {
+                            complete[0] = true;
+                            helper.fail("Reloaded courier did not complete the original exact lease: source="
+                                    + sourceCells + ", courier=" + courierCells
+                                    + ", requester=" + requesterCells
+                                    + ", demand=" + currentDemand
+                                    + ", reservation=" + persistedReservation);
+                            return;
+                        }
+                        complete[0] = true;
+                        currentCourier[0].discard();
+                        requester.discard();
+                        helper.succeed();
+                    }
+                }
+                default -> throw new IllegalStateException(
+                        "Unknown live-lease reload phase " + phase[0]);
+            }
+
+            if (!complete[0] && helper.getTick() - startedAt >= 650) {
+                complete[0] = true;
+                helper.fail("Live-lease reload delivery timed out: phase=" + phase[0]
+                        + ", courier=" + currentCourier[0].getWorkerStatus()
+                        + ", source=" + sourceCells + ", courierCargo=" + courierCells
+                        + ", requester=" + requesterCells
+                        + ", demand=" + currentDemand
+                        + ", reservations=" + ledger.reservations());
+            }
+        });
+    }
+
+    /**
+     * Proves that owner removal of the authoritative Command Center releases an in-flight
+     * automatic lease, pauses a configured route, and preserves every physical item.
+     */
+    private static void courierHallRemoval(GameTestHelper helper) {
+        SmartBrainTestArea area = prepareSmartBrainTestAreaAt(
+                helper,
+                GameType.CREATIVE,
+                -2,
+                14,
+                -2,
+                8,
+                isolatedCapital(helper, 217));
+        ServerLevel level = helper.getLevel();
+        ServerPlayer owner = area.player();
+        BlockPos hallPos = area.at(1, 1, 3);
+        CommandCenterBlockEntity hall = placeCommandCenter(helper, hallPos);
+        hall.claim(owner);
+        hall.setFaction("galacticwars:republic");
+        KingdomSavedData data = KingdomSavedData.get(level);
+        KingdomRecord kingdom = data.activateHall(
+                owner.getUUID(),
+                hall.factionId(),
+                level.dimension().identifier().toString(),
+                hallPos).orElse(null);
+        if (kingdom == null) {
+            helper.fail("Courier hall-removal fixture could not activate its kingdom");
+            return;
+        }
+        FactionAlignmentSavedData.get(level).setScore(
+                owner.getUUID(), FactionId.of("republic"), 100);
+        applyCampaignSetupEvent(
+                ProgressionSavedData.get(level),
+                owner,
+                ProgressionEventType.FACTION_PLEDGED,
+                "galacticwars:republic");
+
+        GalacticRecruitEntity firstCourier = spawnRecruitAt(
+                helper, ModEntityTypes.CLONE_TROOPER.get(), area.at(3, 1, 3));
+        GalacticRecruitEntity secondCourier = spawnRecruitAt(
+                helper, ModEntityTypes.CLONE_TROOPER.get(), area.at(3, 1, 6));
+        GalacticRecruitEntity requester = spawnRecruitAt(
+                helper, ModEntityTypes.CLONE_TROOPER.get(), area.at(11, 1, 3));
+        requester.initializeFromSpawnEgg();
+        requester.tame(owner);
+        requester.setNoAi(true);
+        if (!data.registerRecruit(
+                owner.getUUID(), requester.getUUID(), NpcServiceBranch.CIVILIAN)) {
+            helper.fail("Courier hall-removal requester could not join the settlement");
+            return;
+        }
+        firstCourier.initializeFromSpawnEgg();
+        secondCourier.initializeFromSpawnEgg();
+        owner.setPos(firstCourier.getX(), firstCourier.getY(), firstCourier.getZ());
+        if (!firstCourier.handleMenuButton(owner, RecruitCommandMenu.BUTTON_HIRE)
+                || !firstCourier.handleMenuButton(
+                        owner, RecruitCommandMenu.BUTTON_ASSIGN_COURIER)) {
+            helper.fail("First hall-removal courier could not be hired and assigned");
+            return;
+        }
+        owner.setPos(secondCourier.getX(), secondCourier.getY(), secondCourier.getZ());
+        if (!secondCourier.handleMenuButton(owner, RecruitCommandMenu.BUTTON_HIRE)
+                || !secondCourier.handleMenuButton(
+                        owner, RecruitCommandMenu.BUTTON_ASSIGN_COURIER)) {
+            helper.fail("Second hall-removal courier could not be hired and assigned");
+            return;
+        }
+
+        WorksiteRecord sharedWorksite = data.assignedWorksite(
+                owner.getUUID(), firstCourier.getUUID()).orElse(null);
+        if (sharedWorksite == null
+                || data.assignedWorksite(owner.getUUID(), secondCourier.getUUID())
+                        .filter(candidate -> candidate.id().equals(sharedWorksite.id()))
+                        .isEmpty()) {
+            helper.fail("Hall-removal couriers did not share the frontier worksite");
+            return;
+        }
+        var configuration = sharedWorksite.configuration();
+        WorksiteUpdateResult dispatchConfigured = data.configureWorksite(
+                owner.getUUID(),
+                sharedWorksite.id(),
+                configuration.revision(),
+                configuration.bounds(),
+                configuration.kingdomAccess(),
+                configuration.priority(),
+                configuration.overlayVisible(),
+                configuration.itemFilters(),
+                CourierDispatchMode.HYBRID);
+        if (!dispatchConfigured.accepted()) {
+            helper.fail("Hall-removal hybrid dispatch configuration failed: "
+                    + dispatchConfigured.reasonCode());
+            return;
+        }
+        String dimensionId = level.dimension().identifier().toString();
+        List<CourierWaypoint> route = List.of(
+                new CourierWaypoint(
+                        dimensionId,
+                        area.at(4, 1, 6).getX(),
+                        area.at(4, 1, 6).getY(),
+                        area.at(4, 1, 6).getZ(),
+                        List.of(CourierTransferAction.waitTicks(400))),
+                new CourierWaypoint(
+                        dimensionId,
+                        area.at(10, 1, 6).getX(),
+                        area.at(10, 1, 6).getY(),
+                        area.at(10, 1, 6).getZ(),
+                        List.of(CourierTransferAction.waitTicks(1))));
+        WorksiteRecord hybridWorksite = dispatchConfigured.worksite().orElseThrow();
+        WorksiteUpdateResult routeConfigured = data.configureWorksiteRoute(
+                owner.getUUID(),
+                hybridWorksite.id(),
+                hybridWorksite.configuration().revision(),
+                route,
+                CourierRouteMode.LOOP);
+        if (!routeConfigured.accepted()) {
+            helper.fail("Hall-removal route configuration failed: "
+                    + routeConfigured.reasonCode());
+            return;
+        }
+
+        Container requesterCargo = requester.createCargoContainer();
+        for (int slot = 0; slot < requesterCargo.getContainerSize(); slot++) {
+            requesterCargo.setItem(slot, new ItemStack(Items.COBBLESTONE, 64));
+        }
+        putContainerItem(hall, new ItemStack(ModItems.ENERGY_CELL.get(), 4));
+        SupplyDemand demand = new SupplyDemand(
+                UUID.randomUUID(),
+                SupplyCategory.AMMUNITION,
+                "galacticwars:energy_cell",
+                4,
+                0,
+                100,
+                "recruit/" + requester.getUUID() + "/hall_removal");
+        UUID settlementId = kingdom.settlement().id();
+        if (!data.requestSupply(owner.getUUID(), settlementId, demand)) {
+            helper.fail("Courier hall-removal demand was rejected");
+            return;
+        }
+
+        GalacticRecruitEntity[] leaseCourier = {null};
+        GalacticRecruitEntity[] routeCourier = {null};
+        UUID[] reservationId = {null};
+        CourierRouteExecutionState[] frozenRoute = {null};
+        int[] phase = {0};
+        long[] phaseStartedAt = {helper.getTick()};
+        boolean[] complete = {false};
+        helper.onEachTick(() -> {
+            if (complete[0]) {
+                return;
+            }
+            SettlementSupplyLedger ledger = data.supplyLedger(settlementId).orElseThrow();
+            SupplyDemand currentDemand = ledger.demands().stream()
+                    .filter(candidate -> candidate.id().equals(demand.id()))
+                    .findFirst().orElseThrow();
+            List<SupplyReservation> activeReservations = ledger.reservations().stream()
+                    .filter(candidate -> candidate.active(level.getGameTime()))
+                    .toList();
+            int firstCells = countContainerItem(
+                    firstCourier.createCargoContainer(), ModItems.ENERGY_CELL.get());
+            int secondCells = countContainerItem(
+                    secondCourier.createCargoContainer(), ModItems.ENERGY_CELL.get());
+            int requesterCells = countContainerItem(
+                    requesterCargo, ModItems.ENERGY_CELL.get());
+            int hallCells = level.getBlockEntity(hallPos) instanceof Container currentHall
+                    ? countContainerItem(currentHall, ModItems.ENERGY_CELL.get())
+                    : 0;
+            if (firstCells + secondCells + requesterCells + hallCells != 4) {
+                complete[0] = true;
+                helper.fail("Hall removal violated physical courier conservation: first="
+                        + firstCells + ", second=" + secondCells
+                        + ", requester=" + requesterCells + ", hall=" + hallCells
+                        + ", phase=" + phase[0]);
+                return;
+            }
+
+            switch (phase[0]) {
+                case 0 -> {
+                    GalacticRecruitEntity loaded = firstCells == 4
+                            ? firstCourier
+                            : secondCells == 4 ? secondCourier : null;
+                    GalacticRecruitEntity routing = loaded == firstCourier
+                            ? secondCourier
+                            : loaded == secondCourier ? firstCourier : null;
+                    if (loaded != null
+                            && routing.courierRouteExecutionState().dwellTicksRemaining() > 0
+                            && loaded.getWorkerStatus().reasonCode()
+                                    .equals("recipient_inventory_full")
+                            && currentDemand.outstandingQuantity() == 4
+                            && activeReservations.size() == 1
+                            && activeReservations.getFirst().workerId()
+                                    .equals(loaded.getUUID())) {
+                        leaseCourier[0] = loaded;
+                        routeCourier[0] = routing;
+                        reservationId[0] = activeReservations.getFirst().id();
+                        frozenRoute[0] = routing.courierRouteExecutionState();
+                        owner.setPos(hallPos.getX() + 0.5D, hallPos.getY(), hallPos.getZ() + 0.5D);
+                        if (!owner.gameMode.destroyBlock(hallPos)
+                                || !level.getBlockState(hallPos).isAir()
+                                || data.isHallActive(owner.getUUID())) {
+                            complete[0] = true;
+                            helper.fail("Owner block removal did not deactivate the Command Center");
+                            return;
+                        }
+                        SupplyReservation released = data.supplyLedger(settlementId)
+                                .flatMap(current -> current.reservation(reservationId[0]))
+                                .orElse(null);
+                        if (released == null
+                                || released.state() != SupplyReservation.State.RELEASED) {
+                            complete[0] = true;
+                            helper.fail("Command Center removal did not release the active lease: "
+                                    + released);
+                            return;
+                        }
+                        phase[0] = 1;
+                        phaseStartedAt[0] = helper.getTick();
+                    }
+                }
+                case 1 -> {
+                    SupplyReservation released = ledger.reservation(reservationId[0])
+                            .orElse(null);
+                    if (released == null
+                            || released.state() != SupplyReservation.State.RELEASED
+                            || !activeReservations.isEmpty()
+                            || currentDemand.outstandingQuantity() != 4
+                            || countContainerItem(
+                                    leaseCourier[0].createCargoContainer(),
+                                    ModItems.ENERGY_CELL.get()) != 4
+                            || requesterCells != 0
+                            || !routeCourier[0].courierRouteExecutionState()
+                                    .equals(frozenRoute[0])) {
+                        complete[0] = true;
+                        helper.fail("Inactive settlement mutated courier state: lease="
+                                + released + ", active=" + activeReservations
+                                + ", demand=" + currentDemand
+                                + ", leaseCargo=" + countContainerItem(
+                                        leaseCourier[0].createCargoContainer(),
+                                        ModItems.ENERGY_CELL.get())
+                                + ", requester=" + requesterCells
+                                + ", route=" + routeCourier[0].courierRouteExecutionState());
+                        return;
+                    }
+                    if (helper.getTick() - phaseStartedAt[0] >= 45
+                            && leaseCourier[0].getWorkerStatus().phase() == WorkerPhase.PAUSED
+                            && routeCourier[0].getWorkerStatus().phase() == WorkerPhase.PAUSED
+                            && leaseCourier[0].getWorkerStatus().reasonCode()
+                                    .equals("upkeep_unpaid")
+                            && routeCourier[0].getWorkerStatus().reasonCode()
+                                    .equals("upkeep_unpaid")) {
+                        requesterCargo.setItem(8, ItemStack.EMPTY);
+                        CommandCenterBlockEntity replacement = placeCommandCenter(helper, hallPos);
+                        replacement.claim(owner);
+                        replacement.setFaction("galacticwars:republic");
+                        if (data.activateHall(
+                                owner.getUUID(),
+                                replacement.factionId(),
+                                dimensionId,
+                                hallPos).isEmpty()) {
+                            complete[0] = true;
+                            helper.fail("Removed Command Center could not be reactivated");
+                            return;
+                        }
+                        phase[0] = 2;
+                        phaseStartedAt[0] = helper.getTick();
+                    }
+                }
+                case 2 -> {
+                    SupplyReservation released = ledger.reservation(reservationId[0])
+                            .orElse(null);
+                    int retainedCargo = countContainerItem(
+                            leaseCourier[0].createCargoContainer(),
+                            ModItems.ENERGY_CELL.get());
+                    if (released == null
+                            || released.state() != SupplyReservation.State.RELEASED
+                            || !activeReservations.isEmpty()
+                            || currentDemand.outstandingQuantity() != 4
+                            || retainedCargo != 4
+                            || requesterCells != 0) {
+                        complete[0] = true;
+                        helper.fail("Reactivation completed or duplicated a released lease: lease="
+                                + released + ", active=" + activeReservations
+                                + ", demand=" + currentDemand
+                                + ", cargo=" + retainedCargo
+                                + ", requester=" + requesterCells);
+                        return;
+                    }
+                    if (!routeCourier[0].courierRouteExecutionState().equals(frozenRoute[0])
+                            && routeCourier[0].getWorkerStatus().phase() != WorkerPhase.PAUSED) {
+                        complete[0] = true;
+                        firstCourier.discard();
+                        secondCourier.discard();
+                        requester.discard();
+                        helper.succeed();
+                    }
+                }
+                default -> throw new IllegalStateException(
+                        "Unknown courier hall-removal phase " + phase[0]);
+            }
+
+            if (!complete[0] && helper.getTick() - phaseStartedAt[0] >= 700) {
+                complete[0] = true;
+                helper.fail("Courier hall-removal lifecycle timed out: phase=" + phase[0]
+                        + ", first=" + firstCourier.getWorkerStatus()
+                        + ", second=" + secondCourier.getWorkerStatus()
+                        + ", demand=" + currentDemand
+                        + ", reservations=" + ledger.reservations());
+            }
+        });
+    }
+
+    private static void hybridCourierDispatch(GameTestHelper helper) {
+        ServerLevel level = helper.getLevel();
+        ServerPlayer owner = makeConnectedMockPlayer(helper, GameType.CREATIVE);
+        BlockPos hallPos = isolatedCapital(helper, 214);
+        ChunkPos fixtureChunk = new ChunkPos(hallPos.getX() >> 4, hallPos.getZ() >> 4);
+        level.getChunkSource().updateChunkForced(fixtureChunk, true);
+        level.getChunk(fixtureChunk.x(), fixtureChunk.z());
+        owner.setPos(hallPos.getX() + 0.5D, hallPos.getY(), hallPos.getZ() + 0.5D);
+        CommandCenterBlockEntity hall = placeCommandCenter(helper, hallPos);
+        hall.claim(owner);
+        hall.setFaction("galacticwars:republic");
+
+        KingdomSavedData data = KingdomSavedData.get(level);
+        KingdomRecord kingdom = data.activateHall(
+                owner.getUUID(),
+                hall.factionId(),
+                level.dimension().identifier().toString(),
+                hallPos).orElse(null);
+        if (kingdom == null) {
+            helper.fail("Hybrid courier fixture could not activate its isolated kingdom");
+            return;
+        }
+
+        GalacticRecruitEntity courier = spawnRecruitAt(
+                helper, ModEntityTypes.CLONE_TROOPER.get(), hallPos.offset(2, 0, 0));
+        GalacticRecruitEntity requester = helper.spawn(
+                ModEntityTypes.CLONE_TROOPER.get(), new BlockPos(3, 1, 3));
+        courier.initializeFromSpawnEgg();
+        requester.initializeFromSpawnEgg();
+        courier.setNoAi(true);
+        requester.setNoAi(true);
+        courier.tame(owner);
+        requester.tame(owner);
+        if (!data.registerRecruit(
+                        owner.getUUID(), courier.getUUID(), NpcServiceBranch.CIVILIAN)
+                || !data.registerRecruit(
+                        owner.getUUID(), requester.getUUID(), NpcServiceBranch.CIVILIAN)
+                || !data.reserveWorksite(
+                        owner.getUUID(), courier.getUUID(), WorkerProfession.COURIER)) {
+            helper.fail("Hybrid courier fixture could not register its recruits and worksite");
+            return;
+        }
+        courier.setWorkerProfession(WorkerProfession.COURIER);
+
+        WorksiteRecord worksite = data.assignedWorksite(
+                owner.getUUID(), courier.getUUID()).orElseThrow();
+        var configuration = worksite.configuration();
+        WorksiteUpdateResult dispatchConfigured = data.configureWorksite(
+                owner.getUUID(),
+                worksite.id(),
+                configuration.revision(),
+                configuration.bounds(),
+                configuration.kingdomAccess(),
+                configuration.priority(),
+                configuration.overlayVisible(),
+                configuration.itemFilters(),
+                CourierDispatchMode.HYBRID);
+        if (!dispatchConfigured.accepted()) {
+            helper.fail("Hybrid courier dispatch mode was rejected: "
+                    + dispatchConfigured.reasonCode());
+            return;
+        }
+
+        BlockPos firstRouteWaypoint = hallPos.offset(1, 0, 0);
+        BlockPos secondRouteWaypoint = hallPos.offset(2, 0, 0);
+        String dimensionId = level.dimension().identifier().toString();
+        List<CourierWaypoint> route = List.of(
+                new CourierWaypoint(
+                        dimensionId,
+                        firstRouteWaypoint.getX(),
+                        firstRouteWaypoint.getY(),
+                        firstRouteWaypoint.getZ(),
+                        List.of(CourierTransferAction.waitTicks(1))),
+                new CourierWaypoint(
+                        dimensionId,
+                        secondRouteWaypoint.getX(),
+                        secondRouteWaypoint.getY(),
+                        secondRouteWaypoint.getZ(),
+                        List.of(CourierTransferAction.waitTicks(1))));
+        WorksiteRecord hybridWorksite = dispatchConfigured.worksite().orElseThrow();
+        WorksiteUpdateResult routeConfigured = data.configureWorksiteRoute(
+                owner.getUUID(),
+                hybridWorksite.id(),
+                hybridWorksite.configuration().revision(),
+                route,
+                CourierRouteMode.LOOP);
+        if (!routeConfigured.accepted()) {
+            helper.fail("Hybrid courier route was rejected: " + routeConfigured.reasonCode());
+            return;
+        }
+
+        putContainerItem(hall, new ItemStack(Items.BREAD, 8));
+        SupplyDemand sustainedDemand = new SupplyDemand(
+                UUID.randomUUID(),
+                SupplyCategory.FOOD,
+                "minecraft:bread",
+                4,
+                0,
+                100,
+                "recruit/" + requester.getUUID() + "/hybrid_dispatch");
+        if (!data.requestSupply(
+                owner.getUUID(), kingdom.settlement().id(), sustainedDemand)) {
+            helper.fail("Hybrid courier sustained demand was rejected");
+            return;
+        }
+        StorageEndpoint hallStorage = data.registeredStorageEndpoint(
+                owner.getUUID(), dimensionId, hallPos).orElseThrow();
+        var reserved = data.reserveSupply(
+                owner.getUUID(),
+                kingdom.settlement().id(),
+                sustainedDemand.id(),
+                courier.getUUID(),
+                hallStorage,
+                sustainedDemand.outstandingQuantity(),
+                8,
+                level.getGameTime(),
+                1_200L);
+        if (!reserved.accepted()) {
+            helper.fail("Hybrid courier automatic reservation was rejected: "
+                    + reserved.reason());
+            return;
+        }
+        setActiveSupplyReservation(
+                courier, reserved.reservation().orElseThrow().id());
+
+        helper.runAfterDelay(2, () -> verifyHybridCourierDispatch(
+                helper, level, courier, firstRouteWaypoint, fixtureChunk));
+    }
+
+    private static void verifyHybridCourierDispatch(
+            GameTestHelper helper,
+            ServerLevel level,
+            GalacticRecruitEntity courier,
+            BlockPos firstRouteWaypoint,
+            ChunkPos fixtureChunk
+    ) {
+        invokeAcquireCourierOrder(courier);
+        if (!courier.getWorkerStatus().reasonCode().equals("automatic_supply_withdraw")) {
+            helper.fail("Automatic-first hybrid courier did not acquire sustained demand: "
+                    + courier.getWorkerStatus());
+            return;
+        }
+        if (!invokeReleaseActiveSupplyReservation(courier)) {
+            helper.fail("Hybrid courier could not release its first source reservation");
+            return;
+        }
+
+        CompoundTag persisted = saveRecruit(courier, level);
+        String persistedTurn = persisted.getString("CourierHybridTurn").orElse("");
+        if (!persistedTurn.equals("route")) {
+            helper.fail("Automatic hybrid acquisition did not persist the route turn: "
+                    + persistedTurn);
+            return;
+        }
+
+        GalacticRecruitEntity reloaded = loadRecruit(persisted, level);
+        invokeAcquireCourierOrder(reloaded);
+        if (!reloaded.getWorkerStatus().reasonCode().equals("courier_route_action")
+                || reloaded.getWorkerStatus().target().filter(target ->
+                        target.x() == firstRouteWaypoint.getX()
+                                && target.y() == firstRouteWaypoint.getY()
+                                && target.z() == firstRouteWaypoint.getZ()).isEmpty()) {
+            helper.fail("Reloaded hybrid courier starved its configured route: "
+                    + reloaded.getWorkerStatus());
+            return;
+        }
+        CompoundTag afterRoute = saveRecruit(reloaded, level);
+        if (!afterRoute.getString("CourierHybridTurn").orElse("").equals("automatic")) {
+            helper.fail("Successful route acquisition did not persist the next automatic turn");
+            return;
+        }
+
+        CompoundTag legacy = persisted.copy();
+        legacy.remove("CourierHybridTurn");
+        GalacticRecruitEntity legacyReload = loadRecruit(legacy, level);
+        CompoundTag migratedLegacy = saveRecruit(legacyReload, level);
+        if (!migratedLegacy.getString("CourierHybridTurn").orElse("").equals("automatic")) {
+            helper.fail("A legacy courier without a persisted turn was not migrated automatic-first");
+            return;
+        }
+        level.getChunkSource().updateChunkForced(fixtureChunk, false);
+        helper.succeed();
+    }
+
+    private static void boundedWorkerScans(GameTestHelper helper) {
+        BlockPos hallPos = isolatedCapital(helper, 20);
+        CommandCenterBlockEntity hall = placeCommandCenter(helper, hallPos);
+        ServerPlayer owner = makeConnectedMockPlayer(helper, GameType.CREATIVE);
+        hall.claim(owner);
+        KingdomSavedData data = KingdomSavedData.get(helper.getLevel());
+        if (data.activateHall(
+                owner.getUUID(),
+                hall.factionId(),
+                helper.getLevel().dimension().identifier().toString(),
+                hallPos).isEmpty()) {
+            helper.fail("Bounded scan fixture could not activate its Command Center");
+            return;
+        }
+        GalacticRecruitEntity recruit = ModEntityTypes.CLONE_TROOPER.get().create(
+                helper.getLevel(), EntitySpawnReason.TRIGGERED);
+        if (recruit == null) {
+            helper.fail("Bounded scan fixture could not create its recruit");
+            return;
+        }
+        recruit.setPos(hallPos.getX() + 1.5D, hallPos.getY(), hallPos.getZ() + 0.5D);
+        helper.getLevel().addFreshEntity(recruit);
+        recruit.tame(owner);
+        recruit.setWorkerProfession(WorkerProfession.ANIMAL_FARMER);
+        if (!data.registerRecruit(owner.getUUID(), recruit.getUUID())
+                || !data.reserveWorksite(
+                        owner.getUUID(), recruit.getUUID(), WorkerProfession.ANIMAL_FARMER)) {
+            helper.fail("Bounded scan fixture could not assign its initial worksite");
+            return;
+        }
+        WorksiteRecord initialWorksite = data.assignedWorksite(
+                owner.getUUID(), recruit.getUUID()).orElseThrow();
+        WorkOrder queuedAnimalOrder = new WorkOrder(
+                UUID.randomUUID(),
+                WorkOrderType.ANIMAL_FARM,
+                Optional.empty(),
+                WorkOrderState.QUEUED,
+                Optional.of(initialWorksite.id()),
+                Optional.empty(),
+                helper.getLevel().dimension().identifier().toString(),
+                hallPos.getX(),
+                hallPos.getY(),
+                hallPos.getZ(),
+                "minecraft:wheat",
+                1,
+                0,
+                "",
+                0);
+        WorkOrder claimedAnimalOrder = data.queueAndClaimWorkOrder(
+                owner.getUUID(), recruit.getUUID(), queuedAnimalOrder).orElseThrow();
+        setRecruitField(recruit, "workOrderId", claimedAnimalOrder.id());
+        recruit.setWorkerProfession(WorkerProfession.COOK);
+        WorkOrder releasedAnimalOrder = data.workOrder(
+                owner.getUUID(), claimedAnimalOrder.id()).orElseThrow();
+        if (releasedAnimalOrder.assignedRecruitId().isPresent()
+                || recruit.getWorkerStatus().workOrderId().isPresent()
+                || recruit.getWorkerStatus().phase() != WorkerPhase.ACQUIRE_ORDER) {
+            helper.fail("Profession change retained its previous order or execution cursor: "
+                    + releasedAnimalOrder + ", status=" + recruit.getWorkerStatus());
+            return;
+        }
+        WorksiteRecord assigned = data.assignedWorksite(
+                owner.getUUID(), recruit.getUUID()).orElseThrow();
+        WorksiteUpdateResult tagConfigured = data.configureWorksite(
+                owner.getUUID(),
+                assigned.id(),
+                assigned.configuration().revision(),
+                assigned.configuration().bounds(),
+                true,
+                assigned.configuration().priority(),
+                assigned.configuration().overlayVisible(),
+                List.of("#minecraft:meat"),
+                assigned.configuration().courierDispatchMode());
+        net.minecraft.world.item.Item tagDemand = invokeConfiguredCookingDemand(
+                recruit, helper.getLevel());
+        TagKey<net.minecraft.world.item.Item> meatTag = TagKey.create(
+                Registries.ITEM, Identifier.withDefaultNamespace("meat"));
+        if (!tagConfigured.accepted()
+                || tagDemand == null
+                || !new ItemStack(tagDemand).is(meatTag)) {
+            helper.fail("Cook did not resolve a recipe-bearing member from #minecraft:meat; item="
+                    + (tagDemand == null
+                            ? "none"
+                            : BuiltInRegistries.ITEM.getKey(tagDemand)));
+            return;
+        }
+
+        BlockPos chestPos = hallPos.offset(3, 0, 0);
+        helper.getLevel().setBlock(chestPos, Blocks.CHEST.defaultBlockState(), 3);
+        if (!(helper.getLevel().getBlockEntity(chestPos) instanceof Container chest)) {
+            helper.fail("Bounded scan fixture could not place its backing chest");
+            return;
+        }
+        StorageEndpoint oneSlotEndpoint = new StorageEndpoint(
+                helper.getLevel().dimension().identifier().toString(),
+                chestPos.getX(),
+                chestPos.getY(),
+                chestPos.getZ(),
+                1);
+        KingdomRecord currentKingdom = data.kingdomForOwner(owner.getUUID()).orElseThrow();
+        SettlementRecord currentSettlement = currentKingdom.settlement();
+        WorksiteRecord currentWorksite = data.assignedWorksite(
+                owner.getUUID(), recruit.getUUID()).orElseThrow();
+        WorksiteRecord endpointWorksite = currentWorksite.withPrimaryStorageEndpoint(
+                oneSlotEndpoint);
+        List<WorksiteRecord> updatedWorksites = currentSettlement.worksites().stream()
+                .map(worksite -> worksite.id().equals(endpointWorksite.id())
+                        ? endpointWorksite : worksite)
+                .toList();
+        SettlementRecord updatedSettlement = new SettlementRecord(
+                currentSettlement.id(),
+                currentSettlement.dimensionId(),
+                currentSettlement.hallX(),
+                currentSettlement.hallY(),
+                currentSettlement.hallZ(),
+                currentSettlement.claimRadius(),
+                currentSettlement.housingCapacity(),
+                currentSettlement.recruitIds(),
+                currentSettlement.commanderId(),
+                currentSettlement.commanderPolicy(),
+                updatedWorksites,
+                currentSettlement.buildProjects(),
+                currentSettlement.workOrders(),
+                currentSettlement.recruitmentCampaigns(),
+                currentSettlement.rewards().add(oneSlotEndpoint.slots(), 0),
+                currentSettlement.revision() + 1,
+                currentSettlement.additionalCommanderIds());
+        storeKingdomFixture(data, currentKingdom.replaceSettlement(updatedSettlement));
+        if (data.registeredStorageEndpoint(
+                        owner.getUUID(),
+                        helper.getLevel().dimension().identifier().toString(),
+                        chestPos)
+                .filter(endpoint -> endpoint.slots() == 1)
+                .isEmpty()) {
+            helper.fail("Bounded scan fixture did not install its one-slot endpoint");
+            return;
+        }
+
+        chest.setItem(1, new ItemStack(Items.BREAD));
+        boolean unreachableDemand = invokeRequestRecruitFoodSupply(
+                recruit, helper.getLevel());
+        if (unreachableDemand
+                || !data.supplyLedger(updatedSettlement.id()).orElseThrow().demands().isEmpty()) {
+            helper.fail("Food beyond the registered slot limit published an unreachable demand");
+            return;
+        }
+        chest.setItem(1, ItemStack.EMPTY);
+        chest.setItem(0, new ItemStack(Items.BREAD));
+        boolean reachableDemand = invokeRequestRecruitFoodSupply(recruit, helper.getLevel());
+        var demands = data.supplyLedger(updatedSettlement.id()).orElseThrow().demands();
+        if (!reachableDemand
+                || demands.size() != 1
+                || !demands.getFirst().itemId().equals("minecraft:bread")) {
+            helper.fail("Food in the registered slot did not publish a reachable demand");
+            return;
+        }
+        helper.succeed();
     }
 
     private static void animalFarmerSpeciesPairing(GameTestHelper helper) {
@@ -7243,13 +12160,19 @@ public final class ModGameTests {
         private final ServerPlayer owner;
         private final GalacticRecruitEntity recruit;
         private final KingdomSavedData data;
-        private final ChunkPos forcedChunk;
+        private final Set<ChunkPos> forcedChunks;
         private final int storedBeforeFishing;
         private int phase;
         private long phaseStartedAt;
         private boolean complete;
         private Animal first;
         private Animal second;
+        private BlockPos furnacePos;
+        private long rawWithdrawnAt = -1L;
+        private long furnaceLoadedAt = -1L;
+        private long furnaceLitAt = -1L;
+        private String lastCookStatus = "";
+        private long lastCookStatusAt = -1L;
 
         private SpecialistWorkerLifecycleScenario(
                 GameTestHelper helper,
@@ -7258,7 +12181,7 @@ public final class ModGameTests {
                 ServerPlayer owner,
                 GalacticRecruitEntity recruit,
                 KingdomSavedData data,
-                ChunkPos forcedChunk,
+                Set<ChunkPos> forcedChunks,
                 int storedBeforeFishing
         ) {
             this.helper = helper;
@@ -7267,7 +12190,7 @@ public final class ModGameTests {
             this.owner = owner;
             this.recruit = recruit;
             this.data = data;
-            this.forcedChunk = forcedChunk;
+            this.forcedChunks = forcedChunks;
             this.storedBeforeFishing = storedBeforeFishing;
             this.phaseStartedAt = helper.getTick();
         }
@@ -7358,7 +12281,7 @@ public final class ModGameTests {
                 this.beginCooking();
                 return;
             }
-            this.timeoutAfter(360, "Animal farmer did not withdraw feed and breed"
+            this.timeoutAfter(520, "Animal farmer did not withdraw feed and breed"
                     + "; status=" + this.recruit.getWorkerStatus()
                     + ", order=" + completedOrder
                     + ", love=" + this.first.isInLove() + "/"
@@ -7367,6 +12290,8 @@ public final class ModGameTests {
         }
 
         private void beginCooking() {
+            WorkOrder previousOrder = this.data.assignedWorkOrder(
+                    this.owner.getUUID(), this.recruit.getUUID()).orElse(null);
             this.owner.setPos(
                     this.recruit.getX(), this.recruit.getY(), this.recruit.getZ());
             this.recruit.setWorkerMainHandItem(ItemStack.EMPTY);
@@ -7375,30 +12300,64 @@ public final class ModGameTests {
                 this.fail("Cook contract was rejected");
                 return;
             }
+            WorkOrder releasedOrder = previousOrder == null
+                    ? null
+                    : this.data.workOrder(
+                            this.owner.getUUID(), previousOrder.id()).orElse(null);
+            if ((releasedOrder != null && releasedOrder.assignedRecruitId().isPresent())
+                    || this.recruit.getWorkerStatus().workOrderId().isPresent()) {
+                this.fail("Profession change retained the previous worker order; previous="
+                        + releasedOrder + ", status=" + this.recruit.getWorkerStatus());
+                return;
+            }
             if (!configureWorkerLifecycleWorksite(
                     this.helper,
                     this.data,
                     this.owner,
                     this.recruit,
                     this.hallPos,
-                    List.of("minecraft:beef"))) {
+                    List.of("#minecraft:meat"))) {
                 this.complete = true;
                 return;
             }
-            BlockPos furnacePos = this.hallPos.offset(3, 0, -2);
+            this.furnacePos = this.hallPos.offset(3, 0, -2);
             this.helper.getLevel().setBlock(
-                    furnacePos, Blocks.FURNACE.defaultBlockState(), 3);
+                    this.furnacePos, Blocks.FURNACE.defaultBlockState(), 3);
             putContainerItem(this.hall, new ItemStack(Items.BEEF));
             putContainerItem(this.hall, new ItemStack(Items.COAL));
             this.advanceTo(2);
         }
 
         private void waitForCooking() {
+            long currentTick = this.helper.getTick();
+            int raw = countContainerItem(this.hall, Items.BEEF);
+            if (raw == 0 && this.rawWithdrawnAt < 0L) {
+                this.rawWithdrawnAt = currentTick;
+            }
+            Container furnace = this.helper.getLevel().getBlockEntity(this.furnacePos)
+                    instanceof Container container ? container : null;
+            if (furnace != null && !furnace.getItem(0).isEmpty()
+                    && this.furnaceLoadedAt < 0L) {
+                this.furnaceLoadedAt = currentTick;
+            }
+            BlockState furnaceState = this.helper.getLevel().getBlockState(this.furnacePos);
+            if (furnaceState.hasProperty(BlockStateProperties.LIT)
+                    && furnaceState.getValue(BlockStateProperties.LIT)
+                    && this.furnaceLitAt < 0L) {
+                this.furnaceLitAt = currentTick;
+            }
+            String cookStatus = this.recruit.getWorkerStatus().phase() + "/"
+                    + this.recruit.getWorkerStatus().reasonCode() + "/"
+                    + this.recruit.getWorkerStatus().target();
+            if (!cookStatus.equals(this.lastCookStatus)) {
+                this.lastCookStatus = cookStatus;
+                this.lastCookStatusAt = currentTick;
+            }
             boolean completedOrder = hasCompletedWorkerOrder(
                     this.data, this.owner.getUUID(), WorkOrderType.COOK);
             if (completedOrder
                     && countContainerItem(this.hall, Items.COOKED_BEEF) == 1
-                    && countContainerItem(this.hall, Items.BEEF) == 0
+                    && raw == 0
                     && workerInventoryCount(this.recruit) == 0) {
                 this.beginMerchant();
                 return;
@@ -7406,8 +12365,20 @@ public final class ModGameTests {
             this.timeoutAfter(600, "Cook did not use a real furnace recipe"
                     + "; status=" + this.recruit.getWorkerStatus()
                     + ", order=" + completedOrder
-                    + ", raw=" + countContainerItem(this.hall, Items.BEEF)
-                    + ", cooked=" + countContainerItem(this.hall, Items.COOKED_BEEF));
+                    + ", raw=" + raw
+                    + ", cooked=" + countContainerItem(this.hall, Items.COOKED_BEEF)
+                    + ", rawWithdrawnAt=" + this.rawWithdrawnAt
+                    + ", furnaceLoadedAt=" + this.furnaceLoadedAt
+                    + ", furnaceLitAt=" + this.furnaceLitAt
+                    + ", lastStatusAt=" + this.lastCookStatusAt
+                    + ", position=" + this.recruit.position()
+                    + ", navigationDone=" + this.recruit.getNavigation().isDone()
+                    + ", walkMemory=" + BrainUtil.hasMemory(this.recruit,
+                    net.minecraft.world.entity.ai.memory.MemoryModuleType.WALK_TARGET)
+                    + ", navigationResult=" + BrainUtil.getMemory(
+                    this.recruit, ArmyBrainMemoryTypes.NAVIGATION_RESULT)
+                    + ", furnace=" + (furnace == null ? "missing" : List.of(
+                    furnace.getItem(0), furnace.getItem(1), furnace.getItem(2))));
         }
 
         private void beginMerchant() {
@@ -7443,8 +12414,7 @@ public final class ModGameTests {
                     && this.recruit.hasMerchantStock(
                             ModItems.ENERGY_CELL.get(), 2)) {
                 this.complete = true;
-                this.helper.getLevel().getChunkSource()
-                        .updateChunkForced(this.forcedChunk, false);
+                this.releaseForcedChunks();
                 this.helper.succeed();
                 return;
             }
@@ -7467,9 +12437,13 @@ public final class ModGameTests {
 
         private void fail(String message) {
             this.complete = true;
-            this.helper.getLevel().getChunkSource()
-                    .updateChunkForced(this.forcedChunk, false);
+            this.releaseForcedChunks();
             this.helper.fail(message);
+        }
+
+        private void releaseForcedChunks() {
+            this.forcedChunks.forEach(chunk -> this.helper.getLevel().getChunkSource()
+                    .updateChunkForced(chunk, false));
         }
     }
 
@@ -7583,12 +12557,95 @@ public final class ModGameTests {
         return count;
     }
 
+    private static List<ItemStack> copyContainerStacks(Container container) {
+        List<ItemStack> stacks = new ArrayList<>();
+        for (int slot = 0; slot < container.getContainerSize(); slot++) {
+            ItemStack stack = container.getItem(slot);
+            if (!stack.isEmpty()) {
+                stacks.add(stack.copy());
+            }
+        }
+        return stacks;
+    }
+
+    private static int countMatchingStack(Container container, ItemStack template) {
+        int count = 0;
+        for (int slot = 0; slot < container.getContainerSize(); slot++) {
+            ItemStack stack = container.getItem(slot);
+            if (ItemStack.isSameItemSameComponents(stack, template)) {
+                count += stack.getCount();
+            }
+        }
+        return count;
+    }
+
+    private static int countMatchingStack(List<ItemStack> stacks, ItemStack template) {
+        return stacks.stream()
+                .filter(stack -> ItemStack.isSameItemSameComponents(stack, template))
+                .mapToInt(ItemStack::getCount)
+                .sum();
+    }
+
     private static int countContainerItems(Container container) {
         int count = 0;
         for (int slot = 0; slot < container.getContainerSize(); slot++) {
             count += container.getItem(slot).getCount();
         }
         return count;
+    }
+
+    private static WorksiteRecord configurePhysicalMarket(
+            GameTestHelper helper,
+            ServerPlayer owner,
+            GalacticRecruitEntity merchant,
+            CommandCenterBlockEntity storage,
+            BlockPos storagePos,
+            int energyCellStock
+    ) {
+        KingdomSavedData data = KingdomSavedData.get(helper.getLevel());
+        if (data.kingdomForRecruit(merchant.getUUID()).isEmpty()
+                && !data.registerRecruit(
+                        owner.getUUID(), merchant.getUUID(), NpcServiceBranch.CIVILIAN)) {
+            throw new IllegalStateException("Could not register the physical market merchant");
+        }
+        if (!data.reserveWorksite(
+                owner.getUUID(), merchant.getUUID(), WorkerProfession.MERCHANT)) {
+            throw new IllegalStateException("Could not reserve the physical market worksite");
+        }
+        String dimensionId = helper.getLevel().dimension().identifier().toString();
+        WorksiteRecord worksite = data.configureAssignedFrontierWorksite(
+                        owner.getUUID(),
+                        merchant.getUUID(),
+                        dimensionId,
+                        storagePos.offset(2, 0, 0),
+                        8)
+                .orElseGet(() -> data.assignedWorksite(
+                        owner.getUUID(), merchant.getUUID()).orElseThrow());
+        StorageEndpoint endpoint = data.registeredStorageEndpoint(
+                        owner.getUUID(), dimensionId, storagePos)
+                .orElseThrow(() -> new IllegalStateException(
+                        "Command Center was not registered as physical market storage"));
+        WorksiteUpdateResult configured = data.configureWorksiteStorage(
+                owner.getUUID(), worksite.id(), worksite.configuration().revision(), endpoint);
+        if (!configured.accepted() && !configured.reasonCode().equals("unchanged")) {
+            throw new IllegalStateException(
+                    "Could not configure physical market storage: " + configured.reasonCode());
+        }
+        WorksiteRecord authoritative = data.assignedWorksite(
+                owner.getUUID(), merchant.getUUID()).orElseThrow();
+        setRecruitField(merchant, "storageTarget", storagePos.immutable());
+        merchant.setPos(
+                authoritative.x() + 0.5D,
+                authoritative.y(),
+                authoritative.z() + 0.5D);
+        setWorkerPhase(merchant, WorkerPhase.COOLDOWN, "market_open", null);
+        if (energyCellStock > 0) {
+            putContainerItem(storage, new ItemStack(ModItems.ENERGY_CELL.get(), energyCellStock));
+        }
+        if (!merchant.isMarketAvailable()) {
+            throw new IllegalStateException("Configured physical market did not open");
+        }
+        return authoritative;
     }
 
     private static SmartBrainTestArea prepareSmartBrainTestArea(
@@ -7599,12 +12656,21 @@ public final class ModGameTests {
             int minZ,
             int maxZ
     ) {
-        int verticalLane = SMART_BRAIN_AREA_SEQUENCE.getAndIncrement();
+        int lane = SMART_BRAIN_AREA_SEQUENCE.getAndIncrement();
+        int horizontalLane = lane / SMART_BRAIN_TEST_AREA_VERTICAL_LANES;
+        int verticalLane = lane % SMART_BRAIN_TEST_AREA_VERTICAL_LANES;
         BlockPos testOrigin = helper.absolutePos(BlockPos.ZERO);
         int baseY = Math.min(
                 helper.getLevel().getMaxY() - 8,
-                helper.getLevel().getMinY() + 256 + verticalLane * 12);
-        BlockPos isolatedBase = new BlockPos(testOrigin.getX(), baseY, testOrigin.getZ());
+                helper.getLevel().getMinY() + 256
+                        + verticalLane * SMART_BRAIN_TEST_AREA_VERTICAL_SPACING);
+        // Two well-separated vertical floors halve chunk generation, while the horizontal
+        // lane prevents the old max-height clamp from collapsing later fixtures together.
+        BlockPos isolatedBase = new BlockPos(
+                testOrigin.getX()
+                        + horizontalLane * SMART_BRAIN_TEST_AREA_HORIZONTAL_SPACING,
+                baseY,
+                testOrigin.getZ());
         return prepareSmartBrainTestAreaAt(
                 helper, playerGameType, minX, maxX, minZ, maxZ,
                 isolatedBase);
@@ -7654,6 +12720,32 @@ public final class ModGameTests {
         // advances a player's entity-ticking chunk ticket after a same-dimension teleport.
         helper.getLevel().getChunkSource().move(player);
         return new SmartBrainTestArea(base, player);
+    }
+
+    private static boolean areSmartBrainAreaChunksTicking(
+            GameTestHelper helper,
+            SmartBrainTestArea area,
+            int minX,
+            int maxX,
+            int minZ,
+            int maxZ
+    ) {
+        // Aggregate GameTests can register the embedded player after the one-shot
+        // post-teleport update. Refresh its ticket before polling the prepared lane.
+        helper.getLevel().getChunkSource().move(area.player());
+        int minChunkX = Math.min(area.base().getX() + minX, area.base().getX() + maxX) >> 4;
+        int maxChunkX = Math.max(area.base().getX() + minX, area.base().getX() + maxX) >> 4;
+        int minChunkZ = Math.min(area.base().getZ() + minZ, area.base().getZ() + maxZ) >> 4;
+        int maxChunkZ = Math.max(area.base().getZ() + minZ, area.base().getZ() + maxZ) >> 4;
+        for (int chunkX = minChunkX; chunkX <= maxChunkX; chunkX++) {
+            for (int chunkZ = minChunkZ; chunkZ <= maxChunkZ; chunkZ++) {
+                if (!helper.getLevel().areEntitiesActuallyLoadedAndTicking(
+                        new ChunkPos(chunkX, chunkZ))) {
+                    return false;
+                }
+            }
+        }
+        return true;
     }
 
     private static GalacticRecruitEntity spawnRecruitAt(
@@ -7817,6 +12909,63 @@ public final class ModGameTests {
         }
     }
 
+    private static net.minecraft.world.item.Item invokeConfiguredCookingDemand(
+            GalacticRecruitEntity recruit,
+            ServerLevel level
+    ) {
+        try {
+            Method method = GalacticRecruitEntity.class.getDeclaredMethod(
+                    "configuredCookingDemand", ServerLevel.class);
+            method.setAccessible(true);
+            return (net.minecraft.world.item.Item) method.invoke(recruit, level);
+        } catch (ReflectiveOperationException exception) {
+            throw new IllegalStateException("Could not resolve configured cooking demand", exception);
+        }
+    }
+
+    private static boolean invokeRequestRecruitFoodSupply(
+            GalacticRecruitEntity recruit,
+            ServerLevel level
+    ) {
+        try {
+            Method method = GalacticRecruitEntity.class.getDeclaredMethod(
+                    "requestRecruitFoodSupply", ServerLevel.class);
+            method.setAccessible(true);
+            return (boolean) method.invoke(recruit, level);
+        } catch (ReflectiveOperationException exception) {
+            throw new IllegalStateException("Could not request recruit food supply", exception);
+        }
+    }
+
+    private static void storeKingdomFixture(KingdomSavedData data, KingdomRecord kingdom) {
+        try {
+            Method method = KingdomSavedData.class.getDeclaredMethod(
+                    "storeKingdom", KingdomRecord.class);
+            method.setAccessible(true);
+            method.invoke(data, kingdom);
+            data.setDirty();
+        } catch (ReflectiveOperationException exception) {
+            throw new IllegalStateException("Could not install GameTest kingdom fixture", exception);
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private static void setSavedDataState(
+            ProgressionSavedData data,
+            UUID playerId,
+            ProgressionState state
+    ) {
+        try {
+            Field field = ProgressionSavedData.class.getDeclaredField("states");
+            field.setAccessible(true);
+            ((Map<UUID, ProgressionState>) field.get(data)).put(playerId, state);
+            data.setDirty();
+        } catch (ReflectiveOperationException exception) {
+            throw new IllegalStateException(
+                    "Could not install progression overflow fixture", exception);
+        }
+    }
+
     private static GalacticVehicleEntity spawnVehicleAt(
             GameTestHelper helper,
             EntityType<GalacticVehicleEntity> type,
@@ -7917,12 +13066,21 @@ public final class ModGameTests {
         }
 
         private void waitForIndexAndPrepare() {
-            boolean allIndexed = this.vehicles.stream().allMatch(
-                    vehicle -> this.helper.getLevel().getEntity(vehicle.getUUID()) == vehicle);
-            if (!allIndexed) {
-                if (this.helper.getTick() - this.indexWaitStartedTick >= 120L) {
+            this.helper.getLevel().getChunkSource().move(this.owner);
+            long indexedVehicles = this.vehicles.stream()
+                    .filter(vehicle -> this.helper.getLevel().getEntity(vehicle.getUUID()) == vehicle)
+                    .count();
+            long tickingVehicles = this.vehicles.stream()
+                    .filter(vehicle -> this.helper.getLevel().areEntitiesActuallyLoadedAndTicking(
+                            ChunkPos.containing(vehicle.blockPosition())))
+                    .count();
+            if (indexedVehicles != this.vehicles.size() || tickingVehicles != this.vehicles.size()) {
+                if (this.helper.getTick() - this.indexWaitStartedTick
+                        >= SMART_BRAIN_CHUNK_READY_TIMEOUT) {
                     this.phase = 3;
-                    this.helper.fail("Vehicle chassis never entered the server entity index");
+                    this.helper.fail("Vehicle chassis never became ready: indexed="
+                            + indexedVehicles + "/" + this.vehicles.size()
+                            + ", ticking=" + tickingVehicles + "/" + this.vehicles.size());
                 }
                 return;
             }
@@ -8315,7 +13473,9 @@ public final class ModGameTests {
         private final GameTestHelper helper;
         private final SmartBrainTestArea area;
         private final List<GalacticRecruitEntity> responders = new ArrayList<>();
+        private final long chunkWaitStartedTick;
         private boolean started;
+        private boolean fixturesReady;
         private boolean complete;
         private boolean alertPrecedenceVerified;
         private boolean warningCooldownVerified;
@@ -8336,6 +13496,7 @@ public final class ModGameTests {
         ) {
             this.helper = helper;
             this.area = area;
+            this.chunkWaitStartedTick = helper.getTick();
         }
 
         private void tick() {
@@ -8343,10 +13504,45 @@ public final class ModGameTests {
                 return;
             }
             if (!this.started) {
+                if (!areSmartBrainAreaChunksTicking(
+                        this.helper, this.area, -2, 50, -2, 12)) {
+                    if (this.helper.getTick() - this.chunkWaitStartedTick
+                            >= SMART_BRAIN_CHUNK_READY_TIMEOUT) {
+                        this.fail("Faction AI reaction area never became entity-ticking");
+                    }
+                    return;
+                }
                 this.start();
                 if (this.complete) {
                     return;
                 }
+            }
+
+            if (!this.fixturesReady) {
+                List<GalacticRecruitEntity> fixtures = new ArrayList<>(this.responders);
+                fixtures.add(this.commander);
+                fixtures.add(this.trader);
+                fixtures.add(this.civilian);
+                fixtures.add(this.fallbackTrooper);
+                fixtures.add(this.foreignOutpostTrooper);
+                long indexedFixtures = fixtures.stream()
+                        .filter(recruit -> this.helper.getLevel().getEntity(recruit.getUUID()) == recruit)
+                        .count();
+                long tickingFixtures = fixtures.stream()
+                        .filter(recruit -> this.helper.getLevel().areEntitiesActuallyLoadedAndTicking(
+                                ChunkPos.containing(recruit.blockPosition())))
+                        .count();
+                if (indexedFixtures != fixtures.size() || tickingFixtures != fixtures.size()) {
+                    if (this.helper.getTick() - this.startTick
+                            >= SMART_BRAIN_CHUNK_READY_TIMEOUT) {
+                        this.fail("Faction AI reaction fixtures never became ready: indexed="
+                                + indexedFixtures + "/" + fixtures.size()
+                                + ", ticking=" + tickingFixtures + "/" + fixtures.size());
+                    }
+                    return;
+                }
+                this.fixturesReady = true;
+                this.startTick = this.helper.getTick();
             }
 
             ServerLevel level = this.helper.getLevel();
@@ -8792,6 +13988,41 @@ public final class ModGameTests {
                     workstation.getZ() + 0.5D);
             this.worker.getNavigation().stop();
             this.workStartTick = this.helper.getTick();
+        }
+    }
+
+    private static void setActiveSupplyReservation(
+            GalacticRecruitEntity recruit,
+            UUID reservationId
+    ) {
+        WorkerExecutionState execution = (WorkerExecutionState) getRecruitField(
+                recruit, "workerExecutionState");
+        setRecruitField(
+                recruit,
+                "workerExecutionState",
+                execution.withSupplyReservation(Optional.of(reservationId)));
+    }
+
+    private static void invokeAcquireCourierOrder(GalacticRecruitEntity recruit) {
+        try {
+            Method method = GalacticRecruitEntity.class.getDeclaredMethod("acquireCourierOrder");
+            method.setAccessible(true);
+            method.invoke(recruit);
+        } catch (ReflectiveOperationException exception) {
+            throw new IllegalStateException("Could not acquire courier work", exception);
+        }
+    }
+
+    private static boolean invokeReleaseActiveSupplyReservation(
+            GalacticRecruitEntity recruit
+    ) {
+        try {
+            Method method = GalacticRecruitEntity.class.getDeclaredMethod(
+                    "releaseActiveSupplyReservation");
+            method.setAccessible(true);
+            return (boolean) method.invoke(recruit);
+        } catch (ReflectiveOperationException exception) {
+            throw new IllegalStateException("Could not release courier supply reservation", exception);
         }
     }
 

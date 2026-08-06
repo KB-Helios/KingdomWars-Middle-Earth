@@ -118,7 +118,7 @@ public final class KingdomResearchService {
             return ResearchResult.replay(state.revision());
         }
         GalacticRecruitEntity recruit = technicianCandidate(
-                context.level, context.data, context.kingdom, technicianId, commandCenter);
+                context.level, context.data, context.kingdom, technicianId);
         if (recruit == null) {
             return ResearchResult.rejected("invalid_technician", state.revision());
         }
@@ -194,7 +194,7 @@ public final class KingdomResearchService {
         }
         UUID technicianId = project.technicianId().orElse(null);
         GalacticRecruitEntity technician = technicianCandidate(
-                level, data, kingdom, technicianId, commandCenter);
+                level, data, kingdom, technicianId);
         if (technician == null || !technician.isActivelyResearchingAt(commandCenter.getBlockPos())) {
             return false;
         }
@@ -219,19 +219,14 @@ public final class KingdomResearchService {
             ServerLevel level,
             KingdomSavedData data,
             KingdomRecord kingdom,
-            UUID technicianId,
-            CommandCenterBlockEntity commandCenter
+            UUID technicianId
     ) {
         if (technicianId == null || data.kingdomForRecruit(technicianId)
                 .filter(candidate -> candidate.id().equals(kingdom.id())).isEmpty()
                 || !(level.getEntity(technicianId) instanceof GalacticRecruitEntity recruit)
                 || !recruit.isAlive()
                 || !recruit.isTame()
-                || recruit.getWorkerProfession().filter(WorkerProfession.TECHNICIAN::equals).isEmpty()
-                || recruit.distanceToSqr(
-                        commandCenter.getBlockPos().getX() + 0.5D,
-                        commandCenter.getBlockPos().getY() + 0.5D,
-                        commandCenter.getBlockPos().getZ() + 0.5D) > 64.0D) {
+                || recruit.getWorkerProfession().filter(WorkerProfession.TECHNICIAN::equals).isEmpty()) {
             return null;
         }
         return recruit;

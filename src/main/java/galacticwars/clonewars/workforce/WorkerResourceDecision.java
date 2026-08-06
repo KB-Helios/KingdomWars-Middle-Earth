@@ -1,5 +1,6 @@
 package galacticwars.clonewars.workforce;
 
+import java.util.Locale;
 import java.util.Objects;
 
 public record WorkerResourceDecision(
@@ -10,7 +11,7 @@ public record WorkerResourceDecision(
 ) {
     public WorkerResourceDecision {
         Objects.requireNonNull(action, "action");
-        itemId = itemId == null ? "" : itemId.trim().toLowerCase();
+        itemId = itemId == null ? "" : itemId.trim().toLowerCase(Locale.ROOT);
         if (quantity < 0) {
             throw new IllegalArgumentException("quantity cannot be negative");
         }

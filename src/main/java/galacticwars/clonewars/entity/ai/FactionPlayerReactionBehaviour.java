@@ -37,6 +37,7 @@ public final class FactionPlayerReactionBehaviour
             return false;
         }
         return Config.ENABLE_DYNAMIC_FACTION_AI.getAsBoolean()
+                && !recruit.isHazardAvoidanceActive()
                 && recruit.isNaturalFactionNpc()
                 && nearbyPlayer(recruit) != null;
     }

@@ -39,6 +39,10 @@ public final class WorkerDutyLoadoutPolicy {
         };
     }
 
+    public static boolean isUsableTool(WorkerProfession profession, ItemStack stack) {
+        return !stack.isEmpty() && isCompatible(profession, stack);
+    }
+
     public static boolean isRecognizedTool(ItemStack stack) {
         if (stack.isEmpty()) {
             return false;

@@ -2,35 +2,56 @@ package galacticwars.clonewars.menu;
 
 import dev.architectury.registry.menu.ExtendedMenuProvider;
 import galacticwars.clonewars.entity.GalacticRecruitEntity;
+import java.util.Objects;
 import java.util.Optional;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.chat.Component;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.inventory.AbstractContainerMenu;
 
 public final class WorksiteConfigurationMenuProvider implements ExtendedMenuProvider {
-    private final GalacticRecruitEntity recruit;
+    private final WorksiteConfigurationSnapshot preparedSnapshot;
     private final Optional<BlockPos> commandCenterAnchor;
-    private WorksiteConfigurationSnapshot preparedSnapshot;
 
-    public WorksiteConfigurationMenuProvider(GalacticRecruitEntity recruit) {
-        this(recruit, Optional.empty());
+    public static Optional<WorksiteConfigurationMenuProvider> prepare(
+            ServerPlayer player,
+            GalacticRecruitEntity recruit
+    ) {
+        return prepare(player, recruit, Optional.empty());
     }
 
-    public WorksiteConfigurationMenuProvider(
+    public static Optional<WorksiteConfigurationMenuProvider> prepare(
+            ServerPlayer player,
             GalacticRecruitEntity recruit,
             BlockPos commandCenterAnchor
     ) {
-        this(recruit, Optional.of(commandCenterAnchor.immutable()));
+        return prepare(
+                player,
+                recruit,
+                Optional.of(Objects.requireNonNull(
+                        commandCenterAnchor, "commandCenterAnchor").immutable()));
     }
 
-    private WorksiteConfigurationMenuProvider(
+    private static Optional<WorksiteConfigurationMenuProvider> prepare(
+            ServerPlayer player,
             GalacticRecruitEntity recruit,
             Optional<BlockPos> commandCenterAnchor
     ) {
-        this.recruit = recruit;
+        Objects.requireNonNull(player, "player");
+        Objects.requireNonNull(recruit, "recruit");
+        return WorksiteConfigurationMenu.capture(player, recruit, "ready")
+                .map(snapshot -> new WorksiteConfigurationMenuProvider(
+                        snapshot, commandCenterAnchor));
+    }
+
+    private WorksiteConfigurationMenuProvider(
+            WorksiteConfigurationSnapshot preparedSnapshot,
+            Optional<BlockPos> commandCenterAnchor
+    ) {
+        this.preparedSnapshot = Objects.requireNonNull(preparedSnapshot, "preparedSnapshot");
         this.commandCenterAnchor = commandCenterAnchor;
     }
 
@@ -48,17 +69,13 @@ public final class WorksiteConfigurationMenuProvider implements ExtendedMenuProv
         WorksiteConfigurationMenu menu = new WorksiteConfigurationMenu(
                 containerId,
                 playerInventory,
-                recruit,
+                preparedSnapshot,
                 commandCenterAnchor);
-        preparedSnapshot = menu.snapshot();
         return menu;
     }
 
     @Override
     public void saveExtraData(FriendlyByteBuf buffer) {
-        if (preparedSnapshot == null) {
-            throw new IllegalStateException("worksite menu data requested before menu creation");
-        }
         WorksiteConfigurationSnapshot.write(buffer, preparedSnapshot);
         buffer.writeBoolean(commandCenterAnchor.isPresent());
         commandCenterAnchor.ifPresent(buffer::writeBlockPos);

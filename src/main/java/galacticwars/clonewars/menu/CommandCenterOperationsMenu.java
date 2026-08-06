@@ -396,12 +396,14 @@ public final class CommandCenterOperationsMenu extends AbstractContainerMenu {
                 return report(serverPlayer, false, selectionReason(
                         !workers.isEmpty(), primaryTargetId.isEmpty()));
             }
-            if (WorksiteConfigurationMenu.captureSnapshot(serverPlayer, worker).isEmpty()) {
+            Optional<WorksiteConfigurationMenuProvider> provider =
+                    WorksiteConfigurationMenuProvider.prepare(serverPlayer, worker, hallPos);
+            if (provider.isEmpty()) {
                 return report(serverPlayer, false, "worksite_missing");
             }
             MenuRegistry.openExtendedMenu(
                     serverPlayer,
-                    new WorksiteConfigurationMenuProvider(worker, hallPos));
+                    provider.orElseThrow());
             return true;
         } else if (buttonId == RESUME_WORKER
                 || buttonId == RECALL_WORKER

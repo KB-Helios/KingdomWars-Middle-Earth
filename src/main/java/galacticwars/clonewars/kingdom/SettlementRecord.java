@@ -414,6 +414,9 @@ public record SettlementRecord(
             return this;
         }
         WorkAreaConfiguration configured = selected.configuration().withCourierRoute(route, mode);
+        if (configured == selected.configuration()) {
+            return this;
+        }
         java.util.ArrayList<WorksiteRecord> updated = new java.util.ArrayList<>(worksites.size());
         for (WorksiteRecord worksite : worksites) {
             updated.add(worksite.id().equals(worksiteId)

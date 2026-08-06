@@ -26,7 +26,8 @@ public final class RecruitSelfCareBehaviour extends ExtendedBehaviour<GalacticRe
             cooldownTicks--;
             return false;
         }
-        return recruit.shouldUseRecruitSelfCare();
+        return RecruitAiCadence.shouldCheckSelfCare(recruit.tickCount)
+                && recruit.shouldUseRecruitSelfCare();
     }
 
     @Override

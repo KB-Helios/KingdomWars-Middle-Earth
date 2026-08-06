@@ -50,6 +50,7 @@ public final class RecruitWalkTargetBehaviour
         // compatibility, which marks the recruit as sitting. The group brain
         // still needs to publish its formation target before it can hold it.
         if (recruit.isTame() && recruit.isOrderedToSit()
+                && !recruit.isHazardAvoidanceActive()
                 && !recruit.hasAuthoritativeArmyGroup()) {
             BrainUtil.clearMemory(recruit, MemoryModuleType.WALK_TARGET);
             stopOwnedNavigation(recruit);

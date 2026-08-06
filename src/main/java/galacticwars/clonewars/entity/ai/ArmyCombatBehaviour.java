@@ -8,6 +8,7 @@ import galacticwars.clonewars.army.ArmyTacticalPlanner;
 import galacticwars.clonewars.combat.BlasterHeatPolicy;
 import galacticwars.clonewars.combat.BlasterItem;
 import galacticwars.clonewars.combat.FactionRangedWeaponService;
+import galacticwars.clonewars.combat.RecruitAmmunitionService;
 import galacticwars.clonewars.entity.GalacticRecruitEntity;
 import galacticwars.clonewars.kingdom.KingdomSavedData;
 import galacticwars.clonewars.recruitment.RecruitDuty;
@@ -111,6 +112,10 @@ public final class ArmyCombatBehaviour extends ExtendedBehaviour<GalacticRecruit
             BrainUtil.clearMemory(recruit, MemoryModuleType.WALK_TARGET);
             if (weapon.getItem() instanceof BlasterItem blaster) {
                 if (attackCooldownTicks == 0 && BlasterHeatPolicy.canFire(blasterHeat)) {
+                    if (!RecruitAmmunitionService.tryConsumeForShot(recruit)) {
+                        holdOrRepositionRanged(recruit, state, target);
+                        return;
+                    }
                     blaster.fireAt(level, recruit, target, weapon);
                     blasterHeat = BlasterHeatPolicy.afterShot(blasterHeat);
                     attackCooldownTicks = ArmyBrainSupport.coordinatedCooldownTicks(
@@ -147,15 +152,16 @@ public final class ArmyCombatBehaviour extends ExtendedBehaviour<GalacticRecruit
                 recruit.getAttributeValue(Attributes.FOLLOW_RANGE));
         if (recruit.distanceToSqr(target) <= range * range
                 && recruit.getSensing().hasLineOfSight(target)) {
-            if (recruit.tickCount % 8 == 0) {
-                BrainUtil.setMemory(
-                        recruit,
-                        MemoryModuleType.WALK_TARGET,
-                        new WalkTarget(
-                                RecruitCombatMovement.coverOrDodge(recruit, target),
-                                1.1F,
-                                0));
+            if (!RecruitAiCadence.shouldRecomputeArmyCover(recruit.tickCount)) {
+                return;
             }
+            BrainUtil.setMemory(
+                    recruit,
+                    MemoryModuleType.WALK_TARGET,
+                    new WalkTarget(
+                            RecruitCombatMovement.coverOrDodge(recruit, target),
+                            1.1F,
+                            0));
             return;
         }
         int preferredRange = Math.max(4,
